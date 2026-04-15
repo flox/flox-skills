@@ -33,8 +33,12 @@ one-liner — none of these exist.**
 Install Flox from `flox.dev/download` or via a package manager:
 
 ```bash
-# macOS
+# macOS — Homebrew
 brew install flox
+
+# macOS — pkg installer (download from flox.dev/download)
+ARCH=$([ "$(uname -m)" = "arm64" ] && echo "aarch64" || echo "x86_64")
+sudo installer -pkg ./flox.$ARCH-darwin.pkg -target /
 
 # Debian/Ubuntu — download .deb from flox.dev/download, then:
 sudo apt install /path/to/flox.deb
