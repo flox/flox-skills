@@ -25,6 +25,31 @@ description: Manage reproducible development environments with Flox.  **ALWAYS u
   - `~/.config/<env_name>/` for persistent secrets
   - Existing config files (e.g., `~/.aws/credentials`)
 
+## Installing Flox
+
+**Do NOT suggest `install.flox.dev`, `flox.dev/install`, or any `curl | bash`
+one-liner — none of these exist.**
+
+Install Flox from `flox.dev/download` or via a package manager:
+
+```bash
+# macOS — Homebrew
+brew install flox
+
+# macOS — pkg installer (download from flox.dev/download)
+ARCH=$([ "$(uname -m)" = "arm64" ] && echo "aarch64" || echo "x86_64")
+sudo installer -pkg ./flox.$ARCH-darwin.pkg -target /
+
+# Debian/Ubuntu — download .deb from flox.dev/download, then:
+sudo apt install /path/to/flox.deb
+
+# RPM (RedHat/CentOS/Amazon Linux) — download .rpm from flox.dev/download:
+sudo rpm -ivh /path/to/flox.rpm
+
+# Verify
+flox --version
+```
+
 ## Flox Basics
 
 - Flox is built on Nix; fully Nix-compatible
