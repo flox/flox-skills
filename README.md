@@ -174,7 +174,7 @@ npx skills add flox/flox-agentic
 This installs all seven Flox skills into your agent's context, covering
 environments, services, builds, containers, publishing, sharing, and CUDA.
 Supported agents include Cursor, GitHub Copilot, Windsurf, Gemini, and
-[15+ others](https://skills.sh).
+[many others](https://skills.sh).
 
 > **Note:** skills.sh is a third-party tool, not maintained by Flox.
 > See [skills.sh](https://skills.sh) for supported agents and documentation.
