@@ -161,9 +161,27 @@ For Kiro, create a configuration file in `.kiro/settings/mcp.json` for workspace
 }
 ```
 
-#### Other Agents
+#### Other Agents (Cursor, Copilot, Windsurf, Gemini, and more)
 
-The Flox MCP server can be used with any agent that supports the Model Context Protocol. Configure it according to your agent's MCP configuration requirements, ensuring `flox-mcp` is available in your PATH.
+For agents that support the [skills.sh](https://skills.sh) standard, you
+can install the full Flox skills library with a single command (requires
+Node.js):
+
+```bash
+npx skills add flox/flox-agentic
+```
+
+This installs all seven Flox skills into your agent's context, covering
+environments, services, builds, containers, publishing, sharing, and CUDA.
+Supported agents include Cursor, GitHub Copilot, Windsurf, Gemini, and
+[many others](https://skills.sh).
+
+> **Note:** skills.sh is a third-party tool, not maintained by Flox.
+> See [skills.sh](https://skills.sh) for supported agents and documentation.
+
+For MCP tool access, the Flox MCP server works with any agent that supports
+the Model Context Protocol. Configure it per your agent's requirements,
+ensuring `flox-mcp` is available in your PATH.
 
 ## Documentation
 
