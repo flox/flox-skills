@@ -1,6 +1,6 @@
 {
   "name": "flox",
-  "description": "Flox development environment and deployment plugin. Includes expert guidance for package management, services, builds and package distribution, containerization, environment composition and layering. Works with the Flox MCP server for enhanced functionality.",
+  "description": "Flox development environment and deployment plugin. Includes expert guidance for package management, services, builds and package distribution, containerization, environment composition and layering.",
   "version": "1.0.0",
   "author": {
     "name": "Flox"

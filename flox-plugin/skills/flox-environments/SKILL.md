@@ -89,6 +89,19 @@ flox activate -- <cmd>          # Run without subshell
 flox edit                       # Edit manifest interactively
 ```
 
+### Finding the Right Package
+
+Catalog package names aren't always what you'd expect, and every name carries
+many versions:
+
+- **Search first, and clarify if there are multiple matches.** Names don't
+  always match upstream expectations (e.g. `python3` vs `python39`), and search
+  is case-sensitive.
+- **`flox search <term>` returns only the *latest* version of each name.** Use
+  `flox show <pkg>` to see all available versions *and* per-architecture
+  availability (e.g. `vim-darwin@9.1.0412 (aarch64-darwin, x86_64-darwin only)`).
+- Use `flox search <term> --all` for broader results.
+
 ## Manifest Structure
 
 - `[install]`: Package list with descriptors
