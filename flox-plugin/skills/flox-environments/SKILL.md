@@ -1,9 +1,22 @@
 ---
 name: flox-environments
-description: Manage reproducible development environments with Flox.  **ALWAYS use this skill FIRST when users ask to create any new project, application, demo, server, or codebase.** Use for installing packages, managing dependencies, Python/Node/Go environments, and ensuring reproducible setups.
+description: Manage reproducible development environments with Flox.  **ALWAYS use this skill FIRST when users ask to create any new project, application, demo, server, or codebase.** Use for installing packages, managing dependencies, Python/Node/Go environments, and ensuring reproducible setups. Also covers sharing, composing, and layering environments — build-time composition via [include], remote environments, pushing/pulling via FloxHub, and team collaboration — via `references/sharing.md`.
 ---
 
-# Flox Environments Guide
+# Flox Guide
+
+The core of this document covers environments, packages, manifests, and language
+setups. The specialized topics below live in reference files under `references/`.
+
+**When a request involves one of these topics, read the matching reference file
+before answering** — those files hold the authoritative details (commands,
+manifest sections, gotchas) and go well beyond general knowledge.
+
+## Specialized Topics
+
+- **Sharing, composition & layering** — composing environments via `[include]`,
+  runtime layering, remote environments, push/pull, FloxHub, team collaboration
+  → read `references/sharing.md`
 
 ## Working Style & Structure
 
@@ -84,7 +97,7 @@ flox edit                       # Edit manifest interactively
 - `[profile]`: Shell-specific functions/aliases
 - `[services]`: Service definitions (see flox-services skill)
 - `[build]`: Reproducible build commands (see flox-builds skill)
-- `[include]`: Compose other environments (see flox-sharing skill)
+- `[include]`: Compose other environments (see `references/sharing.md`)
 - `[options]`: Activation mode, supported systems
 
 ## The [install] Section
@@ -274,80 +287,10 @@ If packages conflict, use different `pkg-group` values or adjust `priority`
 - Define env vars with `${VAR:-default}`
 - Guard FLOX_ENV_CACHE usage: `${FLOX_ENV_CACHE:-}` with fallback
 
-## Environment Layering
-
-### What is Layering?
-
-**Layering** is runtime stacking of environments where activate order matters. Each layer runs in its own subshell, preserving isolation while allowing tool composition.
-
-### Core Layering Commands
-
-```bash
-# Layer debugging tools on base environment
-flox activate -r team/base -- flox activate -r team/debug
-
-# Layer multiple environments
-flox activate -r team/db -- flox activate -r team/cache -- flox activate
-
-# Layer local on remote
-flox activate -r prod/app -- flox activate
-```
-
-### When to Use Layering
-
-- **Ad hoc tool addition**: Add debugging/profiling tools temporarily
-- **Development vs production**: Layer dev tools on production environment
-- **Flexible composition**: Mix and match environments at runtime
-- **Temporary utilities**: Add one-time tools without modifying environment
-
-### Layering Use Cases
-
-**Development tools on production environment:**
-```bash
-flox activate -r prod/app -- flox activate -r dev/tools
-```
-
-**Debugging tools on CUDA environment:**
-```bash
-flox activate -r team/cuda-base -- flox activate -r team/cuda-debug
-```
-
-**Temporary utilities:**
-```bash
-flox activate -r project/main -- flox activate -r utils/network
-```
-
-### Creating Layer-Optimized Environments
-
-**Design for runtime stacking with potential conflicts:**
-
-```toml
-[vars]
-# Prefix vars to avoid masking
-MYAPP_PORT = "8080"
-MYAPP_HOST = "localhost"
-
-[profile.common]
-# Use unique, prefixed function names
-myapp_setup() { ... }
-myapp_debug() { ... }
-
-[services.myapp-db]  # Prefix service names
-command = "..."
-```
-
-**Best practices for layerable environments:**
-- Single responsibility per environment
-- Expect vars/binaries might be overridden by upper layers
-- Document what the environment provides/expects
-- Keep hooks fast and idempotent
-- Use prefixed names to avoid collisions
-
 ## Related Skills
 
 - **flox-services** - Running services and background processes
 - **flox-builds** - Building and packaging applications
 - **flox-publish** - Publishing packages to catalogs
-- **flox-sharing** - Environment composition and layering
 - **flox-containers** - Containerizing environments
 - **flox-cuda** - CUDA/GPU development environments
