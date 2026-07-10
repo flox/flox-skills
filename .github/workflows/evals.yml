@@ -5,12 +5,13 @@ name: skill-evals
 # deterministic hard-checks. Judge score and implicit-triggering rate are
 # probabilistic, so they're reported but never block. Agent + judge run via
 # `claude`, authenticated with the org-managed Anthropic key.
+#
+# The job runs on every pull request so the required `evals` status check always
+# reports. The heavy suite runs only when the skill or eval sources change
+# (flox-plugin/**, evals/**, or this workflow); other PRs short-circuit to a
+# passing check so a path-filtered gate never wedges docs/config PRs.
 on:
   pull_request:
-    paths:
-      - "flox-plugin/**"
-      - "evals/**"
-      - ".github/workflows/evals.yml"
   workflow_dispatch: {}
 
 concurrency:
@@ -23,26 +24,49 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect skill/eval changes
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "Non-PR event; running the full eval suite."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only \
+                 "${{ github.event.pull_request.base.sha }}" \
+                 "${{ github.event.pull_request.head.sha }}" \
+               | grep -qE '^(flox-plugin/|evals/|[.]github/workflows/evals[.]yml)'; then
+            echo "Skill/eval sources changed; running the full eval suite."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No skill/eval changes; reporting evals as passed without running the suite."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        if: steps.changes.outputs.run == 'true'
         with:
           python-version: "3.11"
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: steps.changes.outputs.run == 'true'
         with:
           node-version: "20"
 
       - name: Install Claude Code CLI
+        if: steps.changes.outputs.run == 'true'
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Run skills eval gate
+        if: steps.changes.outputs.run == 'true'
         env:
           # Org-managed key (provisioned for the skills repo); `claude` reads ANTHROPIC_API_KEY.
           ANTHROPIC_API_KEY: ${{ secrets.MANAGED_SKILLS_ANTHROPIC_API_KEY }}
         run: python3 evals/run.py --mode skills --gate --concurrency 8
 
       - name: Upload eval results
-        if: always()
+        if: ${{ always() && steps.changes.outputs.run == 'true' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: eval-results
