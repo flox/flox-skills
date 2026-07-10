@@ -101,15 +101,15 @@ The Flox plugin for Claude Code provides comprehensive Flox integration, includi
 From within Claude Code:
 
 ```bash
-/plugin marketplace add flox/flox-agentic
-/plugin install flox@flox-agentic
+/plugin marketplace add flox/flox-skills
+/plugin install flox@flox-skills
 ```
 
 Or from the command line:
 
 ```bash
-claude plugin marketplace add flox/flox-agentic
-claude plugin install flox@flox-agentic
+claude plugin marketplace add flox/flox-skills
+claude plugin install flox@flox-skills
 ```
 
 **Configure MCP Server:**
@@ -168,7 +168,7 @@ can install the full Flox skills library with a single command (requires
 Node.js):
 
 ```bash
-npx skills add flox/flox-agentic
+npx skills add flox/flox-skills
 ```
 
 This installs all seven Flox skills into your agent's context, covering
