@@ -222,10 +222,10 @@ def main():
     }
     out = {"summary": summary, "results": results}
     out_path = HERE / "results" / (args.out or f"{args.mode.replace('+', '_')}.json")
-    # Snapshot the committed goldens BEFORE overwriting this arm's file, so the
-    # report can diff against them (same-arm = "Δ vs main"; baseline = "lift").
+    # Snapshot this arm's committed golden BEFORE overwriting it, so the report can
+    # diff against it (hard-check flips). The cross-arm metrics table reads the
+    # other arms' goldens directly — those files aren't overwritten by this run.
     prev_golden = _read_golden(out_path.name)
-    baseline_golden = _read_golden("baseline.json")
     out_path.write_text(json.dumps(out, indent=2))
     print("\n=== SUMMARY ===")
     print(json.dumps(summary, indent=2))
@@ -239,8 +239,7 @@ def main():
     bad = [r for r in binding if not r["hard_pass"]]
     errs = [r for r in results if "error" in r and r.get("tier", "should") == "should"]
 
-    write_step_summary(summary, results, binding, bad, errs, args.gate,
-                       prev_golden, baseline_golden)
+    write_step_summary(summary, results, binding, bad, errs, args.gate, prev_golden)
 
     if args.gate and (bad or errs):
         print(f"\nGATE FAILED: {len(bad)} functional should-tier task(s) failed hard-checks: "
@@ -269,7 +268,7 @@ def _diff_vs_golden(summary, results, prev_golden):
     added = sorted(cur.keys() - prev.keys())
     removed = sorted(prev.keys() - cur.keys())
     ps = prev_golden.get("summary", {})
-    lines = [f"### Δ vs main (of-record `{fname}`, model `{ps.get('model', '?')}`)"]
+    lines = [f"### Hard-check diff vs main (of-record `{fname}`, model `{ps.get('model', '?')}`)"]
     lines.append(f"- ❌ **hard-check regressions ({len(regressed)}):** " + ", ".join(regressed)
                  if regressed else "- ✅ no hard-check regressions")
     if fixed:
@@ -286,8 +285,44 @@ def _diff_vs_golden(summary, results, prev_golden):
     return lines
 
 
-def write_step_summary(summary, results, binding, bad, errs, gate_enabled,
-                       prev_golden=None, baseline_golden=None):
+def _metrics_table(summary):
+    """Cross-arm metrics: this run (live) for its arm, committed goldens for the others."""
+    arms = [("baseline", "baseline.json"), ("skills", "skills.json"), ("skills+mcp", "skills_mcp.json")]
+    summ = {}
+    for arm, fn in arms:
+        if arm == summary["mode"]:
+            summ[arm] = summary
+        else:
+            g = _read_golden(fn)
+            summ[arm] = g.get("summary") if g else None
+
+    def cell(arm, key, pct):
+        s = summ[arm]
+        if not s or key not in s:
+            return "—"
+        return f"{s[key]:.0%}" if pct else f"{s[key]:.2f}"
+
+    def delta(key, pct):
+        b, s = summ["baseline"], summ["skills"]
+        if not b or not s or key not in b or key not in s:
+            return "—"
+        d = s[key] - b[key]
+        return f"{d * 100:+.1f}pp" if pct else f"{d:+.2f}"
+
+    def hdr(arm):
+        return f"**{arm}**" if arm == summary["mode"] else arm
+
+    metrics = [("Hard-pass", "hard_pass_rate", True), ("Avg judge", "avg_judge_score", False),
+               ("Judge-correct", "judge_correct_rate", True), ("Should-trigger", "should_trigger_rate", True)]
+    rows = [f"| metric | {hdr('baseline')} | {hdr('skills')} | {hdr('skills+mcp')} | Δ skills−baseline |",
+            "|---|--:|--:|--:|--:|"]
+    for label, key, pct in metrics:
+        rows.append(f"| {label} | {cell('baseline', key, pct)} | {cell('skills', key, pct)} "
+                    f"| {cell('skills+mcp', key, pct)} | {delta(key, pct)} |")
+    return rows
+
+
+def write_step_summary(summary, results, binding, bad, errs, gate_enabled, prev_golden=None):
     """Render a markdown report to $GITHUB_STEP_SUMMARY (the Actions run page)."""
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not path:
@@ -298,32 +333,25 @@ def write_step_summary(summary, results, binding, bad, errs, gate_enabled,
     else:
         verdict = "ℹ️ measurement run (gate off)"
 
-    out = [f"## Skill evals — **`{summary['mode']}`** arm — {verdict}", "",
+    out = [f"## Skill evals — **`{summary['mode']}`** arm (this run) — {verdict}", "",
            f"**Model** (agent + judge): `{summary.get('model', 'unknown')}` · "
            f"**{summary['n_tasks']} tasks** ({summary['n_errors']} errors)", ""]
 
-    base = (baseline_golden or {}).get("summary")
-    show_base = bool(base) and summary["mode"] != "baseline"
-
-    def pp(cur, prev):
-        return f"{(cur - prev) * 100:+.1f}pp"
-
-    def d2(cur, prev):
-        return f"{cur - prev:+.2f}"
-
-    if show_base:
-        out += ["| metric | value | vs baseline |", "|---|---|---|",
-                f"| hard-pass | {summary['hard_pass_rate']:.0%} | {pp(summary['hard_pass_rate'], base['hard_pass_rate'])} |",
-                f"| avg judge | {summary['avg_judge_score']}/5 | {d2(summary['avg_judge_score'], base['avg_judge_score'])} |",
-                f"| judge-correct | {summary['judge_correct_rate']:.0%} | {pp(summary['judge_correct_rate'], base['judge_correct_rate'])} |",
-                f"| should-trigger | {summary['should_trigger_rate']:.0%} | {pp(summary['should_trigger_rate'], base['should_trigger_rate'])} |", "",
-                f"_vs baseline = lift over the bare model (`baseline.json`, model `{base.get('model', '?')}`)._", ""]
-    else:
-        out += ["| metric | value |", "|---|---|",
-                f"| hard-pass | {summary['hard_pass_rate']:.0%} |",
-                f"| avg judge | {summary['avg_judge_score']}/5 |",
-                f"| judge-correct | {summary['judge_correct_rate']:.0%} |",
-                f"| should-trigger | {summary['should_trigger_rate']:.0%} |", ""]
+    out += ["### Metrics", "",
+            "- **Hard-pass** — share of tasks whose answer clears every deterministic "
+            "structural check (e.g. has an `[install]` section, no hallucinated install URL). "
+            "This is what the gate enforces.",
+            "- **Avg judge** — average 1–5 quality score from an LLM judge grading each answer "
+            "against that task's rubric.",
+            "- **Judge-correct** — share of answers the judge marked factually correct.",
+            "- **Should-trigger** — of the prompts that never mention Flox, the share where the "
+            "assistant still proactively recommends it.", ""]
+    out += _metrics_table(summary)
+    out += ["",
+            "_Arms: **baseline** = bare model (no plugin/MCP) · **skills** = plugin loaded, MCP "
+            "off · **skills+mcp** = plugin + Flox MCP server. Bold column = this run (live); the "
+            "others are the last committed golden (`—` if none). Δ compares skills-only to "
+            "baseline, since the MCP is being deprecated._", ""]
 
     areas = {}
     for r in scored:

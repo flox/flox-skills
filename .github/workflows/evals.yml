@@ -74,11 +74,19 @@ jobs:
         if: steps.changes.outputs.run == 'true'
         run: npm install -g @anthropic-ai/claude-code
 
+      # Only the skills+mcp arm needs flox — its MCP config runs
+      # `flox activate -r flox/flox-mcp-server -- flox-mcp`. Normal PR (skills)
+      # runs skip this so they stay fast and flox-free.
+      - name: Install flox (skills+mcp arm only)
+        if: ${{ steps.changes.outputs.run == 'true' && github.event.inputs.mode == 'skills+mcp' }}
+        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
+
       - name: Run skills eval gate
         if: steps.changes.outputs.run == 'true'
         env:
           # Org-managed key (provisioned for the skills repo); `claude` reads ANTHROPIC_API_KEY.
           ANTHROPIC_API_KEY: ${{ secrets.MANAGED_SKILLS_ANTHROPIC_API_KEY }}
+          FLOX_DISABLE_METRICS: "true"
           # PR events always gate on the skills arm; workflow_dispatch may pick a
           # different arm and turn the gate off (e.g. to measure the baseline).
           EVAL_MODE: ${{ github.event.inputs.mode || 'skills' }}
