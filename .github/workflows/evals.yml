@@ -10,12 +10,28 @@ name: skill-evals
 # reports. The heavy suite runs only when the skill or eval sources change
 # (flox-plugin/**, evals/**, or this workflow); other PRs short-circuit to a
 # passing check so a path-filtered gate never wedges docs/config PRs.
+#
+# workflow_dispatch can pick an arm (skills / baseline / skills+mcp) and toggle
+# the gate — e.g. to measure the bare-model baseline without failing the run.
 on:
   pull_request:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Eval arm to run"
+        type: choice
+        options:
+          - skills
+          - baseline
+          - skills+mcp
+        default: skills
+      gate:
+        description: "Fail the run on should-tier hard-check failures"
+        type: boolean
+        default: true
 
 concurrency:
-  group: skill-evals-${{ github.ref }}
+  group: skill-evals-${{ github.ref }}-${{ github.event.inputs.mode || 'skills' }}
   cancel-in-progress: true
 
 jobs:
@@ -63,11 +79,20 @@ jobs:
         env:
           # Org-managed key (provisioned for the skills repo); `claude` reads ANTHROPIC_API_KEY.
           ANTHROPIC_API_KEY: ${{ secrets.MANAGED_SKILLS_ANTHROPIC_API_KEY }}
-        run: python3 evals/run.py --mode skills --gate --concurrency 8
+          # PR events always gate on the skills arm; workflow_dispatch may pick a
+          # different arm and turn the gate off (e.g. to measure the baseline).
+          EVAL_MODE: ${{ github.event.inputs.mode || 'skills' }}
+          EVAL_GATE: ${{ github.event.inputs.gate || 'true' }}
+        run: |
+          args=(--mode "$EVAL_MODE" --concurrency 8)
+          if [ "$EVAL_GATE" = "true" ]; then
+            args+=(--gate)
+          fi
+          python3 evals/run.py "${args[@]}"
 
       - name: Upload eval results
         if: ${{ always() && steps.changes.outputs.run == 'true' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: eval-results
-          path: evals/results/skills.json
+          name: eval-results-${{ github.event.inputs.mode || 'skills' }}
+          path: evals/results/
