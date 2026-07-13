@@ -22,6 +22,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PLUGIN_DIR = HERE.parent / "flox-plugin"
+MODEL = "claude-opus-4-8"  # pinned for reproducible scores; override with --model
 
 ANSWER_SUFFIX = (
     "\n\nProvide the COMPLETE solution as your written answer: the manifest "
@@ -69,7 +70,7 @@ CHECKS = {
 
 
 def run_claude(prompt, mode, allow_tools, timeout=420, retries=3):
-    cmd = ["claude", "-p", prompt, "--output-format", "json"]
+    cmd = ["claude", "-p", prompt, "--model", MODEL, "--output-format", "json"]
     if allow_tools:
         cmd += ["--allowedTools", *allow_tools]
     if mode == "skills":
@@ -150,9 +151,20 @@ def process_task(t, mode, allow):
             "judge": verdict, "answer_excerpt": answer[:1200]}
 
 
+def _read_golden(name):
+    """Load a committed results/<name> golden snapshot, or None if absent/bad."""
+    try:
+        return json.loads((HERE / "results" / name).read_text())
+    except Exception:
+        return None
+
+
 def main():
+    global MODEL, PLUGIN_DIR
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["skills", "skills+mcp", "baseline"], default="skills")
+    ap.add_argument("--model", default=MODEL,
+                    help=f"model id for both agent and judge (default {MODEL})")
     ap.add_argument("--tasks", default=str(HERE / "tasks.jsonl"))
     ap.add_argument("--only", help="run a single task id")
     ap.add_argument("--gate", action="store_true",
@@ -163,8 +175,8 @@ def main():
                     help="parallel claude calls (default 6; lower if you hit rate limits)")
     args = ap.parse_args()
 
+    MODEL = args.model
     if args.plugin_dir:
-        global PLUGIN_DIR
         PLUGIN_DIR = Path(args.plugin_dir).resolve()
 
     allow = ["Skill", "Read"]
@@ -195,6 +207,7 @@ def main():
     should_triggers = [r for r in triggers if r["tier"] == "should"]
     summary = {
         "mode": args.mode,
+        "model": MODEL,
         "n_tasks": len(results),
         "n_errors": sum(1 for r in results if "error" in r),
         **stats(scored),
@@ -209,6 +222,10 @@ def main():
     }
     out = {"summary": summary, "results": results}
     out_path = HERE / "results" / (args.out or f"{args.mode.replace('+', '_')}.json")
+    # Snapshot the committed goldens BEFORE overwriting this arm's file, so the
+    # report can diff against them (same-arm = "Δ vs main"; baseline = "lift").
+    prev_golden = _read_golden(out_path.name)
+    baseline_golden = _read_golden("baseline.json")
     out_path.write_text(json.dumps(out, indent=2))
     print("\n=== SUMMARY ===")
     print(json.dumps(summary, indent=2))
@@ -222,7 +239,8 @@ def main():
     bad = [r for r in binding if not r["hard_pass"]]
     errs = [r for r in results if "error" in r and r.get("tier", "should") == "should"]
 
-    write_step_summary(summary, results, binding, bad, errs, args.gate)
+    write_step_summary(summary, results, binding, bad, errs, args.gate,
+                       prev_golden, baseline_golden)
 
     if args.gate and (bad or errs):
         print(f"\nGATE FAILED: {len(bad)} functional should-tier task(s) failed hard-checks: "
@@ -234,7 +252,42 @@ def main():
               f"should-trigger {summary['should_trigger_rate']}).")
 
 
-def write_step_summary(summary, results, binding, bad, errs, gate_enabled):
+def _diff_vs_golden(summary, results, prev_golden):
+    """Δ vs the of-record same-arm snapshot: hard-check flips (signal) + judge Δ (advisory)."""
+    fname = f"{summary['mode'].replace('+', '_')}.json"
+    if not prev_golden:
+        return [f"### Δ vs main (`{fname}`)",
+                f"_No committed golden for this arm — commit `evals/results/{fname}` to enable per-PR diffs._", ""]
+    prev = {r["id"]: r for r in prev_golden.get("results", []) if "judge" in r}
+    cur = {r["id"]: r for r in results if "judge" in r}
+    regressed, fixed = [], []
+    for tid in cur.keys() & prev.keys():
+        if cur[tid]["hard_pass"] and not prev[tid]["hard_pass"]:
+            fixed.append(tid)
+        elif not cur[tid]["hard_pass"] and prev[tid]["hard_pass"]:
+            regressed.append(f"`{tid}` ({cur[tid]['area']})")
+    added = sorted(cur.keys() - prev.keys())
+    removed = sorted(prev.keys() - cur.keys())
+    ps = prev_golden.get("summary", {})
+    lines = [f"### Δ vs main (of-record `{fname}`, model `{ps.get('model', '?')}`)"]
+    lines.append(f"- ❌ **hard-check regressions ({len(regressed)}):** " + ", ".join(regressed)
+                 if regressed else "- ✅ no hard-check regressions")
+    if fixed:
+        lines.append(f"- ✅ hard-check fixes ({len(fixed)}): " + ", ".join(f"`{t}`" for t in fixed))
+    if added:
+        lines.append(f"- ➕ new tasks ({len(added)}): " + ", ".join(f"`{t}`" for t in added))
+    if removed:
+        lines.append(f"- ➖ removed tasks ({len(removed)}): " + ", ".join(f"`{t}`" for t in removed))
+    if "avg_judge_score" in ps:
+        dj = round(summary["avg_judge_score"] - ps["avg_judge_score"], 2)
+        lines.append(f"- judge avg {summary['avg_judge_score']} vs {ps['avg_judge_score']} "
+                     f"(Δ {dj:+}) — _advisory, judge is noisy run-to-run_")
+    lines.append("")
+    return lines
+
+
+def write_step_summary(summary, results, binding, bad, errs, gate_enabled,
+                       prev_golden=None, baseline_golden=None):
     """Render a markdown report to $GITHUB_STEP_SUMMARY (the Actions run page)."""
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not path:
@@ -244,13 +297,33 @@ def write_step_summary(summary, results, binding, bad, errs, gate_enabled):
         verdict = "❌ **GATE FAILED**" if (bad or errs) else "✅ **GATE PASSED**"
     else:
         verdict = "ℹ️ measurement run (gate off)"
-    out = [f"## Skill evals — `{summary['mode']}` — {verdict}", ""]
-    out += ["| metric | value |", "|---|---|",
-            f"| tasks | {summary['n_tasks']} ({summary['n_errors']} errors) |",
-            f"| hard-pass rate | {summary['hard_pass_rate']:.0%} |",
-            f"| avg judge | {summary['avg_judge_score']}/5 |",
-            f"| judge-correct | {summary['judge_correct_rate']:.0%} |",
-            f"| should-trigger | {summary['should_trigger_rate']:.0%} |", ""]
+
+    out = [f"## Skill evals — **`{summary['mode']}`** arm — {verdict}", "",
+           f"**Model** (agent + judge): `{summary.get('model', 'unknown')}` · "
+           f"**{summary['n_tasks']} tasks** ({summary['n_errors']} errors)", ""]
+
+    base = (baseline_golden or {}).get("summary")
+    show_base = bool(base) and summary["mode"] != "baseline"
+
+    def pp(cur, prev):
+        return f"{(cur - prev) * 100:+.1f}pp"
+
+    def d2(cur, prev):
+        return f"{cur - prev:+.2f}"
+
+    if show_base:
+        out += ["| metric | value | vs baseline |", "|---|---|---|",
+                f"| hard-pass | {summary['hard_pass_rate']:.0%} | {pp(summary['hard_pass_rate'], base['hard_pass_rate'])} |",
+                f"| avg judge | {summary['avg_judge_score']}/5 | {d2(summary['avg_judge_score'], base['avg_judge_score'])} |",
+                f"| judge-correct | {summary['judge_correct_rate']:.0%} | {pp(summary['judge_correct_rate'], base['judge_correct_rate'])} |",
+                f"| should-trigger | {summary['should_trigger_rate']:.0%} | {pp(summary['should_trigger_rate'], base['should_trigger_rate'])} |", "",
+                f"_vs baseline = lift over the bare model (`baseline.json`, model `{base.get('model', '?')}`)._", ""]
+    else:
+        out += ["| metric | value |", "|---|---|",
+                f"| hard-pass | {summary['hard_pass_rate']:.0%} |",
+                f"| avg judge | {summary['avg_judge_score']}/5 |",
+                f"| judge-correct | {summary['judge_correct_rate']:.0%} |",
+                f"| should-trigger | {summary['should_trigger_rate']:.0%} |", ""]
 
     areas = {}
     for r in scored:
@@ -262,6 +335,8 @@ def write_step_summary(summary, results, binding, bad, errs, gate_enabled):
         aj = sum(x["judge"]["score"] for x in rs) / len(rs)
         out.append(f"| {area} | {len(rs)} | {hp:.0%} | {aj:.1f} |")
     out.append("")
+
+    out += _diff_vs_golden(summary, results, prev_golden)
 
     flags = []
     for r in results:
