@@ -63,9 +63,10 @@ CHECKS = {
     "uses_remote_env": lambda a: "flox push" in a or "flox pull" in a or "flox activate -r" in a,
     # Implicit-trigger check: did the skill fire and produce Flox guidance even
     # though the prompt never said "flox"?
-    "invokes_flox": lambda a: bool(re.search(r"\bflox\b", a, re.I))
-    and (re.search(r"flox (init|install|search|show|containerize|publish|build|activate|push|edit)", a)
-         or "[install]" in a or "manifest.toml" in a),
+    "invokes_flox": lambda a: bool(
+        re.search(r"\bflox\b", a, re.I)
+        and (re.search(r"flox (init|install|search|show|containerize|publish|build|activate|push|edit)", a)
+             or "[install]" in a or "manifest.toml" in a)),
 }
 
 
