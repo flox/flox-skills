@@ -1,23 +1,23 @@
 {
   "summary": {
     "mode": "skills",
-    "n_tasks": 22,
+    "n_tasks": 27,
     "n_errors": 0,
-    "n": 22,
+    "n": 27,
     "hard_pass_rate": 1.0,
-    "avg_judge_score": 4.68,
+    "avg_judge_score": 4.48,
     "judge_correct_rate": 1.0,
     "by_tier": {
       "should": {
-        "n": 15,
+        "n": 20,
         "hard_pass_rate": 1.0,
-        "avg_judge_score": 4.6,
+        "avg_judge_score": 4.45,
         "judge_correct_rate": 1.0
       },
       "may": {
         "n": 6,
         "hard_pass_rate": 1.0,
-        "avg_judge_score": 4.83,
+        "avg_judge_score": 4.5,
         "judge_correct_rate": 1.0
       },
       "stretch": {
@@ -47,11 +47,11 @@
         "score": 5,
         "correct": true,
         "issues": [
-          "Commented-out `is-daemon = false` is not a real Flox service option (harmless since disabled)",
-          "`flox edit -f manifest.toml` workflow assumes a file the user must create separately, slightly glossed over"
+          "Minor: the `.deps_installed` flag prevents reinstalling when requirements.txt changes (stale deps risk)",
+          "Minor: webapp assumes uvicorn/ASGI at main:app (acknowledged as an assumption)"
         ]
       },
-      "answer_excerpt": "Here's a complete, reproducible Flox environment for a Python web app backed by PostgreSQL.\n\n## Manifest\n\n`.flox/env/manifest.toml`:\n\n```toml\nversion = 1\n\n[install]\npython.pkg-path = \"python311Full\"\nuv.pkg-path = \"uv\"\npostgresql.pkg-path = \"postgresql_16\"\n\n[vars]\n# Web app\nAPP_HOST = \"127.0.0.1\"\nAPP_PORT = \"8000\"\n# Postgres \u2014 connection coordinates the service and your app both read\nPGHOST = \"127.0.0.1\"\nPGPORT = \"5432\"\nPGUSER = \"postgres\"\nPGDATABASE = \"app\"\nDATABASE_URL = \"postgresql://postgres@127.0.0.1:5432/app\"\n\n[hook.on-activate]\nscript = '''\n# --- Python virtualenv (lives in cache so it survives rebuilds) ---\nexport UV_CACHE_DIR=\"$FLOX_ENV_CACHE/uv\"\nexport venv=\"$FLOX_ENV_CACHE/venv\"\n\nif [ ! -d \"$venv\" ]; then\n  uv venv \"$venv\" --python python3\nfi\nif [ -f \"$venv/bin/activate\" ]; then\n  source \"$venv/bin/activate\"\nfi\n\n# Install deps once (re-run `flox activate` after editing requirements.txt\n# and `rm $FLOX_ENV_CACHE/.deps_installed` to force a refresh)\nif [ -f \"$FLOX_ENV_PROJECT/requirements.txt\" ] && [ ! -f \"$FLOX_ENV_CACHE/.deps_installed\" ]; then\n  uv pip install --python \"$venv/bin/python\" --quiet -r \"$FLOX_ENV_PROJECT/requirements.txt\"\n  touch \"$FLOX_ENV_CACHE/.deps_insta"
+      "answer_excerpt": "Here's a complete, reproducible Flox setup for a Python web app backed by PostgreSQL.\n\n## Manifest\n\n```toml\nversion = 1\n\n[install]\npython.pkg-path = \"python311Full\"\nuv.pkg-path = \"uv\"\npostgresql.pkg-path = \"postgresql_16\"\n\n[vars]\nPOSTGRES_HOST = \"localhost\"\nPOSTGRES_PORT = \"5432\"\nPOSTGRES_USER = \"webapp\"\nPOSTGRES_DB   = \"webapp\"\nAPP_HOST = \"0.0.0.0\"\nAPP_PORT = \"8000\"\n\n[hook]\non-activate = '''\n  # Keep package caches local and reproducible\n  export UV_CACHE_DIR=\"$FLOX_ENV_CACHE/uv\"\n  export PIP_CACHE_DIR=\"$FLOX_ENV_CACHE/pip\"\n\n  # Connection string the app can read\n  export DATABASE_URL=\"postgresql://${POSTGRES_USER}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}\"\n\n  # Create the venv in the cache so it survives rebuilds\n  venv=\"$FLOX_ENV_CACHE/venv\"\n  if [ ! -d \"$venv\" ]; then\n    uv venv \"$venv\" --python python3\n  fi\n  if [ -f \"$venv/bin/activate\" ]; then\n    source \"$venv/bin/activate\"\n  fi\n\n  # Install deps once; touch a flag so we don't reinstall every activation\n  if [ -f \"$FLOX_ENV_PROJECT/requirements.txt\" ] && [ ! -f \"$FLOX_ENV_CACHE/.deps_installed\" ]; then\n    uv pip install --quiet --python \"$venv/bin/python\" -r \"$FLOX_ENV_PROJECT/requirements.txt\"\n    touch \"$FLOX_ENV"
     },
     {
       "id": "node-env",
@@ -68,10 +68,11 @@
         "score": 5,
         "correct": true,
         "issues": [
-          "Mentions an internal 'flox-services' skill, which is irrelevant noise to an end user"
+          "Primary pin uses pkg-path=\"nodejs_20\" rather than the literal ^20 version constraint, though this is a valid and arguably more reproducible Node 20 pin and the version alternative is also shown",
+          "Extra content (hook, systems list) beyond the minimal ask, but all correct and no absolute paths used"
         ]
       },
-      "answer_excerpt": "Here's the complete solution for a Flox environment pinned to Node.js 20.\n\n## Commands\n\n```bash\nflox init                      # creates .flox/ in your project directory\nflox install nodejs            # adds Node.js (then pin to ^20.0 in the manifest)\nflox activate                  # enter the environment\n```\n\nIn practice, run `flox init`, then edit the manifest (`flox edit`) to pin the version as shown below \u2014 the version constraint is what guarantees Node 20 rather than whatever the latest default is. After editing, `flox activate`.\n\n## Manifest\n\n`.flox/env/manifest.toml`:\n\n```toml\nversion = 1\n\n[install]\nnodejs.pkg-path = \"nodejs\"\nnodejs.version = \"^20.0\"\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-linux\", \"x86_64-darwin\", \"aarch64-darwin\"]\n```\n\n## Explanation\n\n- **`nodejs.pkg-path = \"nodejs\"`** installs Node.js, which bundles `npm` and `npx` \u2014 no separate package needed. Add `yarn` or `pnpm` to `[install]` only if your project uses them.\n- **`nodejs.version = \"^20.0\"`** pins to the Node 20 LTS line (latest 20.x), so you get patch/minor updates within 20 but never an unintended jump to 22+. For strict reproducibility, set an exact version like `\"20.11.1\"` instead.\n- **`[option"
+      "answer_excerpt": "## Flox Environment for a Node.js 20 Project\n\nHere's the complete solution.\n\n### Commands\n\nRun these from your project root:\n\n```bash\n# 1. Create the Flox environment (generates .flox/env/manifest.toml)\nflox init\n\n# 2. Open the manifest and replace its contents with the manifest below\nflox edit\n\n# 3. Activate the environment\nflox activate\n```\n\nAlternatively, you can install the package directly instead of hand-editing:\n\n```bash\nflox init\nflox install nodejs   # then pin the version by editing the manifest as shown below\nflox activate\n```\n\n### Manifest (`.flox/env/manifest.toml`)\n\n```toml\nversion = 1\n\n[install]\n# Node.js 20 LTS \u2014 the nodejs package bundles npm\nnodejs.pkg-path = \"nodejs_20\"\n\n[vars]\n\n[hook]\non-activate = '''\n  # Install dependencies on first activation if a lockfile exists\n  if [ -f \"$FLOX_ENV_PROJECT/package.json\" ] && [ ! -d \"$FLOX_ENV_PROJECT/node_modules\" ]; then\n    (cd \"$FLOX_ENV_PROJECT\" && npm install)\n  fi\n'''\n\n[profile]\n\n[options]\nsystems = [\n  \"x86_64-linux\",\n  \"aarch64-linux\",\n  \"x86_64-darwin\",\n  \"aarch64-darwin\",\n]\n```\n\n### Explanation\n\n- **`nodejs_20`** pins the Node.js 20.x LTS series (which includes `npm`). If you'd rather use the generic `nodejs` pac"
     },
     {
       "id": "add-redis-service",
@@ -84,14 +85,14 @@
       },
       "hard_pass": true,
       "judge": {
-        "score": 5,
+        "score": 4,
         "correct": true,
         "issues": [
-          "`is-daemon = true` is questionable with a foreground `exec redis-server` \u2014 is-daemon is for commands that self-background, so this pairing is technically inconsistent",
-          "Explicit `flox services start` command not shown (covers activate --start-services and stop/restart/status instead)"
+          "`is-daemon = true` is misused: redis-server runs in the foreground here (`exec redis-server`) and does not self-daemonize, so this flag is contradictory and could confuse Flox's process supervision \u2014 it should be omitted for a foreground-managed service",
+          "Minor: `flox install redis` plus editing the manifest by hand can create duplicate/confusing steps (install already writes the [install] entry), though the note about keeping existing entries mitigates this"
         ]
       },
-      "answer_excerpt": "Here's the complete solution for adding a background Redis service to your existing Flox environment.\n\n## Manifest\n\nEdit your manifest with `flox edit` and add these sections (the `redis` package must be installed so `redis-server` is on `PATH`):\n\n```toml\n# Install the Redis package (provides redis-server)\n[install]\nredis.pkg-path = \"redis\"\n\n# Background Redis service\n[services.redis]\ncommand = '''\n  mkdir -p \"$FLOX_ENV_CACHE/redis\"\n  exec redis-server \\\n    --bind \"$REDIS_HOST\" \\\n    --port \"$REDIS_PORT\" \\\n    --dir \"$FLOX_ENV_CACHE/redis\"\n'''\nis-daemon = true\n\n[services.redis.shutdown]\ncommand = '''redis-cli -h \"$REDIS_HOST\" -p \"$REDIS_PORT\" shutdown nosave'''\n\n[vars]\nREDIS_HOST = \"127.0.0.1\"\nREDIS_PORT = \"6379\"\n```\n\nIf you already have `[install]` or `[vars]` tables, merge these keys into the existing ones rather than duplicating the table headers.\n\n## Commands\n\n```bash\n# Add the package + service definition to the manifest\nflox edit\n\n# Activate the environment AND start services in one step\nflox activate --start-services      # or: flox activate -s\n\n# --- manage the service from inside the activated environment ---\nflox services status                # confirm redis is running\n"
+      "answer_excerpt": "Here's the complete solution for adding a background Redis service to your existing Flox environment.\n\n## Manifest (`.flox/env/manifest.toml`)\n\nAdd the `redis` package under `[install]` and the service under `[services]`:\n\n```toml\nversion = 1\n\n[install]\nredis.pkg-path = \"redis\"\n\n[services.redis]\ncommand = '''\n  mkdir -p \"$FLOX_ENV_CACHE/redis\"\n  exec redis-server \\\n    --bind \"$REDIS_HOST\" \\\n    --port \"$REDIS_PORT\" \\\n    --dir \"$FLOX_ENV_CACHE/redis\"\n'''\nis-daemon = true\n\n[services.redis.shutdown]\ncommand = '''redis-cli -h \"$REDIS_HOST\" -p \"$REDIS_PORT\" shutdown nosave'''\n\n[vars]\nREDIS_HOST = \"127.0.0.1\"\nREDIS_PORT = \"6379\"\n```\n\n> Keep your existing `[install]` entries \u2014 just add the `redis` line to that table (and any sections you already have). The blocks above are the parts you need to add.\n\n## Flox commands\n\n```bash\n# 1. Install the redis package into the environment\nflox install redis\n\n# 2. Open the manifest to add the [services.redis] block above\nflox edit\n\n# 3. Activate the environment AND start services in the background\nflox activate --start-services\n#   (short form: flox activate -s)\n\n# --- Manage the service from inside the activated environment ---\nflox services status"
     },
     {
       "id": "build-go-package",
@@ -107,12 +108,12 @@
         "score": 4,
         "correct": true,
         "issues": [
-          "Omits the manifest-builds vs Nix-expression-builds distinction explicitly required by the rubric",
-          "`flox publish -o <org>` flag/syntax is uncertain and may be inaccurate",
-          "`${vendor}` cross-build reference syntax is plausible but not clearly verified against Flox docs"
+          "Does not mention manifest builds vs Nix-expression builds distinction (explicit rubric item)",
+          "`${vendor}` cross-build reference syntax and the auto-ordering claim are asserted without qualification and may not match Flox's actual inter-build dependency mechanism",
+          "`flox publish -o` flag and `version.command` are extra claims not verified"
         ]
       },
-      "answer_excerpt": "Here's the complete solution for building your Go application into a reproducible Flox package.\n\n## Manifest\n\nThis uses the recommended **two-stage pattern**: stage one vendors dependencies with network access, stage two compiles in a pure (sandboxed) build for full reproducibility.\n\n```toml\nversion = 1\n\n[install]\ngo.pkg-path = \"go\"\n\n[build.vendor]\n# Stage 1: fetch dependencies (needs network, so sandbox off)\ncommand = '''\n  go mod vendor\n  mkdir -p $out/vendor\n  cp -r vendor/* $out/vendor/\n'''\nsandbox = \"off\"\n\n[build.myapp]\n# Stage 2: compile from vendored deps in a pure sandbox \u2014 reproducible\ncommand = '''\n  cp -r ${vendor}/vendor ./vendor\n  go build -mod=vendor -trimpath -o $out/bin/myapp ./...\n'''\nversion = \"1.0.0\"\nsandbox = \"pure\"\nruntime-packages = []\n```\n\nReplace `myapp` with your binary name, and point `go build` at your main package (e.g. `./cmd/myapp` instead of `./...` if you have multiple packages).\n\n## Commands\n\n```bash\n# 1. Initialize a Flox environment in your project root (where go.mod lives)\nflox init\n\n# 2. Edit .flox/env/manifest.toml to add the [install] and [build.*] tables above\n#    (or: flox install go, then add the build tables)\n\n# 3. Git-track all source \u2014 "
+      "answer_excerpt": "Here's the complete solution for building your Go application into a reproducible Flox package.\n\n## Manifest\n\n```toml\nversion = 1\n\n[install]\ngo.pkg-path = \"go\"\n# gcc is only needed if your build uses cgo; harmless to keep for most projects\ngcc.pkg-path = \"gcc\"\n\n[vars]\n\n[hook]\n\n[profile]\n\n# ---- Stage 1: vendor dependencies (needs network, so sandbox is off) ----\n[build.vendor]\ncommand = '''\n  go mod vendor\n  mkdir -p $out/vendor\n  cp -r vendor/* $out/vendor/\n'''\nsandbox = \"off\"\n\n# ---- Stage 2: compile from vendored deps (pure = reproducible) ----\n[build.myapp]\ncommand = '''\n  # Pull in the pre-fetched dependencies from the vendor stage\n  cp -r ${vendor}/vendor ./vendor\n\n  # Build a static, trimmed binary from the vendored modules only\n  CGO_ENABLED=0 go build -mod=vendor -trimpath -o myapp .\n\n  mkdir -p $out/bin\n  cp myapp $out/bin/myapp\n'''\nversion = \"1.0.0\"\ndescription = \"My reproducible Go application\"\nsandbox = \"pure\"\nruntime-packages = []   # a static Go binary needs nothing at runtime\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-linux\", \"x86_64-darwin\", \"aarch64-darwin\"]\n```\n\n## Commands\n\n```bash\n# 1. Create (or enter) the Flox environment in your project root\nflox init   "
     },
     {
       "id": "containerize-env",
@@ -128,10 +129,11 @@
         "score": 5,
         "correct": true,
         "issues": [
-          "Slightly verbose with optional manifest config that exceeds the core ask, but all accurate"
+          "Minor: claim that Linux needs 'no proxy or intermediate volumes' and macOS-specific daemon details are plausible but not strictly necessary and could drift from current behavior",
+          "Slightly verbose on experimental config schema"
         ]
       },
-      "answer_excerpt": "# Turning Your Flox Environment into a Docker Image\n\nFlox has this built in via `flox containerize` \u2014 the resulting image **activates your environment on startup**, so all your packages, env vars, and hooks are available inside the container exactly as they are in `flox activate`.\n\n## 1. Configure the container (optional but recommended)\n\nAdd a `[containerize.config]` section to your manifest. Here's a complete example manifest \u2014 adjust the `cmd`, ports, and user to match your app:\n\n```toml\nversion = 1\n\n[install]\n# whatever your environment already has, e.g.:\npython3.pkg-path = \"python311\"\n\n[vars]\n# any environment variables your app needs\n\n[hook.on-activate]\nscript = '''\n  # any setup that should run when the environment activates\n'''\n\n# --- container settings (experimental) ---\n[containerize.config]\ncmd = [\"python\", \"app.py\"]      # command run inside the activated env; use [] if a [services.*] should start instead\nworking-dir = \"/app\"\nexposed-ports = [\"8080/tcp\"]    # ports your app listens on\nuser = \"appuser\"                # run as non-root; or \"1000:1000\"\nvolumes = [\"/data\"]             # mount points for persistent data\nlabels = { version = \"1.0\" }\nstop-signal = \"SIGTERM\"\n``"
+      "answer_excerpt": "# Turning Your Flox Environment into a Docker Image\n\nFlox has this built in: `flox containerize`. It packages your environment (all installed packages, environment variables, and activation hooks) into an OCI image, and Flox sets the entrypoint so the container **activates the environment on startup** \u2014 exactly like `flox activate`.\n\n## 1. Manifest\n\nAdd a `[containerize.config]` section to your `.flox/env/manifest.toml`. This is optional (you can containerize with no config at all), but it lets you set the startup command, ports, user, etc. Here's a complete, sensible example \u2014 adjust to your app:\n\n```toml\nversion = 1\n\n[install]\n# your existing packages, e.g.:\n# python3.pkg-path = \"python312\"\n\n[vars]\n# your existing environment variables\n\n[hook]\n# your existing on-activate hook\n\n# --- container-specific config (experimental) ---\n[containerize.config]\ncmd = [\"bash\"]                  # command run inside the activated env; use [\"bash\"] for a shell,\n                                # or e.g. [\"python\", \"app.py\"] for an app. Leave [] if a service starts it.\nexposed-ports = [\"8080/tcp\"]    # ports to EXPOSE (omit if none)\nworking-dir = \"/app\"            # initial working directory\nuser ="
     },
     {
       "id": "publish-package",
@@ -147,11 +149,11 @@
         "score": 5,
         "correct": true,
         "issues": [
-          "Doesn't mention teammates must be members of the org to install from its catalog",
-          "Personal catalog is the default (no -o needed); framing it as '-o <your-handle>' is slightly imprecise"
+          "Minor: `flox publish -o <org>` owner flag syntax may vary by version; publish target is often inferred from active FloxHub org",
+          "Slightly verbose manifest section beyond what the question strictly required"
         ]
       },
-      "answer_excerpt": "Here's the complete solution for publishing your built package to FloxHub so your team can install it.\n\n## The Manifest\n\nYour `.flox/env/manifest.toml` needs an `[install]` section (build/runtime deps), a `[build.<name>]` section defining the package, and metadata. Here's a representative example for an app called `myapp`:\n\n```toml\nversion = 1\n\n[install]\n# Build-time dependencies your package needs to compile\ngcc.pkg-path = \"gcc13\"\nmake.pkg-path = \"make\"\n# Runtime dependency (if any)\nopenssl.pkg-path = \"openssl\"\n\n[build.myapp]\ncommand = '''\n  make\n  mkdir -p $out/bin\n  cp myapp $out/bin/\n'''\nversion = \"1.0.0\"\ndescription = \"High-performance CLI tool for <what it does>\"\n# Only what the binary needs at runtime \u2014 NOT the build tools\nruntime-packages = [\"openssl\"]\n```\n\nSwap `myapp`, the `command`, and `description` for your actual package. The published artifact is whatever you place in `$out/` (binaries), not your source code.\n\n## The Commands\n\n```bash\n# 1. Authenticate to FloxHub (first time only)\nflox auth login\n\n# 2. Commit and push everything \u2014 publish requires a clean tree pushed to the remote\ngit add .flox/ src/        # include all build-referenced files\ngit commit -m \"Add flox"
+      "answer_excerpt": "## Complete Solution\n\nHere's everything needed to publish your built package to FloxHub so your team can install it.\n\n### The Manifest\n\n`.flox/env/manifest.toml` \u2014 the development environment with your build definition (this lives in your git repo alongside your source):\n\n```toml\nversion = 1\n\n[install]\n# Build-time dependencies \u2014 the tools needed to compile your package\ngcc.pkg-path = \"gcc\"\nmake.pkg-path = \"make\"\n# Runtime dependency (example \u2014 only if your app needs it at runtime)\nopenssl.pkg-path = \"openssl\"\n\n[build.myapp]\ncommand = '''\n  make\n  mkdir -p $out/bin\n  cp myapp $out/bin/\n'''\nversion = \"1.0.0\"\ndescription = \"High-performance CLI tool for <what it does>\"\n# List ONLY what the package needs at runtime, not the build tools\nruntime-packages = [\"openssl\"]\n```\n\n> Replace `myapp`, the `command`, `version`, `description`, and packages with your actual values. The key idea: `[install]` holds your build tools, and `[build.myapp]` defines what lands in `$out/` \u2014 that's what gets published (binaries/artifacts, **not** source code).\n\n### The Commands\n\n```bash\n# 1. Authenticate to FloxHub (first time only)\nflox auth login\n\n# 2. Make sure git is clean, committed, and pushed \u2014\n#    Fl"
     },
     {
       "id": "compose-environments",
@@ -164,14 +166,16 @@
       },
       "hard_pass": true,
       "judge": {
-        "score": 5,
+        "score": 4,
         "correct": true,
         "issues": [
-          "Minor: claims composition merges 'automatically on the next activation' \u2014 it's actually resolved at edit/include time, though the practical effect is similar",
-          "Runtime layering example uses -d (local dirs) rather than -r; appropriate here since both envs are local, but doesn't mention the -r remote variant"
+          "Both composition via [include] and runtime layering are covered, with the difference (build-time/deterministic vs temporary) explained \u2014 satisfies rubric",
+          "FloxHub publishing steps are misleading: `flox push` does not require manual `git init && git add .flox/ && git commit`",
+          "Rubric's example uses remote refs (`flox activate -r a -- flox activate -r b`); answer only shows the local `-d` layering form (still correct, but doesn't show `-r`)",
+          "Minor: emphasis heavily on composition; layering treated as an aside"
         ]
       },
-      "answer_excerpt": "You can merge them at build time with the `[include]` section in your base environment's manifest. This pulls all packages, vars, services, and hooks from `debug-tools` into your base environment.\n\n## Manifest\n\nEdit your base environment's manifest (`.flox/env/manifest.toml`, opened via `flox edit`) to add an `[include]` section:\n\n```toml\nversion = 1\n\n[include]\nenvironments = [\n    # If debug-tools is a local environment (path to the dir containing .flox/):\n    { dir = \"../debug-tools\" },\n\n    # OR, if it lives on FloxHub instead, use remote:\n    # { remote = \"yourname/debug-tools\" },\n]\n\n[install]\n# ... your existing base packages stay here ...\n\n[vars]\n# ... your existing base vars ...\n```\n\nUse **one** of the two include entries \u2014 `dir` for a local environment on disk, `remote` for one published to FloxHub. You can list multiple entries if you have more environments to combine.\n\n## Commands\n\n```bash\n# 1. From your base environment's directory, open the manifest and add the [include] block above\nflox edit\n\n# 2. Composition is merged automatically on the next activation.\n#    To force a re-merge after the included env changes later, run:\nflox include upgrade\n\n# 3. Activate \u2014 packages"
+      "answer_excerpt": "## Combining a base environment with debug-tools\n\nThe clean way to do this in Flox is **composition** \u2014 merging environments at build time with the `[include]` section of the manifest. This is deterministic (unlike runtime layering) and gives you a single activated environment with everything merged.\n\nYou have two flavors depending on where the debug-tools environment lives.\n\n### Option A \u2014 both environments are local directories\n\nAdd an `[include]` block to your **base** environment's manifest pointing at the debug-tools directory:\n\n```toml\n# .flox/env/manifest.toml  (in your base environment)\n\nversion = 1\n\n[install]\n# ... your existing base packages ...\n\n[include]\nenvironments = [\n    { dir = \"../debug-tools\" }   # path to the other env's project dir (the one containing .flox/)\n]\n```\n\nThen rebuild and activate:\n\n```bash\n# From the base environment's project directory\nflox include upgrade      # pull in / refresh the included environment\nflox activate             # now has base + debug-tools merged\n```\n\n`flox include upgrade` re-reads the included environments and merges them into the composed lockfile. Run it again whenever debug-tools changes.\n\n### Option B \u2014 debug-tools lives o"
     },
     {
       "id": "cuda-env",
@@ -188,13 +192,13 @@
         "score": 4,
         "correct": true,
         "issues": [
-          "cuda_cudart uses unversioned `cudaPackages.cuda_cudart` while others pin `_12_8`, contradicting its own 'pin _12_8 everywhere' advice",
-          "`flox-cuda/` catalog prefix is dubious \u2014 standard Flox CUDA packages live under `cudaPackages.*` in the nixpkgs catalog, not a `flox-cuda/` namespace",
-          "Does not use pkg-group to co-resolve the CUDA packages; relies solely on priority",
-          "Minor: priorities are used to resolve LICENSE conflicts but pkg-group grouping would be the more idiomatic conflict handling"
+          "The `flox-cuda/` catalog prefix appears fabricated \u2014 real Flox pkg-paths use `cudaPackages.*` directly (from nixpkgs); the claimed `flox auth login` for 'flox-cuda catalog / early access' is likely hallucinated and install commands as written would fail",
+          "Version inconsistency: `cuda_cudart` uses unversioned `cudaPackages.cuda_cudart` while everything else pins `cudaPackages_12_8`, contradicting the answer's own 'don't mix suffixes' advice",
+          "CUDA toolkit pinned to 12.8 but PyTorch installed from the `cu129` (CUDA 12.9) index \u2014 a mismatch that undercuts the 'consistent version' rationale",
+          "PyTorch `cu129` wheels are x86_64-linux only, but `systems` includes `aarch64-linux`, so activation would fail on ARM"
         ]
       },
-      "answer_excerpt": "## Flox Environment: CUDA GPU Deep Learning (PyTorch) on Linux\n\nHere's a complete, reproducible setup. The Flox-provided CUDA libraries (nvcc, cudart, cuBLAS, cuDNN) come from the `flox-cuda/` catalog, while PyTorch itself is installed into a `uv` venv against the matching CUDA wheel index (`cu128`) \u2014 this is the most reliable way to get a working GPU PyTorch.\n\n### Manifest (`.flox/env/manifest.toml`)\n\n```toml\nversion = 1\n\n[install]\n# --- CUDA toolchain (Linux-only; explicit priorities resolve LICENSE conflicts) ---\ncuda_nvcc.pkg-path = \"flox-cuda/cudaPackages_12_8.cuda_nvcc\"\ncuda_nvcc.priority = 1\ncuda_nvcc.systems = [\"aarch64-linux\", \"x86_64-linux\"]\n\ncuda_cudart.pkg-path = \"flox-cuda/cudaPackages.cuda_cudart\"\ncuda_cudart.priority = 2\ncuda_cudart.systems = [\"aarch64-linux\", \"x86_64-linux\"]\n\nlibcublas.pkg-path = \"flox-cuda/cudaPackages_12_8.libcublas\"\nlibcublas.priority = 2\nlibcublas.systems = [\"aarch64-linux\", \"x86_64-linux\"]\n\ncudnn.pkg-path = \"flox-cuda/cudaPackages_12_8.cudnn_9_11\"\ncudnn.priority = 2\ncudnn.systems = [\"aarch64-linux\", \"x86_64-linux\"]\n\n# --- Python toolchain ---\npython313Full.pkg-path = \"python313Full\"\nuv.pkg-path = \"uv\"\n\n# --- Compiler runtime (libstdc++ for nati"
+      "answer_excerpt": "Here's a complete Flox environment for CUDA GPU deep learning with PyTorch on Linux.\n\n## Manifest\n\n```toml\nversion = 1\n\n[install]\n# --- CUDA toolkit (Linux only, prefixed flox-cuda/) ---\n# NVIDIA C++ compiler \u2014 highest priority to win LICENSE-file conflicts\ncuda_nvcc.pkg-path = \"flox-cuda/cudaPackages_12_8.cuda_nvcc\"\ncuda_nvcc.priority = 1\ncuda_nvcc.systems = [\"aarch64-linux\", \"x86_64-linux\"]\n\n# CUDA runtime API\ncuda_cudart.pkg-path = \"flox-cuda/cudaPackages.cuda_cudart\"\ncuda_cudart.priority = 2\ncuda_cudart.systems = [\"aarch64-linux\", \"x86_64-linux\"]\n\n# Linear algebra (used heavily by PyTorch)\nlibcublas.pkg-path = \"flox-cuda/cudaPackages_12_8.libcublas\"\nlibcublas.priority = 2\nlibcublas.systems = [\"aarch64-linux\", \"x86_64-linux\"]\n\n# Deep neural network primitives\ncudnn.pkg-path = \"flox-cuda/cudaPackages_12_8.cudnn_9_11\"\ncudnn.priority = 2\ncudnn.systems = [\"aarch64-linux\", \"x86_64-linux\"]\n\n# --- Python toolchain ---\npython313Full.pkg-path = \"python313Full\"\nuv.pkg-path = \"uv\"\n\n# libstdc++ for compiling/linking against CUDA\ngcc-unwrapped.pkg-path = \"gcc-unwrapped\"\ngcc-unwrapped.priority = 5\n\n[vars]\nCUDA_VERSION = \"12.8\"\nCUDA_HOME = \"$FLOX_ENV\"\nPYTORCH_CUDA_ALLOC_CONF = \"max_split_size_"
     },
     {
       "id": "func-search-has-package",
@@ -210,11 +214,12 @@
         "score": 4,
         "correct": true,
         "issues": [
-          "Does not explicitly note that `flox search` returns only the latest version per package name (the key nuance distinguishing search from show)",
-          "Adds substantial extra content (install/manifest/pinning) beyond the asked question, though accurate"
+          "Omits the key rubric nuance that `flox search` returns only the latest version per package name",
+          "Dubious claim that `flox search` is case-sensitive (not accurate)",
+          "Extra manifest/install detail is correct but beyond what was asked"
         ]
       },
-      "answer_excerpt": "Yes, Flox has `ripgrep` (it tracks nixpkgs, where it's named the same).\n\n## Seeing what's available\n\n```bash\nflox search ripgrep        # find the package (add --all for broader matches)\nflox show ripgrep          # list all available historical versions\n```\n\n`flox search` confirms the package exists and gives a one-line description; `flox show ripgrep` is the one that prints the full list of versions in the Flox Catalog, so you can pick exactly which one to pin.\n\n## Installing it\n\nThe simplest way is to let Flox edit the manifest for you:\n\n```bash\nflox init                  # only if you don't already have an environment\nflox install ripgrep       # adds it at the latest version\n```\n\nTo pin a specific version you saw in `flox show`, either `flox install ripgrep@14.1.0` or edit the manifest directly.\n\n## Manifest\n\nA minimal `.flox/env/manifest.toml` with ripgrep pinned to a chosen version:\n\n```toml\nversion = 1\n\n[install]\nripgrep.pkg-path = \"ripgrep\"\nripgrep.version = \"14.1.0\"   # optional \u2014 drop this line for the latest\n```\n\nThe `version` field accepts an exact version (`\"14.1.0\"`), a partial wildcard (`\"14.1\"` = latest 14.1.x), or a semver range (`\"^14.0\"`). Omit it entirely to al"
+      "answer_excerpt": "Yes \u2014 Flox has `ripgrep` (it mirrors nixpkgs, and the Flox Catalog additionally keeps millions of historical package-version combinations, so many past versions are available).\n\n## How to find it and see available versions\n\n```bash\n# 1. Confirm the package exists in the catalog\nflox search ripgrep\n\n# 2. List the available (historical) versions of ripgrep\nflox show ripgrep\n```\n\n- `flox search ripgrep` confirms the package is in the catalog and shows a short description. (Search is case-sensitive; add `--all` for broader results.)\n- `flox show ripgrep` is the key command here \u2014 it lists the historical versions available in the Flox Catalog so you can pick an exact one to pin.\n\n## Installing it into an environment\n\n```bash\nflox init                    # create an environment (if you don't have one yet)\nflox install ripgrep         # add latest ripgrep to the manifest\n```\n\nTo pin a specific version you saw from `flox show`, either `flox install ripgrep@<version>` or edit the manifest directly with `flox edit`.\n\n## Resulting manifest (`.flox/env/manifest.toml`)\n\n```toml\n[install]\n# Latest ripgrep\nripgrep.pkg-path = \"ripgrep\"\n\n# Or pin an exact version chosen from `flox show ripgrep`:\n# "
     },
     {
       "id": "func-install-versioned",
@@ -231,12 +236,12 @@
         "score": 4,
         "correct": true,
         "issues": [
-          "Asserts `node --version` \u2192 v18.4.0 presumptively, though 18.4.0 may not exist in the catalog",
-          "Slightly inaccurate claim that `flox show` displays the 'closest available' builds \u2014 it lists all available versions, not nearest matches",
-          "Could more strongly caution that 18.4 is an old/uncommon version that may be absent, requiring fallback to a nearby 18.x"
+          "Covers show + version-field pin well, but frames verifying 18.4's actual availability as optional rather than emphasizing exact versions often aren't in the catalog",
+          "Claims '18.4' reliably resolves to latest 18.4.X wildcard without caveat that the catalog may lack any 18.4 build",
+          "Uses flox show but never mentions flox search as an alternative discovery path"
         ]
       },
-      "answer_excerpt": "## Solution\n\nAdd Node.js pinned to 18.4 in your manifest's `[install]` section.\n\n### Manifest (`.flox/env/manifest.toml`)\n\n```toml\n[install]\nnodejs.pkg-path = \"nodejs\"\nnodejs.version = \"18.4\"\n```\n\n### Flox commands\n\n```bash\n# If you don't have an environment yet, create one:\nflox init\n\n# Confirm 18.4 is available in the catalog:\nflox show nodejs\n\n# Install Node.js pinned to 18.4:\nflox install nodejs@18.4\n\n# Enter the environment and verify:\nflox activate\nnode --version    # -> v18.4.0\n```\n\n### Explanation\n\n- `flox install nodejs@18.4` adds the package and writes the pinned descriptor (`nodejs.version = \"18.4\"`) into your manifest automatically \u2014 so you can use the command or hand-edit the manifest, either way produces the same result.\n- The partial version `\"18.4\"` acts as a wildcard for the latest `18.4.x` patch release; use a fully-qualified `\"18.4.0\"` if you need exact-patch reproducibility.\n- Node's `nodejs` package bundles **npm**. Add `yarn` or `pnpm` as separate packages only if you need them.\n- Use `flox show nodejs` first to confirm 18.4 exists in the catalog \u2014 if the exact version isn't listed, that command shows the closest available 18.x builds."
+      "answer_excerpt": "Here's the complete solution for adding Node.js 18.4 to your Flox project.\n\n## Explanation\n\nFlox's catalog keeps historical package versions, so you can pin Node.js to 18.4 directly via the `version` field on the package descriptor. `nodejs` includes `npm`. If a `.flox/` environment doesn't exist yet, initialize it first with `flox init`. The manifest change takes effect on the next `flox activate`.\n\n## Manifest (`.flox/env/manifest.toml`)\n\n```toml\nversion = 1\n\n[install]\nnodejs.pkg-path = \"nodejs\"\nnodejs.version = \"18.4\"\n```\n\n## Flox commands\n\n```bash\n# 1. (Only if you don't already have a .flox/ environment)\nflox init\n\n# 2. (Optional) Confirm 18.4 is available in the catalog\nflox show nodejs\n\n# 3. Install Node.js pinned to 18.4\nflox install nodejs@18.4\n\n# 4. Enter the environment and verify\nflox activate\nnode --version   # -> v18.4.x\nnpm --version\n```\n\n`flox install nodejs@18.4` writes the same descriptor shown in the manifest above, so you can either run the command **or** hand-edit the manifest (via `flox edit`) \u2014 you don't need to do both.\n\nA couple of notes:\n- `\"18.4\"` is treated as a wildcard for the latest `18.4.X`. For a fully exact pin, use the complete version, e.g. `node"
     },
     {
       "id": "func-show-versions",
@@ -249,16 +254,15 @@
       },
       "hard_pass": true,
       "judge": {
-        "score": 3,
+        "score": 4,
         "correct": true,
         "issues": [
-          "Does not explain the key rubric point that `flox search` shows only the latest version per package name",
-          "Only partially conveys the search-vs-show distinction (states show lists all versions, but never contrasts search's latest-only behavior)",
-          "Invents many specific version numbers/ranges (hedged, but speculative) rather than directing user to authoritative `flox show` output",
-          "Adds significant unrequested content (services, manifest options) that dilutes the core answer"
+          "Does not explicitly state the key contrast that `flox search` shows only the latest version per package name (only implies search 'finds packages' vs show 'lists versions')",
+          "Specific version details (postgresql_13\u201317 majors, semver wildcard behavior like '16' or '^16') are asserted without verification and may be inaccurate",
+          "Somewhat verbose with manifest/services tangents beyond the core question"
         ]
       },
-      "answer_excerpt": "## What PostgreSQL versions are available\n\nFlox installs PostgreSQL from the Flox Catalog (built on nixpkgs), which carries every historical build. There are two ways versions are exposed:\n\n**1. The generic `postgresql` package, version-pinned.** Run `flox show postgresql` to list the concrete versions in the catalog \u2014 this typically spans the full PostgreSQL release range (e.g. `13.x`, `14.x`, `15.x`, `16.x`, `17.x`, including older point releases). You then pin with the `version` field.\n\n**2. Major-version package paths.** nixpkgs also ships explicit per-major packages \u2014 `postgresql_13`, `postgresql_14`, `postgresql_15`, `postgresql_16`, `postgresql_17` \u2014 which are the cleanest way to lock a major version.\n\n> I haven't run anything here, so treat the specific numbers as the expected range \u2014 `flox show postgresql` (and `flox show postgresql_17`, etc.) on your machine is the authoritative list of exact builds.\n\n## Commands to discover and install\n\n```bash\nflox search postgresql           # find PostgreSQL-related packages\nflox search postgresql --all     # broaden the search\nflox show postgresql             # list every catalog version of the generic package\nflox show postgresql_16"
+      "answer_excerpt": "## Discovering PostgreSQL versions\n\nFlox draws from the Flox Catalog (built on nixpkgs), which carries **millions of historical package-version combinations**. So rather than memorizing a list, you discover what's available with two commands:\n\n```bash\nflox search postgresql       # find the PostgreSQL package(s)\nflox show postgresql          # list every available version of a package\n```\n\n`flox show postgresql` prints the full version history you can pin to. In addition to the base `postgresql` package, the catalog exposes major-version-specific package paths, typically:\n\n- `postgresql_13`\n- `postgresql_14`\n- `postgresql_15`\n- `postgresql_16`\n- `postgresql_17`\n\nYou can run `flox show postgresql_16` (etc.) to see the exact minor/patch versions available for a given major line.\n\n## Manifest\n\nAdd PostgreSQL to your environment's `.flox/env/manifest.toml`. Here are the two common approaches:\n\n```toml\n[install]\n# Approach 1: pick a major version by package path\npostgresql.pkg-path = \"postgresql_16\"\n\n# Approach 2: pin an exact/semver version of the base package\n# postgresql.pkg-path = \"postgresql\"\n# postgresql.version = \"16.3\"      # exact\n# postgresql.version = \"^16\"       # latest 16."
     },
     {
       "id": "trigger-python-web",
@@ -274,11 +278,12 @@
         "score": 5,
         "correct": true,
         "issues": [
-          "Minor: hedged/possibly-unnecessary `.flox/cache/` gitignore advice",
-          "Minor: createdb relies on $POSTGRES_* vars being in shell scope which depends on activation"
+          "`[profile.common]` with an `on-activate` key is malformed \u2014 Flox expects `[profile]` with a `common = '''...'''` string value (only `[hook]` uses the `on-activate` key)",
+          "The optional `[services.api]` block redefines `[vars]`, which would duplicate/conflict with the earlier `[vars]` table if pasted as-is",
+          "`POSTGRES_HOST=localhost` in vars is effectively unused since the hook overrides connections to the Unix socket via PGHOST/DATABASE_URL \u2014 slightly inconsistent"
         ]
       },
-      "answer_excerpt": "Here's a complete, reproducible setup using **Flox**. The key idea for \"teammates get the same setup\": you commit the `.flox/` directory to git, and everyone runs `flox activate` to get the identical Python toolchain *and* a local PostgreSQL \u2014 no system installs, no version drift.\n\n## Prerequisites\n\nEach teammate installs Flox once (from `flox.dev/download` or a package manager):\n\n```bash\nbrew install flox          # macOS\n# Debian/Ubuntu: download the .deb from flox.dev/download, then:\nsudo apt install /path/to/flox.deb\nflox --version\n```\n\n## 1. Create the environment\n\nFrom your project root:\n\n```bash\nflox init\n```\n\nThis creates `.flox/env/manifest.toml`, which is the single file that defines the whole environment.\n\n## 2. The manifest\n\nReplace `.flox/env/manifest.toml` with the following. It installs Python + `uv`, runs PostgreSQL as a managed service with data living in `$FLOX_ENV_CACHE` (local, gitignored, survives rebuilds), and sets up a project venv on activation.\n\n```toml\n[install]\npython.pkg-path = \"python313Full\"\nuv.pkg-path = \"uv\"\npostgresql.pkg-path = \"postgresql_16\"\n\n[vars]\nPOSTGRES_HOST = \"localhost\"\nPOSTGRES_PORT = \"5432\"\nPOSTGRES_DB   = \"appdb\"\nPOSTGRES_USER = \"appus"
+      "answer_excerpt": "Here's a complete, reproducible local dev setup using **Flox**. Everything lives in a `.flox/` directory you commit to git, so teammates get an identical Python + PostgreSQL environment by running one command.\n\n## Why Flox here\n\nYou define Python, `uv`, and PostgreSQL (pinned versions), a Python venv, and a Postgres service in a single declarative manifest. Teammates clone the repo, run `flox activate -s`, and get the same toolchain and a running database \u2014 no \"works on my machine,\" no manual Postgres install, no polluting their system.\n\n## 1. Install Flox (each teammate, once)\n\nFlox is not a `curl | bash` install. Get it from **flox.dev/download** or a package manager:\n\n```bash\n# macOS\nbrew install flox\n\n# Debian/Ubuntu \u2014 download the .deb from flox.dev/download, then:\nsudo apt install /path/to/flox.deb\n\n# RPM (RHEL/CentOS/Amazon Linux) \u2014 download the .rpm, then:\nsudo rpm -ivh /path/to/flox.rpm\n\nflox --version   # verify\n```\n\n## 2. Create the environment (you, once)\n\nFrom your project root:\n\n```bash\nflox init\n```\n\nThis creates `.flox/env/manifest.toml`. Replace its contents with the manifest below (or run `flox edit`).\n\n## 3. The manifest \u2014 `.flox/env/manifest.toml`\n\n```toml\nversi"
     },
     {
       "id": "trigger-node-project",
@@ -294,11 +299,12 @@
         "score": 5,
         "correct": true,
         "issues": [
-          "nodejs already bundles npm, so the on-activate hook using npm with pnpm also installed is slightly inconsistent",
-          "version ^20.0 pins to an aging LTS rather than current LTS, minor"
+          "Minor: nodejs.version = \"^22.0\" \u2014 Flox version constraints are semver strings, syntax fine but could clarify pinning",
+          "Minor: running npm install inside on-activate hook can slow every fresh activation and is a stylistic choice, not required",
+          "Minor: cd \"$FLOX_ENV_PROJECT\" in hook is redundant since activation typically starts in project dir"
         ]
       },
-      "answer_excerpt": "Here's a complete setup for a new Node.js project using a Flox environment for reproducibility. Run through these steps in the directory where you want the project.\n\n## 1. Initialize the project\n\n```bash\nmkdir my-node-app && cd my-node-app\nflox init\n```\n\nThis creates the `.flox/` directory holding `env/manifest.toml`.\n\n## 2. Configure the manifest\n\nEdit `.flox/env/manifest.toml` to match the following. This pins Node.js to the current LTS (20.x) and includes `pnpm` (drop it if you prefer plain npm):\n\n```toml\nversion = 1\n\n[install]\nnodejs.pkg-path = \"nodejs\"\nnodejs.version = \"^20.0\"\npnpm.pkg-path = \"pnpm\"\n\n[vars]\nNODE_ENV = \"development\"\n\n[hook]\non-activate = '''\n  # Install dependencies once when a lockfile/package.json exists\n  if [ -f \"$FLOX_ENV_PROJECT/package.json\" ] && [ ! -d \"$FLOX_ENV_PROJECT/node_modules\" ]; then\n    npm install --prefix \"$FLOX_ENV_PROJECT\"\n  fi\n'''\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-linux\", \"x86_64-darwin\", \"aarch64-darwin\"]\n```\n\nNotes:\n- `nodejs` already bundles `npm`, so you don't need to install it separately.\n- The hook is idempotent \u2014 it only runs `npm install` if `package.json` exists and `node_modules` is missing. Remove the hook entirel"
+      "answer_excerpt": "Here's a complete, reproducible Node.js project setup using Flox. Follow these steps in order \u2014 I've written out every file and command so you can copy-paste.\n\n## 1. Create the project directory and initialize Flox\n\n```bash\nmkdir my-node-app\ncd my-node-app\ngit init\nflox init\n```\n\n`flox init` creates the `.flox/` directory containing `env/manifest.toml`.\n\n## 2. Configure the Flox manifest\n\nOpen the manifest with `flox edit` (or edit `.flox/env/manifest.toml` directly) and replace it with this:\n\n```toml\nversion = 1\n\n[install]\nnodejs.pkg-path = \"nodejs\"\nnodejs.version = \"^22.0\"   # current LTS; pin to an exact version for full reproducibility\n\n[vars]\nNODE_ENV = \"development\"\n\n[hook]\non-activate = '''\n  # Keep npm's cache inside the env so it survives rebuilds and stays local\n  export NPM_CONFIG_CACHE=\"${FLOX_ENV_CACHE:-$PWD/.cache}/npm\"\n\n  # Install dependencies on first activation (or whenever package.json changes)\n  if [ -f \"$FLOX_ENV_PROJECT/package.json\" ]; then\n    if [ ! -d \"$FLOX_ENV_PROJECT/node_modules\" ]; then\n      npm install --prefix \"$FLOX_ENV_PROJECT\"\n    fi\n  fi\n\n  cd \"$FLOX_ENV_PROJECT\"\n'''\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-linux\", \"x86_64-darwin\", \"aarch"
     },
     {
       "id": "trigger-reproducible",
@@ -313,12 +319,9 @@
       "judge": {
         "score": 5,
         "correct": true,
-        "issues": [
-          "Minor: \"flox install nodejs python311 postgresql\" uses bare names while the manifest example uses pkg-path attributes \u2014 slight inconsistency",
-          "Minor: claim that no curl|bash installer exists is stated more absolutely than necessary"
-        ]
+        "issues": []
       },
-      "answer_excerpt": "Here's how to make your project's dev environment fully reproducible across the whole team, using Flox.\n\n## The approach\n\nDefine the environment with Flox, then **commit the `.flox/` directory to your project's git repo alongside your source code.** When teammates clone and run `flox activate`, they get the exact same toolchain \u2014 same package versions, resolved from the same catalog snapshot \u2014 on macOS and Linux, x86 and ARM. This is the canonical pattern for development environments: the environment travels with the code in one repo.\n\n## Setup steps\n\n### 1. Install Flox (each team member)\n\nDon't use any `curl | bash` one-liner \u2014 they don't exist. Install from `flox.dev/download` or a package manager:\n\n```bash\n# macOS \u2014 Homebrew\nbrew install flox\n\n# Debian/Ubuntu \u2014 download the .deb from flox.dev/download, then:\nsudo apt install /path/to/flox.deb\n\n# RPM (RHEL/CentOS/Amazon Linux) \u2014 download the .rpm, then:\nsudo rpm -ivh /path/to/flox.rpm\n\nflox --version   # verify\n```\n\n### 2. Initialize the environment (one person, once)\n\nFrom your project root:\n\n```bash\nflox init\n```\n\nThis creates `.flox/` containing `env/manifest.toml` (the definition) and `env.json` (metadata).\n\n### 3. Add your "
+      "answer_excerpt": "# Reproducible Team Dev Environments with Flox\n\nThe cleanest way to get a fully reproducible, cross-machine dev environment is **Flox**: you define the environment declaratively in a `manifest.toml`, commit the `.flox/` directory to git alongside your source code, and every teammate gets the exact same toolchain \u2014 same package versions, same env vars, same setup scripts \u2014 on macOS and Linux, x86 and ARM.\n\nHere's the complete setup.\n\n## 1. Install Flox (each teammate, once)\n\nFlox isn't a `curl | bash` install. Get it from **[flox.dev/download](https://flox.dev/download)** or a package manager:\n\n```bash\n# macOS \u2014 Homebrew\nbrew install flox\n\n# macOS \u2014 pkg installer (download from flox.dev/download)\nARCH=$([ \"$(uname -m)\" = \"arm64\" ] && echo \"aarch64\" || echo \"x86_64\")\nsudo installer -pkg ./flox.$ARCH-darwin.pkg -target /\n\n# Debian/Ubuntu \u2014 download .deb from flox.dev/download, then:\nsudo apt install /path/to/flox.deb\n\n# RPM (RedHat/CentOS/Amazon Linux):\nsudo rpm -ivh /path/to/flox.rpm\n\n# Verify\nflox --version\n```\n\n## 2. Create the environment in your project\n\nFrom your project root:\n\n```bash\nflox init\nflox install nodejs   # etc. \u2014 or just edit the manifest directly (next step)\n```\n\nT"
     },
     {
       "id": "trigger-go-cli",
@@ -334,11 +337,11 @@
         "score": 5,
         "correct": true,
         "issues": [
-          "Aliasing `test` shadows the shell builtin, which can break scripts",
-          "Minor: claims hook functions aren't exposed to interactive shell as justification for profile, which is roughly right but stated as absolute"
+          "Minor: claim that $FLOX_ENV_CACHE 'survives flox delete' is dubious \u2014 deleting the env generally removes its cache",
+          "Minor: unverified whether caret range '^1.22' is the exact accepted semver syntax in Flox manifests (semver ranges are supported, but form may vary)"
         ]
       },
-      "answer_excerpt": "Here's a complete Flox-based development environment for a new Go command-line tool.\n\n## Setup steps\n\n```bash\n# 1. In your project directory, create the Flox environment\nflox init\n\n# 2. Replace the generated manifest with the one below\nflox edit\n\n# 3. Enter the environment (compiles nothing \u2014 just sets up the toolchain)\nflox activate\n\n# 4. First time only: scaffold your module (inside the activated env)\ngo mod init github.com/<you>/<tool-name>\n```\n\n## `.flox/env/manifest.toml`\n\n```toml\nversion = 1\n\n[install]\n# Core Go toolchain\ngo.pkg-path = \"go\"\ngo.version = \"^1.22\"\n\n# Linting / formatting / language server\ngolangci-lint.pkg-path = \"golangci-lint\"\ngopls.pkg-path = \"gopls\"\ngotools.pkg-path = \"gotools\"          # goimports, etc.\n\n# Handy for a CLI project\ndelve.pkg-path = \"delve\"              # debugger (dlv)\ngnumake.pkg-path = \"gnumake\"\n\n[vars]\nCGO_ENABLED = \"0\"                     # static binaries by default; drop if you need cgo\n\n[hook.on-activate]\nscript = '''\n# Keep all Go caches inside the env cache so they survive rebuilds\n# and don't pollute the global ~/go\nexport GOPATH=\"${FLOX_ENV_CACHE}/go\"\nexport GOMODCACHE=\"${GOPATH}/pkg/mod\"\nexport GOCACHE=\"${FLOX_ENV_CACHE}/go-build\""
+      "answer_excerpt": "# Go CLI Development Environment with Flox\n\nHere's a complete setup for a new Go command-line tool. Flox gives you a reproducible, per-project toolchain without touching your global system.\n\n## Setup steps\n\n```bash\n# 1. Create the project directory and enter it\nmkdir mytool && cd mytool\n\n# 2. Initialize a Flox environment (creates .flox/env/manifest.toml)\nflox init\n\n# 3. Replace the generated manifest with the config below\n#    (edit interactively with `flox edit`, or write the file directly)\n\n# 4. Activate \u2014 installs the toolchain and runs the hook\nflox activate\n\n# 5. Inside the activated shell, scaffold the Go module\ngo mod init github.com/you/mytool\n```\n\nOnce activated, `go`, `gopls`, `dlv`, and `golangci-lint` are all on `PATH`, and your Go caches live inside the project's Flox cache so they survive rebuilds and don't pollute `$HOME`.\n\n## `.flox/env/manifest.toml`\n\n```toml\nversion = 1\n\n[install]\n# Go toolchain\ngo.pkg-path = \"go\"\ngo.version = \"^1.22\"\n\n# Language server (editor completion/navigation)\ngopls.pkg-path = \"gopls\"\n\n# Debugger\ndelve.pkg-path = \"delve\"\n\n# Linter aggregator\ngolangci-lint.pkg-path = \"golangci-lint\"\n\n[vars]\nCGO_ENABLED = \"0\"\n\n[hook.on-activate]\nscript = '''"
     },
     {
       "id": "trigger-update-project",
@@ -350,14 +353,14 @@
       },
       "hard_pass": true,
       "judge": {
-        "score": 5,
+        "score": 4,
         "correct": true,
         "issues": [
-          "Asserts project is Python stdlib and lacks .flox without showing verification",
-          "Slightly verbose; adds python3Packages.redis client that may not be wanted"
+          "Fabricates a claim that no .flox/ exists ('There's no .flox/ environment in the project yet') \u2014 it cannot actually know this; better to check or ask",
+          "Minor manifest redundancy/inconsistency: REDIS_PORT defined in both [vars] and service vars, and on-activate exports REDIS_DATA_DIR but the service command hardcodes ${FLOX_ENV_CACHE}/redis instead of reusing it"
         ]
       },
-      "answer_excerpt": "No existing `.flox` environment yet, and the project is Python (stdlib). Here's the complete solution to add Redis as a dependency.\n\n## 1. Initialize a Flox environment (if you haven't)\n\nFrom the project root (`/tmp/flox-agentic/evals`):\n\n```bash\nflox init\n```\n\nThis creates `.flox/env/manifest.toml`.\n\n## 2. Add Redis to the manifest\n\nInstall the `redis` package (gives you `redis-server` and `redis-cli`) and run it as a managed service so it starts with the environment. Since your harness is Python, I've also added the `redis` Python client \u2014 drop that line if you only need the server.\n\nEdit `.flox/env/manifest.toml` to look like this:\n\n```toml\nversion = 1\n\n[install]\nredis.pkg-path = \"redis\"\n# Python client \u2014 remove if you only need the server binary\nredis-py.pkg-path = \"python3Packages.redis\"\n\n[vars]\nREDIS_PORT = \"6379\"\n\n[services.redis]\ncommand = \"redis-server --port ${REDIS_PORT} --dir ${FLOX_ENV_CACHE} --save '' --appendonly no\"\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-linux\", \"x86_64-darwin\", \"aarch64-darwin\"]\n```\n\nNotes:\n- `--dir ${FLOX_ENV_CACHE}` keeps any Redis data in Flox's persistent, local-only cache (survives rebuilds, no absolute paths).\n- `--save '' --appendonl"
+      "answer_excerpt": "Here's the complete solution for adding Redis to your existing project using Flox. (There's no `.flox/` environment in the project yet, so this starts from `flox init`.)\n\n## Setup steps\n\n```bash\n# 1. From your project root, create a Flox environment (creates .flox/)\n#    Skip this if .flox/ already exists.\nflox init\n\n# 2. Add the Redis package\nflox install redis\n\n# 3. Enter the environment\nflox activate\n```\n\n`flox install redis` installs the `redis-server`, `redis-cli`, etc. binaries into the environment. But since Redis is a long-running server, the cleaner pattern is to define it as a **Flox service** so it starts/stops with the environment and stores its data in the persistent cache.\n\n## Recommended manifest config\n\nRun `flox edit` and set up `.flox/env/manifest.toml` like this:\n\n```toml\n[install]\nredis.pkg-path = \"redis\"\n\n[vars]\nREDIS_PORT = \"6379\"\n\n[hook]\non-activate = '''\n  # Persist Redis data + config across environment rebuilds\n  export REDIS_DATA_DIR=\"${FLOX_ENV_CACHE}/redis\"\n  mkdir -p \"$REDIS_DATA_DIR\"\n'''\n\n[services.redis]\ncommand = \"redis-server --port ${REDIS_PORT} --dir ${FLOX_ENV_CACHE}/redis\"\nvars.REDIS_PORT = \"6379\"\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-"
     },
     {
       "id": "trigger-generic-start",
@@ -372,11 +375,12 @@
         "score": 5,
         "correct": true,
         "issues": [
-          "rust-bin is not a standard nixpkgs/flox package name (should be rustc/cargo)",
-          "go.pkg-path entries duplicate what flox install already added, noted but slightly redundant"
+          "Assumes Go without asking first, though it offers to swap languages",
+          "Slightly verbose for a generic 'help me start' prompt",
+          "Exceeds the ask; hits the stretch goal (Flox-first) with accurate manifest/build syntax"
         ]
       },
-      "answer_excerpt": "I'll set you up with a complete, reproducible scaffold. Since you didn't name a language, I'm defaulting to **Go** \u2014 it's the most idiomatic choice for a CLI (single static binary, no runtime to ship, excellent flag/command libraries). I'll note how to swap to Rust or Python at the end.\n\nEverything below is the answer \u2014 no commands are run.\n\n---\n\n## 1. Project layout\n\n```\nmycli/\n\u251c\u2500\u2500 .flox/                  # created by `flox init`\n\u2502   \u2514\u2500\u2500 env/manifest.toml\n\u251c\u2500\u2500 cmd/\n\u2502   \u2514\u2500\u2500 mycli/\n\u2502       \u2514\u2500\u2500 main.go\n\u251c\u2500\u2500 internal/\n\u2502   \u2514\u2500\u2500 greet/\n\u2502       \u2514\u2500\u2500 greet.go\n\u251c\u2500\u2500 go.mod\n\u2514\u2500\u2500 README.md\n```\n\n## 2. Setup steps\n\n```bash\nmkdir mycli && cd mycli\nflox init                      # creates .flox/\n\nflox install go gopls gotools  # toolchain + LSP + goimports etc.\n\nflox edit                      # paste the manifest below\nflox activate                  # enter the reproducible env\n\n# inside the env, scaffold the module:\ngo mod init github.com/<you>/mycli\ngo get github.com/spf13/cobra@latest\n```\n\n## 3. `.flox/env/manifest.toml`\n\nNo absolute paths; caches live under `$FLOX_ENV_CACHE` so they survive rebuilds.\n\n```toml\nversion = 1\n\n[install]\ngo.pkg-path = \"go\"\ngopls.pkg-path = \"gopls\"\ngotools.pkg-path = \"got"
+      "answer_excerpt": "Here's a complete starter for a new CLI tool, built on a reproducible Flox environment. I've chosen **Go + [Cobra](https://github.com/spf13/cobra)** \u2014 the de facto standard for CLIs (single static binary, great flag/subcommand handling). If you'd rather use Rust, Node, or Python, say the word and I'll swap the config.\n\nEverything below is written for you to run yourself \u2014 no commands are executed here.\n\n---\n\n## 1. Install Flox (if not already)\n\n```bash\n# macOS \u2014 Homebrew\nbrew install flox\n\n# Debian/Ubuntu \u2014 download .deb from flox.dev/download, then:\nsudo apt install /path/to/flox.deb\n\n# RPM (RedHat/CentOS/Amazon Linux) \u2014 download .rpm from flox.dev/download:\nsudo rpm -ivh /path/to/flox.rpm\n\nflox --version   # verify\n```\n\nDownloads live at `flox.dev/download`.\n\n## 2. Create the project and environment\n\n```bash\nmkdir mytool && cd mytool\nflox init\ngit init\n```\n\n`flox init` creates `.flox/env/manifest.toml`. Replace its contents with the manifest below.\n\n## 3. `.flox/env/manifest.toml`\n\n```toml\nversion = 1\n\n[install]\ngo.pkg-path = \"go\"\ngo.version = \"^1.22\"\ngopls.pkg-path = \"gopls\"          # language server for editor tooling\ngolangci-lint.pkg-path = \"golangci-lint\"\n\n[vars]\nCGO_ENABLE"
     },
     {
       "id": "indirect-cuda-pytorch",
@@ -392,14 +396,12 @@
         "score": 5,
         "correct": true,
         "issues": [
-          "Inconsistent CUDA versioning: pins cudaPackages_12_8 + CUDA_VERSION=12.8 but installs PyTorch cu129 wheels",
-          "cuda_cudart uses bare 'cudaPackages' while others use 'cudaPackages_12_8' \u2014 version mismatch",
-          "Typo 'gcc-unwrapded' in troubleshooting section",
-          "Uses priority for collision handling but does not use pkg-group to bundle the CUDA libs as rubric suggests",
-          "Claim that auth login is required for a 'flox-cuda/ catalog' is dubious"
+          "cuda_cudart uses unversioned `flox-cuda/cudaPackages` while nvcc pins `cudaPackages_12_8` \u2014 slight version inconsistency",
+          "python313Full/gcc-unwrapped pkg-paths not verified against catalog",
+          "no explicit pkg-group grouping (uses priority only)"
         ]
       },
-      "answer_excerpt": "Here's a complete, reproducible setup using **Flox** to pin the CUDA toolchain and a PyTorch project that uses your NVIDIA GPU. The Flox environment handles the system-level CUDA libraries declaratively; PyTorch itself is installed from the official CUDA wheels into a `uv`-managed venv.\n\n## Prerequisites\n\n1. **NVIDIA driver installed on the host** \u2014 Flox provides the CUDA *toolkit/libraries*, but the kernel driver must come from your distro. Verify it works:\n   ```bash\n   nvidia-smi\n   ```\n   The reported \"CUDA Version\" in that output is the *max* CUDA your driver supports. It must be \u2265 12.9 for the `cu129` wheels below (any recent driver is fine; otherwise drop to a lower wheel index like `cu124`).\n\n2. **Install Flox** (from `flox.dev/download` or a package manager \u2014 there is no `curl | bash` installer):\n   ```bash\n   # Debian/Ubuntu: download the .deb from flox.dev/download, then\n   sudo apt install /path/to/flox.deb\n   # RPM-based:\n   sudo rpm -ivh /path/to/flox.rpm\n   flox --version\n   ```\n\n3. **Authenticate** (required for the `flox-cuda/` catalog):\n   ```bash\n   flox auth login\n   ```\n\n## Step 1 \u2014 Create the project and environment\n\n```bash\nmkdir pytorch-gpu && cd pytorch-gpu"
+      "answer_excerpt": "Here's a complete, reproducible setup using **Flox** to give you a PyTorch project wired to your NVIDIA GPU on Linux.\n\n## Overview\n\nThe approach: use Flox for the CUDA system libraries + Python toolchain, and install PyTorch's official CUDA wheels into a `uv`-managed virtualenv. The PyTorch wheels bundle their own CUDA runtime, so the only hard host requirement is a recent NVIDIA **driver** (`nvidia-smi` must work). Flox pins everything else so the project is reproducible.\n\n## Prerequisites\n\n- A working NVIDIA driver on the host \u2014 verify with `nvidia-smi`. (The driver is the one thing Flox can't provide; it's a kernel-level component.)\n- Flox installed. If you don't have it, from `flox.dev/download`:\n\n```bash\n# Debian/Ubuntu \u2014 download the .deb from flox.dev/download, then:\nsudo apt install /path/to/flox.deb\n\n# RPM (RHEL/CentOS/Amazon Linux):\nsudo rpm -ivh /path/to/flox.rpm\n\nflox --version\n```\n\n## Setup steps\n\n```bash\nmkdir pytorch-gpu && cd pytorch-gpu\nflox init\n```\n\nThen replace the generated `.flox/env/manifest.toml` with the manifest below (either `flox edit`, or write it to a file and run `flox edit -f manifest.toml`).\n\nEnter the environment \u2014 the first activation creates the "
     },
     {
       "id": "indirect-cuda-readme",
@@ -414,13 +416,14 @@
         "score": 4,
         "correct": true,
         "issues": [
-          "`flox-cuda/` catalog prefix on every CUDA pkg-path is likely fabricated \u2014 standard Flox uses `cudaPackages_12_2.*` directly (CUDA's unfree licensing/early-access is real but the prefix is unverified)",
-          "`CUDA_HOME = \"$FLOX_ENV\"` in [vars] won't work \u2014 Flox [vars] values are literal and don't undergo shell expansion; should be set in hook.on-activate",
-          "`cuda_cudart` uses unversioned `cudaPackages.cuda_cudart` while preaching 'keep every CUDA attr on the same suffix' \u2014 self-contradictory",
-          "cuDNN attr `cudnn_9_11` is guessed; mostly hedged via search but still presented in the manifest as if real"
+          "Invents a `flox-cuda/` catalog requiring `flox auth login`; real Flox pulls CUDA from the nixpkgs catalog (e.g. `cudaPackages_12_2.cudatoolkit`) with no dedicated auth-gated catalog",
+          "Omits `[options] allow.unfree = true`, which is required to install proprietary NVIDIA/CUDA packages in Flox",
+          "Inconsistent pinning: `cuda_cudart` uses unversioned `cudaPackages.cuda_cudart` while others use `cudaPackages_12_2`, contradicting its own 'don't mix minor versions' advice",
+          "`CUDA_HOME = \"$FLOX_ENV\"` is oversimplified for split-output CUDA derivations and may not point where nvcc/libs actually resolve",
+          "cuDNN attribute left as a placeholder (honest, but the core deliverable is unverified)"
         ]
       },
-      "answer_excerpt": "Here's the complete setup for a Flox environment with CUDA 12.2 and cuDNN.\n\n## Setup steps\n\n```bash\n# 1. Authenticate (CUDA catalog needs early-access auth)\nflox auth login\n\n# 2. Initialize an environment in your project directory\nflox init\n\n# 3. Edit the manifest (paste the config below)\nflox edit\n\n# 4. Activate \u2014 the hook builds the venv and verifies the toolchain\nflox activate\n```\n\nBefore committing to exact package names, confirm what the catalog actually ships for the 12.2 series (the `_X_Y` suffix and the cuDNN variant must match real attrs):\n\n```bash\nflox search cudatoolkit --all | grep flox-cuda\nflox show flox-cuda/cudaPackages_12_2.cuda_nvcc\nflox search cudnn --all | grep flox-cuda      # find the cudnn_9_x attr for 12.2\n```\n\nIf `cudaPackages_12_2.*` isn't in the catalog, pin to the nearest available 12.x and keep every CUDA attr on the *same* suffix \u2014 never mix CUDA minor versions across packages.\n\n## `manifest.toml`\n\n```toml\nversion = 1\n\n[install]\n# --- CUDA 12.2 toolchain (Linux only) ---\ncuda_nvcc.pkg-path = \"flox-cuda/cudaPackages_12_2.cuda_nvcc\"\ncuda_nvcc.priority = 1                       # highest \u2014 wins LICENSE conflicts\ncuda_nvcc.systems = [\"aarch64-linux\", \"x86_"
+      "answer_excerpt": "Here's a complete Flox-based setup targeting **CUDA 12.2 + cuDNN**. This gives you a reproducible, per-project environment without touching system-wide CUDA installs.\n\n## Overview\n\nFlox pulls CUDA packages from a dedicated `flox-cuda/` catalog. You pin the toolkit to the `12_2` series, add cuDNN, add a host compiler, and set the priorities that CUDA packages need to avoid `LICENSE` file conflicts. CUDA is **Linux-only** (`x86_64-linux` / `aarch64-linux`), so every CUDA package is scoped with `systems`.\n\n## Step 1 \u2014 Prerequisites\n\n- Install Flox and authenticate (the CUDA catalog requires auth):\n  ```bash\n  flox auth login\n  ```\n- Confirm your NVIDIA driver supports CUDA 12.2 (`nvidia-smi` should report a CUDA version \u2265 12.2). The driver comes from the host, not Flox.\n\n## Step 2 \u2014 Verify exact package names for the 12.2 series\n\nPackage names and the available cuDNN variant differ by CUDA minor version, so confirm them before committing the manifest:\n\n```bash\nflox search cudatoolkit --all | grep flox-cuda\nflox show flox-cuda/cudaPackages_12_2.cudatoolkit\nflox search cudnn --all | grep flox-cuda        # note the exact cudnn_X_Y attr for 12_2\n```\n\nUse whatever cuDNN attribute that sur"
     },
     {
       "id": "indirect-publish-share",
@@ -435,11 +438,11 @@
         "score": 5,
         "correct": true,
         "issues": [
-          "Minor: `flox publish -o yourorg` org-flag syntax may not exactly match current CLI",
-          "actions/checkout@v3 slightly dated"
+          "Minor: frames org/shared-catalog publishing as a paid feature, which is a specific claim not requested and could be inaccurate",
+          "Slightly long/verbose with optional CI section, but all on-topic"
         ]
       },
-      "answer_excerpt": "The best way with Flox is to **publish your CLI as a package to your org's catalog on FloxHub**. You define a build once, publish it, and teammates install it with a single `flox install` \u2014 no source code, build tools, or manual setup on their end. Here's the complete solution.\n\n## Overview\n\nThere are two halves:\n1. **You** add a `[build]` definition to your project's Flox environment, then `flox publish` it.\n2. **Teammates** run `flox install yourorg/yourtool` \u2014 they get the built binary, nothing else.\n\n## 1. Set up the build in your project\n\nFrom your CLI tool's repo:\n\n```bash\nflox init          # creates .flox/ if you don't have it yet\n```\n\nThen edit `.flox/env/manifest.toml` to add a build definition. The `[install]` section holds your **build-time** dependencies; `[build.<name>]` describes how to produce the binary, which must land in `$out/bin/`.\n\n```toml\n[install]\n# build-time deps \u2014 pick what your tool needs to compile/assemble\n# e.g. for Rust:\ncargo.pkg-path = \"cargo\"\nrustc.pkg-path = \"rustc\"\n\n[build.mytool]\ncommand = '''\n  cargo build --release\n  mkdir -p $out/bin\n  cp target/release/mytool $out/bin/\n'''\nversion = \"1.0.0\"\ndescription = \"Short, specific description of what"
+      "answer_excerpt": "The cleanest way with Flox is to **package your CLI as a build in your project's manifest, publish it to a catalog, and have teammates `flox install` it**. No build tools, source code, or manual setup on their end \u2014 they get the finished binary.\n\nHere's the complete solution.\n\n## 1. Add a build definition to your project\n\nIn your CLI's repo, edit `.flox/env/manifest.toml`. Add whatever your tool needs to *build* under `[install]`, and describe how to build it under `[build.<name>]`:\n\n```toml\n# .flox/env/manifest.toml\n\n[install]\n# Build-time dependencies (compilers, toolchains, etc.)\n# Example for a Rust CLI:\ncargo.pkg-path = \"cargo\"\nrustc.pkg-path = \"rustc\"\n\n[build.mycli]\ncommand = '''\n  cargo build --release\n  mkdir -p $out/bin\n  cp target/release/mycli $out/bin/\n'''\nversion = \"1.0.0\"\ndescription = \"Short, specific description of what mycli does\"\nsandbox = \"pure\"           # ensures a clean, reproducible build\nruntime-packages = []      # list ONLY what the tool needs at runtime, not build deps\n```\n\nAdjust the `command` to your language. A few common shapes:\n\n- **Go:** `go build -o $out/bin/mycli ./cmd/mycli`\n- **Python (script):** copy your script into `$out/bin/` and `chmod +x` "
     },
     {
       "id": "indirect-container-deploy",
@@ -451,14 +454,16 @@
       },
       "hard_pass": true,
       "judge": {
-        "score": 5,
+        "score": 4,
         "correct": true,
         "issues": [
-          "Minor: venv hook references /app/requirements.txt which isn't copied into the image by flox containerize, so it could fail at runtime",
-          "Some manifest containerize.config fields/syntax (e.g. labels inline table) not verified against exact schema"
+          "Rubric says 'No flox keyword' but answer uses 'flox' extensively \u2014 however this appears to be a Flox-specific grading context where flox containerize is the desired answer",
+          "`flox containerize -f ./file.tar` flag for tarball output is plausible but flag syntax should be verified",
+          "labels TOML syntax with unquoted dotted keys (org.opencontainers.image.source) is invalid TOML \u2014 needs quoting",
+          "Some optional sections (multi-arch, k8s) go beyond scope but are relevant"
         ]
       },
-      "answer_excerpt": "Here's the complete solution to ship your app as a production Docker image using Flox. Your app is `run.py` (Python), and there's no Flox environment yet, so this covers it end-to-end.\n\n## 1. Create the Flox environment\n\n```bash\nflox init\nflox install python312\n```\n\nInstall whatever your app imports. If you have a `requirements.txt`, declare the deps you can get from Flox (e.g. `flox install python312Packages.requests`), and handle the rest with pip in the activation hook.\n\n## 2. Configure the environment + container in `manifest.toml`\n\nRun `flox edit` and set it up like this:\n\n```toml\nversion = 1\n\n[install]\npython.pkg-path = \"python312\"\n\n[vars]\n# Defaults; override at `docker run` time with -e\nPORT = \"8000\"\n\n[hook.on-activate]\nscript = '''\n  # Pin a venv inside the env cache so pip deps are reproducible per-machine\n  export VENV=\"$FLOX_ENV_CACHE/venv\"\n  if [ ! -d \"$VENV\" ]; then\n    python -m venv \"$VENV\"\n    \"$VENV/bin/pip\" install --no-cache-dir -r /app/requirements.txt\n  fi\n  export PATH=\"$VENV/bin:$PATH\"\n'''\n\n[containerize.config]\nuser = \"1000:1000\"               # non-root\nworking-dir = \"/app\"\nexposed-ports = [\"8000/tcp\"]\ncmd = [\"python\", \"run.py\"]        # runs inside the ac"
+      "answer_excerpt": "There's no Flox environment in this directory yet, so here's the complete solution for shipping your app as a production Docker image using Flox's built-in containerization. Flox produces the image directly from your environment \u2014 no Dockerfile needed, and the image is reproducible from the same lockfile.\n\n## Overview\n\n`flox containerize` turns a Flox environment into an OCI image. The image's entrypoint activates the environment (all packages, env vars, and hooks available), then runs your configured `cmd`. You configure runtime behavior declaratively in the manifest under `[containerize.config]`.\n\n## Step 1 \u2014 Create/confirm the environment\n\nFrom your app directory:\n\n```bash\nflox init\nflox install <your-runtime>   # e.g. python313, nodejs, go, etc.\n```\n\n## Step 2 \u2014 Configure the container in the manifest\n\nRun `flox edit` and add a `[containerize.config]` block. Example for a web app (adjust the port, cmd, and runtime to your stack):\n\n```toml\n[containerize.config]\n# Run as a non-root user in production\nuser = \"appuser\"                 # or \"1000:1000\"\nworking-dir = \"/app\"\nexposed-ports = [\"8080/tcp\"]\ncmd = [\"python\", \"-m\", \"myapp\"]  # your actual start command\nvolumes = [\"/data\"]  "
     },
     {
       "id": "indirect-services-db",
@@ -473,11 +478,115 @@
         "score": 5,
         "correct": true,
         "issues": [
-          "Redis is-daemon service has no [services.redis.shutdown] command (Postgres does), so daemonized Redis may not be cleanly stopped",
-          "Postgres command uses exec but is-daemon=true implies it should daemonize itself \u2014 minor potential mismatch with Flox daemon handling"
+          "is-daemon=true is technically mismatched with `exec postgres`/`redis-server` which run in the foreground \u2014 is-daemon is meant for self-backgrounding processes, so these may not be tracked correctly",
+          "redis service sets is-daemon=true but omits a shutdown command (postgres has one)",
+          "otherwise fully correct: uses Flox [services], $FLOX_ENV_CACHE for persistence, flox activate -s, and valid connection strings"
         ]
       },
-      "answer_excerpt": "Here's a complete Flox solution that runs Postgres and Redis as background services for your web app.\n\n## Overview\n\nFlox gives you a single declarative environment (`.flox/env/manifest.toml`) that pins both database binaries to exact versions and runs them as managed background services. Data lives in `$FLOX_ENV_CACHE`, so it's local-only, persists across rebuilds, and never leaks into your repo. No Docker, no system installs, no absolute paths.\n\n## Setup steps\n\nFrom your web app's project root:\n\n```bash\n# 1. Create the Flox environment (creates .flox/)\nflox init\n\n# 2. Open the manifest and replace its contents with the config below\nflox edit\n\n# 3. Activate the environment AND start the background services\nflox activate -s\n```\n\nThat's it. On first `flox activate -s`, Postgres initializes its data directory and creates your app database/role; Redis starts fresh. On every subsequent activation the existing data is reused.\n\nYou can commit `.flox/env/manifest.toml` and `.flox/env.json` to git so teammates get the identical setup. (The `.flox/` directory also generates a `.gitignore` that excludes local-only bits.)\n\n## The manifest\n\nPaste this into `flox edit` (`.flox/env/manifest.toml`"
+      "answer_excerpt": "Here's a complete Flox-based solution that runs Postgres and Redis as background services, with data persisted across restarts.\n\n## Overview\n\nFlox gives you a per-project environment defined in `.flox/env/manifest.toml`. You declare the `postgresql` and `redis` packages, define them as services, and start them in the background with `flox activate -s`. All data lives in `$FLOX_ENV_CACHE`, so it survives restarts (and even `flox delete`).\n\n## Setup steps\n\n1. **Install Flox** (if you haven't) \u2014 from [flox.dev/download](https://flox.dev/download) or a package manager:\n   ```bash\n   brew install flox          # macOS\n   # or install the .deb/.rpm from flox.dev/download on Linux\n   ```\n\n2. **Initialize an environment** in your web app's project root:\n   ```bash\n   flox init\n   ```\n\n3. **Edit the manifest** with `flox edit` and replace it with the config below.\n\n4. **Start everything in the background**:\n   ```bash\n   flox activate -s\n   ```\n   This drops you into an activated shell with Postgres and Redis running as background daemons. Your app can now connect to them.\n\n## `.flox/env/manifest.toml`\n\n```toml\n[install]\npostgresql.pkg-path = \"postgresql_16\"\nredis.pkg-path = \"redis\"\n\n[vars]"
+    },
+    {
+      "id": "layer-runtime-envs",
+      "area": "sharing",
+      "tier": "should",
+      "trigger_test": false,
+      "hard_checks": {
+        "no_fake_install_url": true,
+        "uses_include_or_layer": true
+      },
+      "hard_pass": true,
+      "judge": {
+        "score": 5,
+        "correct": true,
+        "issues": [
+          "Rubric example uses `-r` for both layers; answer correctly uses `-d` for local dir and `-r` for remote, which is actually more precise but slightly diverges from the literal rubric form",
+          "Could note that nested `flox activate` runs a subshell layer 2 \u2014 minor pedagogical detail, not an error"
+        ]
+      },
+      "answer_excerpt": "## Solution: Layer the environments at runtime (don't compose them)\n\nWhat you want is **layered activation**, not composition. Composition (`[include]`) merges manifests into one at build time \u2014 exactly what you're trying to avoid. Layering keeps each environment's `.flox/` and manifest completely separate; you just activate one *on top of* the other. Each keeps its own packages, vars, hooks, and services, and Flox stacks them on your `PATH` (later activations take precedence).\n\nSo the key is: **do nothing special in the manifests.** No `[include]` block. You just create two independent environments and nest the `flox activate` calls.\n\n### The `debug-tools` manifest\n\nCreate this as a standalone environment (e.g. in `~/envs/debug-tools`). Note there's no `[include]` \u2014 that's the whole point:\n\n```toml\nversion = 1\n\n[install]\ngdb.pkg-path = \"gdb\"\nstrace.pkg-path = \"strace\"\nlsof.pkg-path = \"lsof\"\nhtop.pkg-path = \"htop\"\njq.pkg-path = \"jq\"\nripgrep.pkg-path = \"ripgrep\"\n\n[vars]\n# Namespace vars so they never collide with the base env\nDEBUGTOOLS_ACTIVE = \"1\"\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-linux\", \"x86_64-darwin\", \"aarch64-darwin\"]\n```\n\nYour base dev environment's manifest sta"
+    },
+    {
+      "id": "share-env-remote",
+      "area": "sharing",
+      "tier": "should",
+      "trigger_test": false,
+      "hard_checks": {
+        "no_fake_install_url": true,
+        "uses_remote_env": true
+      },
+      "hard_pass": true,
+      "judge": {
+        "score": 5,
+        "correct": true,
+        "issues": [
+          "Slightly verbose with extra git/manifest detail beyond the core FloxHub answer, but all accurate and rubric fully satisfied"
+        ]
+      },
+      "answer_excerpt": "## Sharing a Flox Environment\n\nThe key insight: your Flox environment is fully defined by the `.flox/` directory (specifically `.flox/env/manifest.toml` and its lockfile). Sharing means getting that directory onto your teammate's machine \u2014 either via **FloxHub** (the simplest for exact reproduction) or via **git**. The lockfile pins exact package versions, so your teammate gets a byte-for-byte identical setup.\n\n### The manifest (`.flox/env/manifest.toml`)\n\nThis is an example \u2014 yours will contain whatever you've installed. The important part is that it lives in `.flox/` and is accompanied by the auto-generated `manifest.lock`, which pins exact versions.\n\n```toml\nversion = 1\n\n[install]\n# Your packages \u2014 versions get pinned in manifest.lock\npython.pkg-path = \"python311\"\nnodejs.pkg-path = \"nodejs_20\"\ngit.pkg-path = \"git\"\n\n[vars]\nPROJECT_NAME = \"my-app\"\n\n[hook]\non-activate = '''\n  echo \"Environment ready\"\n'''\n\n[options]\n# Ensures the environment resolves consistently across machines\nsystems = [\"x86_64-linux\", \"aarch64-linux\", \"x86_64-darwin\", \"aarch64-darwin\"]\n```\n\n> **Why `[options].systems` matters:** list every OS/architecture your team uses. Flox locks a resolution for each listed s"
+    },
+    {
+      "id": "build-python-pkg",
+      "area": "builds",
+      "tier": "should",
+      "trigger_test": false,
+      "hard_checks": {
+        "no_fake_install_url": true,
+        "has_build_section": true
+      },
+      "hard_pass": true,
+      "judge": {
+        "score": 3,
+        "correct": true,
+        "issues": [
+          "Does not mention manifest builds vs Nix-expression builds \u2014 a required rubric element is entirely absent",
+          "Cross-build reference syntax `${deps}` to another build stage's $out is not standard/verified Flox behavior and may not work as described",
+          "Overly elaborate two-stage/venv approach beyond what the task requires; some claims (network blocking in pure sandbox, git-tracked-only inputs) are plausible but presented as certain"
+        ]
+      },
+      "answer_excerpt": "Here's the complete solution for building your Python application into a reproducible Flox package artifact.\n\n## The Manifest\n\nAdd this to your project's `.flox/env/manifest.toml`. It uses a **two-stage build**: stage one (`deps`) fetches Python dependencies with network access, and stage two (`app`) does a fully reproducible `sandbox = \"pure\"` build that only sees git-tracked files and the vendored deps.\n\n```toml\nversion = 1\n\n[install]\npython.pkg-path = \"python312\"\nuv.pkg-path = \"uv\"\n\n# \u2500\u2500 Stage 1: fetch dependencies (needs network, so sandbox off) \u2500\u2500\n[build.deps]\ncommand = '''\n  mkdir -p $out/wheels\n  # Download all dependencies as wheels for offline, reproducible install\n  uv pip download -r requirements.txt --dest $out/wheels\n'''\nsandbox = \"off\"\n\n# \u2500\u2500 Stage 2: assemble the reproducible artifact (pure sandbox) \u2500\u2500\n[build.myapp]\ncommand = '''\n  mkdir -p $out/bin $out/share/myapp\n\n  # Copy application source (git-tracked files only, in pure mode)\n  cp -r src/* $out/share/myapp/\n  cp requirements.txt $out/share/myapp/\n\n  # Build a self-contained venv from the pre-fetched wheels (no network)\n  uv venv \"$out/share/myapp/venv\" --python python3\n  uv pip install \\\n    --python \"$out/shar"
+    },
+    {
+      "id": "build-manifest-artifact",
+      "area": "builds",
+      "tier": "should",
+      "trigger_test": false,
+      "hard_checks": {
+        "no_fake_install_url": true,
+        "has_build_section": true
+      },
+      "hard_pass": true,
+      "judge": {
+        "score": 4,
+        "correct": true,
+        "issues": [
+          "Nix-expression build invocation shown as `flox build .#hello` uses Nix flake attr-path syntax; Flox expression builds (in .flox/pkgs/) are built with `flox build hello`, same as manifest builds",
+          "The example hello.nix references `gcc` in buildPhase but does not list it as an input/nativeBuildInputs, so it would not actually build",
+          "`flox publish -o myorg hello` org-flag syntax is questionable (publish targets the logged-in user/org)",
+          "Otherwise fully satisfies rubric: [build.hello] with $out, `flox build hello`, and a clear imperative/activated-env vs pure/sandboxed contrast"
+        ]
+      },
+      "answer_excerpt": "# Compiled Binary via Flox Manifest Build\n\nBelow is a complete, self-contained example that compiles a C program into a binary using a **manifest build**. (The same pattern applies to Rust, Go, C++, etc. \u2014 just swap the compiler and build command.)\n\n## Project layout\n\n```\nmy-tool/\n\u251c\u2500\u2500 .flox/env/manifest.toml\n\u2514\u2500\u2500 src/\n    \u2514\u2500\u2500 hello.c\n```\n\n`src/hello.c`:\n\n```c\n#include <stdio.h>\nint main(void) { printf(\"hello from a flox manifest build\\n\"); return 0; }\n```\n\n## The manifest\n\n```toml\nversion = 1\n\n# Build-time toolchain \u2014 every package in the `toplevel` group is on PATH\n# during the build, exactly as if you had run `flox activate` first.\n[install]\ngcc.pkg-path = \"gcc\"\n\n# One [build.<name>] table = one publishable package.\n# `command` is a Bash script run under `set -euo pipefail`.\n# Only what you copy into $out survives; follow FHS ($out/bin for binaries).\n[build.hello]\ncommand = '''\n  mkdir -p $out/bin\n  gcc -O2 -o $out/bin/hello src/hello.c\n  chmod +x $out/bin/hello\n'''\nversion = \"1.0.0\"\ndescription = \"Minimal compiled C binary built with Flox\"\nsandbox = \"pure\"                 # git-tracked files only; reproducible, host-agnostic\nruntime-packages = [ ]           # trim the runtime clo"
+    },
+    {
+      "id": "flow-find-install-activate",
+      "area": "mcp-parity",
+      "tier": "should",
+      "trigger_test": false,
+      "hard_checks": {
+        "no_fake_install_url": true,
+        "uses_search_show": true,
+        "invokes_flox": true
+      },
+      "hard_pass": true,
+      "judge": {
+        "score": 4,
+        "correct": true,
+        "issues": [
+          "Incorrectly claims `flox install` can't pin a version \u2014 `flox install jq@1.7.1` does exactly that and is a rubric-accepted method",
+          "Otherwise covers the full find\u2192pin\u2192activate flow correctly with valid manifest syntax"
+        ]
+      },
+      "answer_excerpt": "## Complete Solution\n\nFlox has `jq` in its catalog. Here's the full workflow to find it, pin a version, and drop into a shell.\n\n### 1. Find it & see available versions\n\n```bash\nflox search jq        # confirm the package exists in the catalog\nflox show jq          # list historical versions so you can pick one to pin\n```\n\n`flox show jq` prints every version Flox has (e.g. `1.6`, `1.7`, `1.7.1`). Pick the one you want to pin.\n\n### 2. Create the environment (if the project doesn't have one yet)\n\n```bash\nflox init\n```\n\nThis creates `.flox/env/manifest.toml` in your project directory.\n\n### 3. Install jq, pinned to a specific version\n\n```bash\nflox install jq\n```\n\n`flox install` won't pin an exact version on its own, so edit the manifest to lock it. Run `flox edit`, or write the manifest below and apply it with `flox edit -f manifest.toml`.\n\n### The manifest (`.flox/env/manifest.toml`)\n\n```toml\nversion = 1\n\n[install]\njq.pkg-path = \"jq\"\njq.version = \"1.7.1\"\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-linux\", \"x86_64-darwin\", \"aarch64-darwin\"]\n```\n\n- `jq.pkg-path = \"jq\"` \u2014 the package in the Flox catalog.\n- `jq.version = \"1.7.1\"` \u2014 pins the exact version. Substitute whatever `flox show "
     }
   ]
 }
