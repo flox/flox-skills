@@ -12,6 +12,7 @@ Results are written to results/<mode>.json. Pure stdlib (no node/uv needed).
 """
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -213,22 +214,80 @@ def main():
     print(json.dumps(summary, indent=2))
     print(f"written: {out_path}")
 
+    # Deterministic gate status: hard-checks on functional should-tier tasks.
+    # The LLM judge's correctness/score is noisy run-to-run and triggering is
+    # probabilistic, so both are *reported* but never fail the build — only the
+    # structural checks do.
+    binding = [r for r in scored if r["tier"] == "should" and not r["trigger_test"]]
+    bad = [r for r in binding if not r["hard_pass"]]
+    errs = [r for r in results if "error" in r and r.get("tier", "should") == "should"]
+
+    write_step_summary(summary, results, binding, bad, errs, args.gate)
+
+    if args.gate and (bad or errs):
+        print(f"\nGATE FAILED: {len(bad)} functional should-tier task(s) failed hard-checks: "
+              f"{[(r['id'], [k for k, v in r['hard_checks'].items() if not v]) for r in bad]}; errors: {[r['id'] for r in errs]}")
+        sys.exit(1)
     if args.gate:
-        # Binding gate = DETERMINISTIC hard-checks on functional should-tier tasks.
-        # The LLM judge's correctness/score is noisy run-to-run, and triggering is
-        # probabilistic, so both are *reported* (avg_judge_score, judge_correct_rate,
-        # should_trigger_rate) but never fail the build — only the deterministic
-        # structural checks do.
-        binding = [r for r in scored if r["tier"] == "should" and not r["trigger_test"]]
-        bad = [r for r in binding if not r["hard_pass"]]
-        errs = [r for r in results if "error" in r and r.get("tier", "should") == "should"]
-        if bad or errs:
-            print(f"\nGATE FAILED: {len(bad)} functional should-tier task(s) failed hard-checks: "
-                  f"{[(r['id'], [k for k, v in r['hard_checks'].items() if not v]) for r in bad]}; errors: {[r['id'] for r in errs]}")
-            sys.exit(1)
         print(f"\nGATE PASSED: all {len(binding)} functional should-tier tasks pass hard-checks. "
               f"(advisory: judge correct {summary['judge_correct_rate']}, avg {summary['avg_judge_score']}, "
               f"should-trigger {summary['should_trigger_rate']}).")
+
+
+def write_step_summary(summary, results, binding, bad, errs, gate_enabled):
+    """Render a markdown report to $GITHUB_STEP_SUMMARY (the Actions run page)."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    scored = [r for r in results if "judge" in r]
+    if gate_enabled:
+        verdict = "❌ **GATE FAILED**" if (bad or errs) else "✅ **GATE PASSED**"
+    else:
+        verdict = "ℹ️ measurement run (gate off)"
+    out = [f"## Skill evals — `{summary['mode']}` — {verdict}", ""]
+    out += ["| metric | value |", "|---|---|",
+            f"| tasks | {summary['n_tasks']} ({summary['n_errors']} errors) |",
+            f"| hard-pass rate | {summary['hard_pass_rate']:.0%} |",
+            f"| avg judge | {summary['avg_judge_score']}/5 |",
+            f"| judge-correct | {summary['judge_correct_rate']:.0%} |",
+            f"| should-trigger | {summary['should_trigger_rate']:.0%} |", ""]
+
+    areas = {}
+    for r in scored:
+        areas.setdefault(r["area"], []).append(r)
+    out += ["### By area", "| area | n | hard-pass | avg judge |", "|---|--:|--:|--:|"]
+    for area in sorted(areas):
+        rs = areas[area]
+        hp = sum(x["hard_pass"] for x in rs) / len(rs)
+        aj = sum(x["judge"]["score"] for x in rs) / len(rs)
+        out.append(f"| {area} | {len(rs)} | {hp:.0%} | {aj:.1f} |")
+    out.append("")
+
+    flags = []
+    for r in results:
+        if "error" in r:
+            flags.append(f"- ⚠️ `{r['id']}` ({r['area']}): error — {r['error'][:80]}")
+        elif not r["hard_pass"]:
+            failed = ", ".join(k for k, v in r["hard_checks"].items() if not v)
+            flags.append(f"- ❌ `{r['id']}` ({r['area']}, {r['tier']}): hard-check failed — {failed}")
+        elif r["judge"]["score"] <= 2:
+            issues = "; ".join(r["judge"].get("issues", [])[:2])
+            flags.append(f"- 🟡 `{r['id']}` ({r['area']}, {r['tier']}): judge {r['judge']['score']}/5 — {issues}")
+    if flags:
+        out += ["### Needs attention", *flags, ""]
+
+    out += ["<details><summary>All tasks</summary>", "",
+            "| task | area | tier | hard | judge |", "|---|---|---|:--:|:--:|"]
+    for r in results:
+        if "error" in r:
+            out.append(f"| {r['id']} | {r['area']} | {r['tier']} | ERROR | – |")
+        else:
+            hp = "✅" if r["hard_pass"] else "❌"
+            out.append(f"| {r['id']} | {r['area']} | {r['tier']} | {hp} | {r['judge']['score']}/5 |")
+    out += ["", "</details>", ""]
+
+    with open(path, "a", encoding="utf-8") as f:
+        f.write("\n".join(out) + "\n")
 
 
 if __name__ == "__main__":
