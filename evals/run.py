@@ -64,8 +64,8 @@ CHECKS = {
     # Implicit-trigger check: did the skill fire and produce Flox guidance even
     # though the prompt never said "flox"?
     "invokes_flox": lambda a: bool(re.search(r"\bflox\b", a, re.I))
-    and ("flox init" in a or "[install]" in a or "manifest.toml" in a
-         or "flox search" in a or "flox show" in a or "flox install" in a),
+    and (re.search(r"flox (init|install|search|show|containerize|publish|build|activate|push|edit)", a)
+         or "[install]" in a or "manifest.toml" in a),
 }
 
 
