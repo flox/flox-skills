@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Flox skills eval harness.
 
-Runs each task in tasks.jsonl through `claude` headless with the Flox plugin
-loaded, in one of two arms:
+Runs each task in tasks.jsonl through `claude` headless, in one of three arms:
 
   --mode skills       skills only, MCP disabled (--strict-mcp-config, no --mcp-config)
   --mode skills+mcp   skills plus the flox-mcp server (--mcp-config)
+  --mode baseline     bare model: no plugin, MCP disabled (unassisted baseline)
 
 Each answer is scored with deterministic hard-checks plus an LLM judge.
 Results are written to results/<mode>.json. Pure stdlib (no node/uv needed).
@@ -58,6 +58,7 @@ CHECKS = {
     "uses_flox_publish": lambda a: "flox publish" in a,
     "uses_include_or_layer": lambda a: "[include]" in a or "flox activate -r" in a,
     "uses_search_show": lambda a: "flox search" in a or "flox show" in a,
+    "uses_remote_env": lambda a: "flox push" in a or "flox pull" in a or "flox activate -r" in a,
     # Implicit-trigger check: did the skill fire and produce Flox guidance even
     # though the prompt never said "flox"?
     "invokes_flox": lambda a: bool(re.search(r"\bflox\b", a, re.I))
@@ -75,6 +76,9 @@ def run_claude(prompt, mode, allow_tools, timeout=420, retries=3):
     elif mode == "skills+mcp":
         mcp_cfg = HERE / "flox-mcp.json"
         cmd += ["--plugin-dir", str(PLUGIN_DIR), "--mcp-config", str(mcp_cfg)]
+    elif mode == "baseline":
+        # Bare model: no plugin loaded, MCP disabled. Measures the unassisted baseline.
+        cmd += ["--strict-mcp-config"]
     elif mode == "judge":
         cmd += ["--strict-mcp-config"]
     last = "unknown"
@@ -147,7 +151,7 @@ def process_task(t, mode, allow):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["skills", "skills+mcp"], default="skills")
+    ap.add_argument("--mode", choices=["skills", "skills+mcp", "baseline"], default="skills")
     ap.add_argument("--tasks", default=str(HERE / "tasks.jsonl"))
     ap.add_argument("--only", help="run a single task id")
     ap.add_argument("--gate", action="store_true",
