@@ -1,0 +1,37 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    actioncable (7.1.0)
+    actionmailer (7.1.0)
+    actionpack (7.1.0)
+    actiontext (7.1.0)
+    actionview (7.1.0)
+    activejob (7.1.0)
+    activemodel (7.1.0)
+    activerecord (7.1.0)
+    activestorage (7.1.0)
+    activesupport (7.1.0)
+    bundler (~> 2.0)
+    debug (1.9.0)
+    puma (6.4.0)
+    rails (7.1.0)
+    rspec-rails (6.1.0)
+    sqlite3 (1.7.0)
+
+PLATFORMS
+  aarch64-linux
+  arm64-darwin-23
+  x86_64-linux
+
+DEPENDENCIES
+  debug
+  puma (~> 6.0)
+  rails (~> 7.1.0)
+  rspec-rails
+  sqlite3 (~> 1.4)
+
+RUBY VERSION
+   ruby 3.3.0p0
+
+BUNDLED WITH
+   2.5.0
