@@ -84,10 +84,34 @@ python3 run_floxify.py --skill-dir /path/to/claude-plugins
 
 # Custom output path:
 python3 run_floxify.py --out results/my-run.json
+
+# Diff against a specific committed baseline (default: floxify-baseline.json):
+python3 run_floxify.py --baseline floxify-baseline.json
 ```
 
 Results land in `results/` as JSON with a summary (hard-pass rate,
 avg judge score, activation counts). Pure stdlib — no pip install needed.
+
+## Regression detection
+
+After each run the harness diffs the results against the committed
+baseline (`results/floxify-baseline.json` by default, override with
+`--baseline`) and prints a **regression diff**:
+
+- **hard-check regressions** — a fixture that passed all hard-checks in
+  the baseline but fails now (the signal that matters; these are the
+  gate-binding checks)
+- **hard-check fixes** — the reverse
+- **new / removed fixtures** — fixtures added to or dropped from the suite
+- **judge-score delta** — advisory only; the judge is noisy run-to-run
+
+When a run writes to the same file it compares against (e.g.
+`--out results/floxify-baseline.json`), the baseline is snapshotted
+*before* the write, so re-recording the baseline still shows a
+meaningful diff against the prior committed version.
+
+To refresh the baseline after an intentional skill change, run the full
+suite with `--out results/floxify-baseline.json` and commit the result.
 
 ## Prerequisites
 
@@ -121,6 +145,30 @@ avg judge score, activation counts). Pure stdlib — no pip install needed.
 
 `may` and `stretch` tiers do not exist in this suite yet (all 6 fixtures
 are `should`). Add them when non-blocking exploratory fixtures are needed.
+
+## CI: scheduled/manual, NOT per-PR
+
+Unlike the text-answer `skills` eval (`evals/run.py`), which gates on
+**every** pull request, the `/floxify` eval does **not** run per-PR. It is
+an outcome eval: it runs the skill against fixture repos and then attempts
+`flox activate`, which needs a live `flox` binary, a reachable Flox
+catalog, and network access. That is too slow and too environment-dependent
+to block PRs on.
+
+Instead, the `floxify-evals` job in `.github/workflows/evals.yml` runs:
+
+- **weekly** (scheduled, Monday 06:00 UTC) as a regression watch, and
+- **on manual dispatch** (`workflow_dispatch` with `run_floxify=true`).
+
+The job checks out the skill from `flox/claude-plugins` (branch
+`add-floxify-skill`; retarget to `main` after that PR merges), installs
+flox, and runs `run_floxify.py --gate`. Its `--gate` still binds on
+should-tier hard-checks — it just runs on a schedule rather than per-PR,
+so a genuine regression surfaces within a week (or immediately on manual
+dispatch) rather than never.
+
+Per-PR floxify regression-catching is therefore **manual/scheduled by
+design** — the live-flox dependency makes a fast per-PR gate impractical.
 
 ## Fixtures
 
@@ -162,8 +210,10 @@ are **references for the LLM judge**, not byte-exact match targets.
 ## Baseline
 
 `results/floxify-baseline.json` — recorded against the `add-floxify-skill`
-PR branch. See the file for run conditions (skill-dir, model, activation
-availability).
+PR branch. The `summary.skill` field records a portable identity
+(`<repo>@<branch>`, e.g. `claude-plugins@add-floxify-skill`) rather than
+an absolute host path, so the committed baseline stays reproducible across
+machines. `summary.model` records the pinned judge/agent model.
 
 When activation was not available in the recording environment, it is
 recorded as `"skipped": true` with a note. Hard-checks and judge scores
