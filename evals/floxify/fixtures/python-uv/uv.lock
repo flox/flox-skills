@@ -1,0 +1,34 @@
+version = 1
+revision = 1
+requires-python = ">=3.12"
+
+[[package]]
+name = "my-python-app"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+  { name = "fastapi" },
+  { name = "httpx" },
+  { name = "pydantic" },
+  { name = "uvicorn", extra = ["standard"] },
+]
+
+[[package]]
+name = "fastapi"
+version = "0.109.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "uvicorn"
+version = "0.27.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "httpx"
+version = "0.26.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "pydantic"
+version = "2.5.0"
+source = { registry = "https://pypi.org/simple" }
