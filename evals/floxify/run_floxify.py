@@ -74,6 +74,35 @@ def _default_skill_dir():
 
 DEFAULT_SKILL_DIR = _default_skill_dir()
 
+# Default comparison target for regression detection: the committed baseline.
+BASELINE_FILE = "floxify-baseline.json"
+
+
+def _skill_identity(skill_dir):
+    """Portable identity for the skill checkout — never an absolute host path.
+
+    Records `<repo-basename>@<branch>` (or `@<short-sha>` on a detached HEAD)
+    so the committed baseline stays reproducible across machines. Falls back
+    to the bare basename when the directory is not a git checkout.
+    """
+    name = Path(skill_dir).name
+    try:
+        branch = subprocess.run(
+            ["git", "-C", str(skill_dir), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+        )
+        ref = branch.stdout.strip() if branch.returncode == 0 else ""
+        if ref == "HEAD":  # detached — use the short SHA instead
+            sha = subprocess.run(
+                ["git", "-C", str(skill_dir), "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True, timeout=10,
+            )
+            ref = sha.stdout.strip() if sha.returncode == 0 else ""
+        return f"{name}@{ref}" if ref else name
+    except Exception:
+        return name
+
+
 # Pinned model — match run.py for consistency across both harnesses.
 MODEL = "claude-opus-4-8"
 
@@ -118,6 +147,22 @@ def _is_valid_toml(text):
 
 # --- per-check lambdas --------------------------------------------------------
 
+# Runtime-pin patterns anchor on the full pkg-path *value* (opening and
+# closing quote) so an unrelated ecosystem tool cannot satisfy the check:
+# "go" must not be matched by gopls/golangci-lint, "python3" not by
+# python3Packages.*, "ruby" not by rubyPackages.*/ruby-build.  The optional
+# version suffix lets the skill resolve either the generic or a versioned
+# catalog name (go / go_1_21, python3 / python312, ruby / ruby_3_3).
+# The version suffix can carry multiple underscore-number segments
+# (go_1_21, ruby_3_3), so allow `(_[0-9]+)*` rather than a single segment.
+PIN_NODE_20 = re.compile(r'pkg-path = "nodejs_20"')
+PIN_GO = re.compile(r'pkg-path = "go(_[0-9]+)*"')
+PIN_PYTHON = re.compile(r'pkg-path = "python3[0-9]*"')
+PIN_RUST = re.compile(r'pkg-path = "cargo"')
+PIN_RUBY = re.compile(r'pkg-path = "ruby(_[0-9]+)*"')
+PIN_POSTGRES = re.compile(r'pkg-path = "postgresql(_[0-9]+)*"')
+
+
 CHECKS = {
     "manifest_created":
         lambda m: m is not None,
@@ -127,26 +172,32 @@ CHECKS = {
         lambda m: m is not None and "[install]" in m,
     "has_services_section":
         lambda m: m is not None and bool(re.search(r"^\[services\.", m or "", re.M)),
+    # Absence checks must still fail on a missing manifest — a None manifest
+    # trivially "contains no absolute paths", which would be a misleading pass.
     "no_abs_paths":
-        lambda m: not ABS_PATH_IN_MANIFEST.search(m or ""),
+        lambda m: m is not None and not ABS_PATH_IN_MANIFEST.search(m),
     "no_fake_install_url":
-        lambda m: not FAKE_INSTALL.search(m or ""),
+        lambda m: m is not None and not FAKE_INSTALL.search(m),
     # Runtime-version pins.
     # nodejs_20: the fixture explicitly pins Node 20 in .nvmrc — the skill
     # should honour the pin, not silently upgrade to the latest catalog version.
     "pins_node_20":
-        lambda m: m is not None and bool(re.search(r"nodejs_20\b", m)),
+        lambda m: m is not None and bool(PIN_NODE_20.search(m)),
     # For other ecosystems, any version of the runtime is acceptable — the
     # skill may resolve a versioned name (e.g. python312, go_1_21, ruby_3_3)
     # or the generic name; both signal the runtime is installed.
     "pins_python":
-        lambda m: m is not None and bool(re.search(r'pkg-path = "python', m)),
+        lambda m: m is not None and bool(PIN_PYTHON.search(m)),
     "pins_go":
-        lambda m: m is not None and bool(re.search(r'pkg-path = "go', m)),
+        lambda m: m is not None and bool(PIN_GO.search(m)),
     "pins_rust":
-        lambda m: m is not None and bool(re.search(r'pkg-path = "cargo"', m)),
+        lambda m: m is not None and bool(PIN_RUST.search(m)),
     "pins_ruby":
-        lambda m: m is not None and bool(re.search(r'pkg-path = "ruby', m)),
+        lambda m: m is not None and bool(PIN_RUBY.search(m)),
+    # node-postgres: the postgres dependency is the point of the fixture —
+    # hard-check it deterministically rather than leaving it to the judge.
+    "pins_postgres":
+        lambda m: m is not None and bool(PIN_POSTGRES.search(m)),
 }
 
 
@@ -367,6 +418,81 @@ def process_task(task, skill_dir, skip_activation=False):
 
 # --- summary helpers ----------------------------------------------------------
 
+def _read_baseline(name):
+    """Load a committed results/<name> baseline snapshot, or None if absent/bad."""
+    try:
+        return json.loads((HERE / "results" / name).read_text())
+    except Exception:
+        return None
+
+
+def _diff_vs_baseline(summary, results, baseline):
+    """Regression report vs the committed baseline.
+
+    Signal: per-fixture hard-check flips (a fixture that passed in the
+    baseline but fails now is a regression; the reverse is a fix).
+    Advisory: per-fixture judge-score delta and the overall average, which
+    are noisy run-to-run and never gate.
+    """
+    if not baseline:
+        return [
+            f"### Regression diff vs baseline (`{BASELINE_FILE}`)",
+            f"_No committed baseline found — record one with "
+            f"`--out results/{BASELINE_FILE}` to enable regression diffs._",
+            "",
+        ]
+
+    prev = {r["id"]: r for r in baseline.get("results", []) if "judge" in r}
+    cur = {r["id"]: r for r in results if "judge" in r}
+
+    regressed, fixed = [], []
+    for tid in cur.keys() & prev.keys():
+        if cur[tid]["hard_pass"] and not prev[tid]["hard_pass"]:
+            fixed.append(tid)
+        elif not cur[tid]["hard_pass"] and prev[tid]["hard_pass"]:
+            failed = ", ".join(
+                k for k, v in cur[tid]["hard_checks"].items() if not v
+            )
+            regressed.append(f"`{tid}` (failed: {failed})")
+
+    added = sorted(cur.keys() - prev.keys())
+    removed = sorted(prev.keys() - cur.keys())
+    prev_summary = baseline.get("summary", {})
+
+    lines = [
+        f"### Regression diff vs baseline "
+        f"(skill `{prev_summary.get('skill', '?')}`, "
+        f"model `{prev_summary.get('model', '?')}`)",
+    ]
+    lines.append(
+        f"- hard-check regressions ({len(regressed)}): " + ", ".join(regressed)
+        if regressed else "- no hard-check regressions"
+    )
+    if fixed:
+        lines.append(
+            f"- hard-check fixes ({len(fixed)}): "
+            + ", ".join(f"`{t}`" for t in fixed)
+        )
+    if added:
+        lines.append(
+            f"- new fixtures ({len(added)}): " + ", ".join(f"`{t}`" for t in added)
+        )
+    if removed:
+        lines.append(
+            f"- removed fixtures ({len(removed)}): "
+            + ", ".join(f"`{t}`" for t in removed)
+        )
+    if "avg_judge_score" in prev_summary:
+        delta = round(summary["avg_judge_score"] - prev_summary["avg_judge_score"], 2)
+        lines.append(
+            f"- judge avg {summary['avg_judge_score']} vs "
+            f"{prev_summary['avg_judge_score']} (delta {delta:+}) "
+            f"— advisory, judge is noisy run-to-run"
+        )
+    lines.append("")
+    return lines
+
+
 def _stats(results):
     scored = [r for r in results if "judge" in r]
     n = max(len(scored), 1)
@@ -426,6 +552,15 @@ def main():
         action="store_true",
         help="Skip flox activate verification (records as skipped, not failed)",
     )
+    ap.add_argument(
+        "--baseline",
+        default=BASELINE_FILE,
+        help=(
+            f"Committed results/<file> to diff against for regression "
+            f"detection (default: {BASELINE_FILE}). Reports per-fixture "
+            "hard-check flips + judge delta."
+        ),
+    )
     args = ap.parse_args()
 
     MODEL = args.model
@@ -469,7 +604,7 @@ def main():
 
     scored = [r for r in results if "judge" in r]
     summary = {
-        "skill_dir": str(skill_dir),
+        "skill": _skill_identity(skill_dir),
         "model": MODEL,
         "n_tasks": len(results),
         "n_errors": sum(1 for r in results if "error" in r),
@@ -480,6 +615,11 @@ def main():
             if any(r["tier"] == tier and "judge" in r for r in results)
         },
     }
+
+    # Snapshot the baseline BEFORE writing output — otherwise a run that
+    # writes to results/floxify-baseline.json would overwrite its own
+    # comparison target and the diff would always be empty.
+    baseline = _read_baseline(args.baseline)
 
     out_name = args.out or f"floxify-{int(time.time())}.json"
     if os.path.isabs(out_name):
@@ -497,13 +637,17 @@ def main():
     print(json.dumps(summary, indent=2))
     print(f"written: {out_path}")
 
+    diff_lines = _diff_vs_baseline(summary, results, baseline)
+    print("\n=== REGRESSION DIFF ===")
+    print("\n".join(diff_lines))
+
     # Gate: hard-checks on should-tier tasks bind when --gate is set.
     # Judge score and activation are advisory — reported, never block.
     binding = [r for r in scored if r["tier"] == "should"]
     bad = [r for r in binding if not r["hard_pass"]]
     errs = [r for r in results if "error" in r and r.get("tier") == "should"]
 
-    _write_step_summary(summary, results, binding, bad, errs, args.gate)
+    _write_step_summary(summary, results, binding, bad, errs, args.gate, diff_lines)
 
     if args.gate and (bad or errs):
         failed_ids = [r["id"] for r in bad]
@@ -526,7 +670,8 @@ def main():
         )
 
 
-def _write_step_summary(summary, results, binding, bad, errs, gate_enabled):
+def _write_step_summary(summary, results, binding, bad, errs, gate_enabled,
+                        diff_lines=None):
     """Write a markdown report to $GITHUB_STEP_SUMMARY if running in CI."""
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not path:
@@ -543,7 +688,7 @@ def _write_step_summary(summary, results, binding, bad, errs, gate_enabled):
         "",
         f"**Model:** `{summary.get('model', '?')}` · "
         f"**{summary['n_tasks']} fixtures** ({summary['n_errors']} errors) · "
-        f"**skill-dir:** `{summary.get('skill_dir', '?')}`",
+        f"**skill:** `{summary.get('skill', '?')}`",
         "",
         "### Hard-check results",
         "| fixture | tier | hard | judge | activate |",
@@ -575,6 +720,9 @@ def _write_step_summary(summary, results, binding, bad, errs, gate_enabled):
             lines.append(f"- `{r['id']}`: hard-check failed — {failed}")
         for r in errs:
             lines.append(f"- `{r['id']}`: run error — {r['error'][:80]}")
+
+    if diff_lines:
+        lines += ["", *diff_lines]
 
     with open(path, "a", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")

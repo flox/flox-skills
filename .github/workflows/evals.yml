@@ -13,12 +13,21 @@ name: skill-evals
 #
 # workflow_dispatch can pick an arm (skills / baseline / skills+mcp) and toggle
 # the gate — e.g. to measure the bare-model baseline without failing the run.
+#
+# The floxify-evals job is SEPARATE from the per-PR skills gate. The /floxify
+# eval (evals/floxify/run_floxify.py) is outcome-based: it runs the skill
+# against fixture repos and needs a live flox + catalog + network, so it is too
+# slow and too environment-dependent to gate every PR. It runs on a weekly
+# schedule and on manual dispatch (run_floxify=true), never on pull_request.
 on:
   pull_request:
+  schedule:
+    # Weekly regression watch for the /floxify skill — Monday 06:00 UTC.
+    - cron: "0 6 * * 1"
   workflow_dispatch:
     inputs:
       mode:
-        description: "Eval arm to run"
+        description: "Eval arm to run (skills job)"
         type: choice
         options:
           - skills
@@ -29,6 +38,10 @@ on:
         description: "Fail the run on should-tier hard-check failures"
         type: boolean
         default: true
+      run_floxify:
+        description: "Also run the /floxify outcome eval (needs live flox)"
+        type: boolean
+        default: false
 
 concurrency:
   group: skill-evals-${{ github.ref }}-${{ github.event.inputs.mode || 'skills' }}
@@ -36,6 +49,9 @@ concurrency:
 
 jobs:
   evals:
+    # Per-PR skills gate. Skipped on the weekly schedule (that run is for the
+    # floxify job); still runs on pull_request and workflow_dispatch.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -104,3 +120,55 @@ jobs:
         with:
           name: eval-results-${{ github.event.inputs.mode || 'skills' }}
           path: evals/results/
+
+  floxify-evals:
+    # Outcome-based /floxify eval — runs the skill against fixture repos and
+    # verifies the manifest it produces (plus `flox activate`). Needs a live
+    # flox + catalog, so it runs weekly and on explicit manual dispatch only,
+    # never per-PR. --gate binds on should-tier hard-checks; judge score and
+    # activation are advisory.
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_floxify == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # The skill under test lives in a separate repo. Check out the branch that
+      # holds it; retarget to main after the floxify PR merges.
+      - name: Check out claude-plugins (skill under test)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: flox/claude-plugins
+          ref: add-floxify-skill
+          path: claude-plugins
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install flox
+        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
+
+      - name: Run /floxify outcome eval gate
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.MANAGED_SKILLS_ANTHROPIC_API_KEY }}
+          FLOX_DISABLE_METRICS: "true"
+        run: |
+          python3 evals/floxify/run_floxify.py \
+            --gate \
+            --skill-dir "$GITHUB_WORKSPACE/claude-plugins" \
+            --out "results/floxify-ci.json"
+
+      - name: Upload floxify eval results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: floxify-eval-results
+          path: evals/floxify/results/
