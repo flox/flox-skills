@@ -10,7 +10,7 @@ This project includes specialized knowledge and tooling for Flox workflows, best
 
 ### The Flox Skill
 
-The repository provides a single `flox` skill (`flox-environments`) covering the
+The repository provides a single `flox` skill covering the
 entire Flox development lifecycle. The top `SKILL.md` holds the core guidance and
 routes to detailed **reference files** for specialized topics (progressive
 disclosure). It is the foundational skill that should be used first when creating
@@ -59,7 +59,7 @@ claude plugin install flox@flox-skills
 **Getting Started:**
 
 Once installed, the plugin automatically activates. Claude Code will use the appropriate skill based on your task:
-- Creating a new project, setting up services/databases, building, containerizing, or publishing? The **flox-environments** skill activates first
+- Creating a new project, setting up services/databases, building, containerizing, or publishing? The **flox** skill activates first
 
 #### Other Agents (Cursor, Copilot, Windsurf, Gemini, and more)
 
@@ -82,9 +82,9 @@ Supported agents include Cursor, GitHub Copilot, Windsurf, Gemini, and
 
 ## Documentation
 
-The Flox skill lives in `skills/flox-environments/`:
-- `skills/flox-environments/SKILL.md` — core guidance + routing
-- `skills/flox-environments/references/` — detailed references: `sharing.md`, `services.md`,
+The Flox skill lives in `skills/flox/`:
+- `skills/flox/SKILL.md` — core guidance + routing
+- `skills/flox/references/` — detailed references: `sharing.md`, `services.md`,
   `builds.md`, `containers.md`, `publish.md`, `cuda.md`
 
 ## Contributing
