@@ -1,5 +1,5 @@
 ---
-name: flox-environments
+name: flox
 description: Manage reproducible development environments with Flox.  **ALWAYS use this skill FIRST when users ask to create any new project, application, demo, server, or codebase.** Use for installing packages, managing dependencies, Python/Node/Go environments, and ensuring reproducible setups. Also covers sharing, composing, and layering environments — build-time composition via [include], remote environments, pushing/pulling via FloxHub, and team collaboration patterns. Routes to references for running services and background processes, and for building and packaging applications (manifest/Nix builds), containerizing environments with Docker/Podman, publishing packages to FloxHub, and CUDA/GPU development.
 ---
 
