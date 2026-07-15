@@ -11,8 +11,8 @@ name: skill-evals
 # (flox-plugin/**, evals/**, or this workflow); other PRs short-circuit to a
 # passing check so a path-filtered gate never wedges docs/config PRs.
 #
-# workflow_dispatch can pick an arm (skills / baseline / skills+mcp) and toggle
-# the gate — e.g. to measure the bare-model baseline without failing the run.
+# workflow_dispatch can pick an arm (skills / baseline) and toggle the gate —
+# e.g. to measure the bare-model baseline without failing the run.
 #
 # The floxify jobs (floxify-evals = Tier 1, floxify-tier2 = Tier 2) are
 # SEPARATE from the per-PR skills gate. The /floxify evals are outcome-based:
@@ -36,7 +36,6 @@ on:
         options:
           - skills
           - baseline
-          - skills+mcp
         default: skills
       gate:
         description: "Fail the run on should-tier hard-check failures"
@@ -116,13 +115,6 @@ jobs:
       - name: Install Claude Code CLI
         if: steps.changes.outputs.run == 'true'
         run: npm install -g @anthropic-ai/claude-code
-
-      # Only the skills+mcp arm needs flox — its MCP config runs
-      # `flox activate -r flox/flox-mcp-server -- flox-mcp`. Normal PR (skills)
-      # runs skip this so they stay fast and flox-free.
-      - name: Install flox (skills+mcp arm only)
-        if: ${{ steps.changes.outputs.run == 'true' && github.event.inputs.mode == 'skills+mcp' }}
-        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
 
       - name: Run skills eval gate
         if: steps.changes.outputs.run == 'true'
