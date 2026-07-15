@@ -231,5 +231,83 @@ class TestLoadRegistry(unittest.TestCase):
             Path(path).unlink()
 
 
+def _run(hard_pass=True, score=5, correct=True, error=None):
+    """Build a per-run result the shape `process_entry` returns."""
+    if error is not None:
+        return {"id": "x", "error": error}
+    return {
+        "id": "x",
+        "hard_pass": hard_pass,
+        "hard_checks": {"manifest_created": hard_pass},
+        "judge": {"score": score, "correct": correct},
+        "activation": {"ok": None, "skipped": True},
+    }
+
+
+class TestSummarize(unittest.TestCase):
+    """Guards the reps>1 reporting bug: an aggregate entry has no top-level
+    `judge` key, so an unflattened summary silently reported all-zeros even
+    when every run passed. `_summarize` must flatten first."""
+
+    def test_reps_1_plain_entries(self):
+        results = [_run(hard_pass=True, score=5)]
+        summary = tier2._summarize(results, "skill@branch")
+        self.assertEqual(summary["n_repos"], 1)
+        self.assertEqual(summary["n"], 1)
+        self.assertEqual(summary["hard_pass_rate"], 1.0)
+        self.assertEqual(summary["avg_judge_score"], 5.0)
+        self.assertEqual(summary["n_errors"], 0)
+
+    def test_reps_gt_1_aggregate_is_flattened_not_zeroed(self):
+        # Aggregate shape from process_task when reps>1: no top-level judge.
+        results = [
+            {
+                "id": "mastodon",
+                "reps": 2,
+                "runs": [_run(hard_pass=True, score=5), _run(hard_pass=True, score=4)],
+                "hard_pass_rate_across_reps": 1.0,
+            }
+        ]
+        summary = tier2._summarize(results, "skill@branch")
+        self.assertEqual(summary["n_repos"], 1)     # one repo
+        self.assertEqual(summary["n"], 2)           # two scored runs, NOT zero
+        self.assertEqual(summary["hard_pass_rate"], 1.0)
+        self.assertEqual(summary["avg_judge_score"], 4.5)
+        self.assertEqual(summary["n_errors"], 0)
+
+    def test_reps_gt_1_counts_error_runs(self):
+        results = [
+            {
+                "id": "x",
+                "reps": 2,
+                "runs": [_run(error="clone failed"), _run(hard_pass=True, score=3)],
+            }
+        ]
+        summary = tier2._summarize(results, "s")
+        self.assertEqual(summary["n_errors"], 1)
+        self.assertEqual(summary["n"], 1)  # one scored run among the two
+
+
+class TestRegistryPatternDriftGuard(unittest.TestCase):
+    """Runs the real mastodon registry patterns against a committed capture
+    of the skill's actual manifest output. Fails if a future registry-pattern
+    edit silently stops matching real output (regex drift)."""
+
+    def test_mastodon_patterns_match_real_manifest(self):
+        here = Path(tier2.__file__).resolve().parent
+        entry = next(
+            e for e in tier2._load_registry(here / "tier2.jsonl")
+            if e["id"] == "mastodon"
+        )
+        manifest = (here / "testdata" / "mastodon-manifest.toml").read_text()
+        checks = tier2._structural_checks(entry, manifest)
+        self.assertTrue(checks["pins_ruby"], checks)
+        self.assertTrue(checks["pins_nodejs_24"], checks)
+        self.assertTrue(checks["has_service_postgres"], checks)
+        self.assertTrue(checks["has_service_redis"], checks)
+        self.assertTrue(checks["no_abs_paths"], checks)
+        self.assertTrue(all(checks.values()), checks)
+
+
 if __name__ == "__main__":
     unittest.main()

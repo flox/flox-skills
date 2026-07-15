@@ -273,6 +273,30 @@ machinery from `run_floxify.py` (`_run_claude_agent`, `_is_valid_toml`,
 5. **Report-only — this tier never gates the build**, in any mode.
    There's no `--gate` flag.
 
+### What a structural pass does and does not tell you
+
+A structural pass is a real but narrow signal. It tells you the produced
+manifest **pins the right runtimes and wires the right services** — the
+`pkg-path` values match the expected runtime patterns and a `[services.*]`
+block exists for each expected service. That's it.
+
+It does **not** tell you the manifest actually builds or activates, or
+that the commands inside the `[hook]` / `[services.*]` blocks are valid.
+A manifest can pin `ruby_4_0`, wire `[services.postgres]`, pass all
+structural checks and score 5/5 from the judge, and still contain a hook
+command that fails the moment you run it — because with activation off,
+nothing runs it. **Use `--activate` to check that.**
+
+The mastodon run is the worked example: its hook pins
+`gem install bundler -v 4.0.13`, but bundler is a 2.x project — there is
+no bundler 4.0.13, so that command would fail on activation. The 7/7
+structural + 5/5 judge result never caught it, and that is exactly where
+Ruby's real onboarding pain lives — in the hook commands, not the package
+pins. This is deliberately **not** a structural hard-check: validating
+that a hook command resolves is activation's job, not structural
+conformance's. Reading a green structural row as "the environment works"
+is the specific over-read this note exists to prevent.
+
 ### Registry (`tier2.jsonl`)
 
 One JSON object per line:
@@ -313,14 +337,20 @@ assumed from the ecosystem name.
 All 7 structural hard-checks passed and the judge scored 5/5: the
 skill correctly pinned `ruby_4_0` (from `.ruby-version` 4.0.6) and
 `nodejs_24` (from `.nvmrc` 24.18), and wired both `[services.postgres]`
-and `[services.redis]`. The judge's only notes were minor — a
-questionable pinned `bundler` version in the install hook, and light
-redundancy between the hook's one-time `createdb` step and the
-`[services.postgres]` block. This is a positive result for Ruby,
-contrary to the assumption that it's a weak ecosystem going in; it
-should not be read as a clean bill of health for Ruby onboarding in
-general — one repo at one commit is one data point, and PostHog/
-Sentry/Supabase remain unrun.
+and `[services.redis]`.
+
+But read that result through the "does and does not tell you" note
+above. The hook pins `gem install bundler -v 4.0.13` — a **nonexistent
+bundler version** (bundler is 2.x). The 7/7 structural + 5/5 judge run
+did not catch it, because activation was off and nothing ever ran the
+hook. A structural pass confirms the runtimes and services are right; it
+says nothing about whether the hook commands work. So this is a genuine
+positive for Ruby's *package/service resolution* — contrary to the
+assumption that Ruby is a weak ecosystem going in — but it is emphatically
+not a clean bill of health for Ruby onboarding. The real pain is in the
+hook (the invalid bundler pin), which only an `--activate` run would
+surface, and this is one repo at one commit; PostHog/Sentry/Supabase
+remain unrun.
 
 ### Run
 
