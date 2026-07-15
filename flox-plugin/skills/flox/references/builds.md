@@ -314,6 +314,13 @@ Teams install these packages and reference them via `$FLOX_ENV/etc/nginx.conf` o
 
 You can write a Nix expression instead of (or in addition to) defining a manifest build.
 
+This is also the answer to **"the catalog's version is too old"** or **"the package
+isn't in Flox yet."** The Flox Catalog tracks nixpkgs with a short lag, so rather
+than waiting you can override the existing recipe to a newer release (see "Update
+Version" below), or package a missing tool from scratch — then `flox publish` it so
+the result installs in any environment. Worked end-to-end walkthrough:
+[Using a newer version of a package](https://flox.dev/docs/tutorials/overriding-packages/).
+
 Put `*.nix` build files in `.flox/pkgs/` for Nix expression builds. Git add all files before building.
 
 ### File Naming
@@ -343,7 +350,10 @@ rustPlatform.buildRustPackage {
 }
 ```
 
-**Update Version**
+**Update Version** — get a newer release than the catalog carries. Override the
+existing recipe's `version`/`src`; leave `hash = ""` first so `flox build` prints
+the correct hash to paste back. Then `flox publish <name>` (requires a git remote
+with all `.flox/pkgs/` files committed and pushed) to make it installable anywhere.
 ```nix
 { hello, fetchurl }:
 hello.overrideAttrs (finalAttrs: _: {
