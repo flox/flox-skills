@@ -49,8 +49,10 @@ authoritative; use them inline without opening a reference file.
 - Hermetic build: `sandbox = "pure"` in `[build.<name>]` — the string `"pure"`
   (or `"off"`), NOT `sandbox = true`.
 - Trim the runtime closure with `runtime-packages = [ … ]` in `[build.<name>]`
-  (the install ids to KEEP at runtime). The key is `runtime-packages`, not
-  `packages`.
+  (a KEEP-list of install ids). ⚠ There is **no** `packages` key in a build
+  section — don't fall back to the Nix `packages`/`buildInputs` habit; the only
+  key that excludes build-only tools from the runtime closure is
+  `runtime-packages`.
 - Manifest build = `[build.<name>]` `command` in `manifest.toml`, run with
   `flox build`. Nix-expression build = a `.nix` file under `.flox/pkgs/`, run
   with `flox build <name>`.
