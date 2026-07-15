@@ -1,0 +1,221 @@
+{
+  "summary": {
+    "model": "claude-sonnet-4-6",
+    "reps": 5,
+    "mean_baseline_hard_pass_rate": 0.633,
+    "mean_skills_hard_pass_rate": 0.567,
+    "total": 6,
+    "errors": 0,
+    "discriminators": 1,
+    "skill_gaps": 2,
+    "no_signals": 3,
+    "mean_judge_gap": -0.37,
+    "discriminator_ids": [
+      "trap-cpp-exact-pkgpaths"
+    ],
+    "skill_gap_ids": [
+      "stretch-build-runtime-packages",
+      "trap-cpp-libstdcxx-unwrapped"
+    ],
+    "no_signal_ids": [
+      "stretch-build-sandbox-pure",
+      "trap-vars-no-interpolation",
+      "trap-containerize-nopush-fixed"
+    ],
+    "error_ids": []
+  },
+  "results": [
+    {
+      "id": "stretch-build-sandbox-pure",
+      "area": "builds",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "hard_pass_rate": 1.0,
+        "hard_pass_count": 5,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 3.8,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## Hermetic Flox Builds with `sandbox = \"pure\"`\n\n`sandbox = \"pure\"` is the flag that enforces both constraints:\n\n| What it locks down | Effect |\n|---|---|\n| Filesystem | Only git-tracked files are visible (copied to a temp dir); host FS is not accessible |\n| Network | Blocked on Linux (allowed on macOS by platform limitation) |\n\n### The pattern: two-stage build\n\nNetwork access is blocked inside the pure sandbox, so any dependency fetching must happen in a preceding `\"off\"` stage. The pure stage then receives those artifacts via the `${deps}` reference \u2014 which expands to the `$out` of that prior build.\n\n```toml\n[build.deps]\n# Fetch-only stage: network allowed, host FS accessible.\n# Result is stored in the Nix store and referenced as ${deps} below.\nsandbox = \"off\"\ncommand = '''\n  go mod vendor\n  mkdir -p $out/vendor\n  cp -r vendor/* $out/vendor/\n'''\n\n[build.app]\n# Hermetic stage: no network, no host FS bleed-through.\n# Only git-tracked source files are visible here.\nsandbox = \"pure\"\nversion = \"1.0.0\"\ndescription = \"My hermetically built Go binary\"\nruntime-packages = []          # trim build-only tools from the runtime closure\ncommand = '''\n  # Inject pre-fetched deps from the \"off\" s"
+      },
+      "skills": {
+        "hard_pass": true,
+        "hard_pass_rate": 1.0,
+        "hard_pass_count": 5,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 4.6,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "I have everything I need from real Flox manifests. Here's the complete answer:\n\n---\n\n## Hermetic Flox Builds with `sandbox = \"pure\"`\n\nThe key field is `sandbox` on a `[build.<name>]` table. Setting it to `\"pure\"` blocks all network access and prevents any host filesystem paths from leaking into the build \u2014 only packages from your `[install]` section (i.e., `$FLOX_ENV`) are visible.\n\nThe idiomatic pattern is a two-stage build: one network-enabled prefetch stage, then a fully sandboxed compile stage that references the prefetched dependencies via `${stage-name}`.\n\n```toml\nversion = 1\n\n[install]\ngo.pkg-path = \"go\"\n\n# \u2500\u2500 Stage 1: fetch dependencies (network allowed) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n[build.myapp-deps]\ncommand = \"\"\"\n  export GOMODCACHE=$out\n  go mod download -modcacherw\n\"\"\"\nsandbox = \"off\"\n\n# \u2500\u2500 Stage 2: hermetic compile (no network, no host filesystem) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n[build.myapp]\ndescription = \"My application\"\nversion.command = \"git describe --long 2>/dev/null || echo '0.0.0-dev'\"\ncommand = \"\"\"\n  export GOMODCACHE=${myapp-deps}\n  export GOPROXY=off\n  export GOSUMDB=off\n\n  VERSION=$(git describe --long 2>/dev/null || echo \"0.0.0-dev\")\n\n  CGO_ENABLED=0 go build \\\n    -tri"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0.8,
+      "classification": "no-signal"
+    },
+    {
+      "id": "stretch-build-runtime-packages",
+      "area": "builds",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "hard_pass_rate": 1.0,
+        "hard_pass_count": 5,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 3.6,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "Here is the complete solution.\n\n---\n\n## The Problem\n\nBy default, every package in the `toplevel` install group is pulled into your build's **runtime closure** \u2014 even if it was only needed at compile time. For Go, that means the entire toolchain ships with your binary.\n\n## The Fix: `runtime-packages` in `[build.*]`\n\n```toml\nversion = 1\n\n[install]\ngo.pkg-path = \"go\"\n\n# Stage 1: vendor dependencies (needs network \u2192 sandbox off)\n[build.vendor]\ncommand = '''\n  go mod vendor\n  mkdir -p $out/vendor\n  cp -r vendor/* $out/vendor/\n'''\nsandbox = \"off\"\n\n# Stage 2: reproducible compile (pure sandbox, no network)\n[build.app]\ncommand = '''\n  cp -r ${vendor}/vendor ./vendor\n  CGO_ENABLED=0 go build -mod=vendor -o $out/bin/myapp ./...\n'''\nsandbox      = \"pure\"\nversion      = \"1.0.0\"\nruntime-packages = []   # \u2190 empty: nothing from [install] goes into the runtime closure\n```\n\n## Exact Commands\n\n```bash\n# Build both stages (vendor first, then app \u2014 order is automatic via ${vendor} ref)\nflox build\n\n# Inspect the resulting runtime closure \u2014 should be tiny (just the binary + libc stubs)\nnix-store -q --references result-app\n\n# Run the binary directly from the result symlink\n./result-app/bin/myapp\n```\n\n## "
+      },
+      "skills": {
+        "hard_pass": false,
+        "hard_pass_rate": 0.2,
+        "hard_pass_count": 1,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 2.2,
+        "judge_correct": false,
+        "judge_issues": [],
+        "answer_excerpt": "## The Problem\n\nWhen Nix/Flox scans a built binary for its runtime closure, it finds any store path strings embedded in the binary. `go build` without `-trimpath` embeds the Go toolchain's store path (e.g. `/nix/store/\u2026-go-1.22/\u2026`) in the binary for debugging metadata, which drags the entire toolchain into the closure.\n\n## The Solution\n\nTwo flags together eliminate the toolchain from the closure:\n\n- **`-trimpath`** \u2014 strips all absolute file-system paths (including the Go store path) from the compiled binary\n- **`CGO_ENABLED=0`** \u2014 produces a fully static binary so no C runtime (glibc etc.) is referenced either\n\n`runtime-packages` in the build stanza lets you declare explicit runtime deps; leaving it empty (or omitting it) means the closure contains only what Nix actually finds referenced in the output.\n\n## Manifest\n\n```toml\nversion = 1\n\n[install]\ngo.pkg-path = \"go\"           # build-time only; not declared as a runtime dep\n\n[build.myapp]\ncommand = \"\"\"\n  CGO_ENABLED=0 go build \\\n    -trimpath \\\n    -ldflags=\"-s -w\" \\\n    -o \"$out/bin/myapp\" \\\n    ./...\n\"\"\"\nruntime-packages = []        # explicit empty list; toolchain stays out\n```\n\n`-ldflags=\"-s -w\"` strips the symbol table and DWA"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": -1.4,
+      "classification": "skill-gap"
+    },
+    {
+      "id": "trap-cpp-libstdcxx-unwrapped",
+      "area": "builds",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": false,
+        "hard_pass_rate": 0.4,
+        "hard_pass_count": 2,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 2.8,
+        "judge_correct": false,
+        "judge_issues": [],
+        "answer_excerpt": "## The Fix: C++ Standard Library in a Flox Environment\n\n### Why it fails\n\nIn a Nix/Flox environment, `gcc` is a **wrapper script** that injects the correct `-I` (include) and `-L` (library) flags pointing into the Nix store. Two things break C++ resolution:\n\n1. **Wrong driver**: The `gcc` driver does not automatically link libstdc++. You must use `g++`, which does. The wrapper for `g++` adds the libstdc++ include path; the wrapper for `gcc` does not.\n2. **Missing linker**: `binutils` (which provides `ld`) is a separate package in nixpkgs and is needed to link libstdc++ symbols.\n3. **Unactivated environment**: The wrapper flags only apply inside `flox activate`. Outside it, the shell may fall back to a system compiler with wrong or missing paths.\n\n---\n\n### Complete manifest\n\n```toml\nversion = 1\n\n[install]\ngcc.pkg-path     = \"gcc\"\nbinutils.pkg-path = \"binutils\"\ngnumake.pkg-path  = \"gnumake\"    # only if you use make; swap for cmake if needed\n\n[vars]\nCC  = \"gcc\"\nCXX = \"g++\"\n```\n\nIf you use CMake, add `cmake.pkg-path = \"cmake\"` to `[install]` \u2014 it will pick up `CXX=g++` from `[vars]` automatically.\n\n---\n\n### Flox commands\n\n```bash\n# Edit the manifest directly (paste the TOML above):\nfl"
+      },
+      "skills": {
+        "hard_pass": false,
+        "hard_pass_rate": 0.4,
+        "hard_pass_count": 2,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 1.4,
+        "judge_correct": false,
+        "judge_issues": [],
+        "answer_excerpt": "## The Problem\n\nIn a Flox environment, installing `gcc` makes the compiler binary available but doesn't automatically wire up the stdenv setup hooks that a `nix develop` shell would run. The compiler wrapper (which would normally populate `NIX_CFLAGS_COMPILE`, `CPLUS_INCLUDE_PATH`, etc.) never fires, so `<vector>` and libstdc++ are invisible even though they ship inside the gcc package.\n\n---\n\n## The Fix: Full `manifest.toml`\n\n```toml\nversion = 1\n\n[install]\ngcc.pkg-path = \"gcc\"\ngnumake.pkg-path = \"gnumake\"   # remove if you don't use make\n\n[vars]\nCC  = \"gcc\"\nCXX = \"g++\"\n\n[hook]\non-activate = '''\n  # Derive GCC's own prefix from the wrapper on PATH.\n  _gcc_prefix=\"$(dirname \"$(dirname \"$(command -v gcc)\")\")\"\n  _gcc_ver=\"$(gcc -dumpversion)\"\n  _gcc_arch=\"$(gcc -dumpmachine)\"\n\n  # \u2500\u2500 C++ standard-library headers \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n  # gcc ships them under <prefix>/include/c++/<ver>/ plus an arch-specific sub-dir.\n  _cxx_base=\"${_gcc_prefix}/include/c++/${_gcc_ver}\"\n  if [ -d \"${_cxx_base}\" ]; then\n    export CPLUS_INCLUDE_PATH=\"${_cxx_base}:${_cxx_base}/${_gcc_arch}${CPLUS_INCLUDE_PATH:+:${CPLUS_INCLUDE_PATH}}\"\n  fi\n\n  # \u2500\u2500 libstdc++ for linking \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": -1.4,
+      "classification": "skill-gap"
+    },
+    {
+      "id": "trap-cpp-exact-pkgpaths",
+      "area": "builds",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": false,
+        "hard_pass_rate": 0.4,
+        "hard_pass_count": 2,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 3.2,
+        "judge_correct": false,
+        "judge_issues": [],
+        "answer_excerpt": "The skill doc names these explicitly. Here's the complete answer:\n\n## Manifest entries\n\n```toml\n[install]\ncatch2.pkg-path = \"catch2_3\"\ngbenchmark.pkg-path = \"gbenchmark\"\n```\n\n## Flox commands\n\n```bash\nflox install catch2_3 gbenchmark\n```\n\nOr, to pin them to a specific version (e.g., Catch2 3.7.x):\n\n```bash\nflox install catch2_3 gbenchmark\n```\n\nThen edit the manifest manually for version pinning:\n\n```toml\n[install]\ncatch2.pkg-path = \"catch2_3\"\ncatch2.version = \"^3.7\"\ngbenchmark.pkg-path = \"gbenchmark\"\ngbenchmark.version = \"^1.9\"\n```\n\n## Key naming notes\n\n- **`catch2_3`** (not `catch2`) \u2014 the `_3` suffix distinguishes the Catch2 v3 package from older v2 builds in the catalog.\n- **`gbenchmark`** (not `benchmark` or `google-benchmark`) \u2014 that's the Nix/Flox catalog name for the Google Benchmark library.\n\nIf you're also setting up a full C++ dev environment, you'll want `gcc-unwrapped` in a `libraries` pkg-group to expose `libstdc++` headers \u2014 the skill doc flags this as a common pitfall."
+      },
+      "skills": {
+        "hard_pass": true,
+        "hard_pass_rate": 0.8,
+        "hard_pass_count": 4,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 4.4,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "The skill's C/C++ section calls out the exact names. Here's the complete answer:\n\n---\n\n## Flox manifest entries\n\n```toml\n[install]\ngbenchmark.pkg-path = \"gbenchmark\"\ncatch2.pkg-path = \"catch2_3\"\n```\n\n> Note: the Google Benchmark pkg-path is `gbenchmark`, **not** `benchmark` \u2014 a common mistake. Catch2 v3 is explicitly disambiguated from v2 via the `_3` suffix.\n\n---\n\n## CLI equivalent\n\n```bash\nflox install gbenchmark catch2_3\n```\n\n---\n\n## To verify / explore versions\n\n```bash\nflox search gbenchmark\nflox show gbenchmark          # lists available versions\n\nflox search catch2_3\nflox show catch2_3\n```\n\n---\n\n**Brief explanation:**\n- `gbenchmark` \u2014 the nixpkgs attribute for [google/benchmark](https://github.com/google/benchmark); the simpler name `benchmark` resolves to a different (unrelated) package.\n- `catch2_3` \u2014 nixpkgs ships Catch2 v2 and v3 as separate attributes (`catch2` and `catch2_3`) so you can pin the major version explicitly. Since Catch2 v3 introduced breaking API changes (e.g., `REQUIRE` macros, CMake target names), using `catch2_3` ensures you get the v3 API regardless of what the default `catch2` resolves to in the future."
+      },
+      "discriminates_hard": true,
+      "discriminates_judge": true,
+      "judge_gap": 1.2,
+      "classification": "discriminator"
+    },
+    {
+      "id": "trap-vars-no-interpolation",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": false,
+        "hard_pass_rate": 0.0,
+        "hard_pass_count": 0,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 4.8,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "`[vars]` is **not** right for this \u2014 it sets literal string values and does not interpolate `$PATH`. You need the `[profile]` section, which is sourced as shell code in the activated shell.\n\n---\n\n### Why not `[vars]`\n\n```toml\n[vars]\n# This sets PATH to the literal string \"./node_modules/.bin:$PATH\" \u2014 $PATH is not expanded.\nPATH = \"./node_modules/.bin:$PATH\"   # \u2190 wrong\n```\n\nFlox treats `[vars]` values as opaque strings, not shell expressions.\n\n---\n\n### Correct approach: `[profile]`\n\n```toml\nversion = 1\n\n[install]\n# ... your packages ...\n\n[profile]\ncommon = \"\"\"\n  export PATH=\"$FLOX_ENV_PROJECT/node_modules/.bin:$PATH\"\n\"\"\"\n```\n\n`$FLOX_ENV_PROJECT` is a Flox-provided variable that resolves to the root of your project (the directory containing `.flox/`), so the path is stable regardless of what directory you `cd` into inside the environment. If you prefer a plain relative path, use `./node_modules/.bin`, but that only works correctly when you're at the project root.\n\n`common` is sourced for bash, zsh, and fish. You can instead write per-shell keys (`bash`, `zsh`, `fish`) if you need shell-specific syntax, but `export VAR=value` is portable enough to go in `common`.\n\n---\n\n### Commands\n\n"
+      },
+      "skills": {
+        "hard_pass": false,
+        "hard_pass_rate": 0.0,
+        "hard_pass_count": 0,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 5.0,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "`[vars]` is the wrong section for this \u2014 Flox treats values there as **literal strings** and does not shell-expand them, so `PATH = \"./node_modules/.bin:$PATH\"` would set PATH to the literal text `./node_modules/.bin:$PATH`, not what you want.\n\nThe right place is `[hook] on-activate`, which is a bash script that runs in the activation context and **does** expand shell variables. Exports from it flow into the activated shell.\n\n**manifest.toml**\n\n```toml\nversion = 1\n\n[hook]\non-activate = '''\n  export PATH=\"$FLOX_ENV_PROJECT/node_modules/.bin:$PATH\"\n'''\n```\n\n`$FLOX_ENV_PROJECT` is a Flox-provided variable pointing to the project root (the directory containing `.flox/`), which is more reliable than `./` since it doesn't depend on your cwd when you activate.\n\n**Commands**\n\n```sh\n# Open the manifest in $EDITOR\nflox edit\n\n# Re-activate to pick up the change (in an already-active env)\nflox activate\n\n# Quick sanity check \u2014 should show the prepended path\nflox activate -- bash -c 'echo $PATH | tr : \"\\n\" | head -5'\n```\n\n**Why not `[profile]`?** `[profile]` is also sourced in the shell and works, but it's intended for interactive-shell customizations (prompt tweaks, aliases). PATH setup that sh"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0.2,
+      "classification": "no-signal"
+    },
+    {
+      "id": "trap-containerize-nopush-fixed",
+      "area": "containers",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "hard_pass_rate": 1.0,
+        "hard_pass_count": 5,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 5.0,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## Flox Environment \u2192 Local Docker Image\n\n### Manifest (`manifest.toml`)\n\nNo Dockerfile needed. Optionally add a `[containerize.config]` section to your existing manifest:\n\n```toml\n[install]\n# ... your packages\n\n[containerize.config]\ncmd = [\"your-entrypoint-command\"]   # optional: default is an interactive shell\nexposed-ports = [\"8080/tcp\"]         # optional\nworking-dir = \"/app\"                 # optional\nuser = \"1000:1000\"                   # optional, run as non-root\n```\n\nIf you don't need any container-specific config, no manifest changes are required at all.\n\n### The Command\n\n```bash\nflox containerize --runtime docker\n```\n\nThat's it. Flox builds an OCI image from the environment and loads it directly into the local Docker daemon \u2014 no Dockerfile, no registry push. The image name defaults to the environment name.\n\n**Alternative (pipe form, same result):**\n\n```bash\nflox containerize -f - | docker load\n```\n\n### How it works\n\n- `--runtime docker` auto-detects Docker and streams the image straight into it (equivalent to piping to `docker load`)\n- The resulting container activates your Flox environment on startup, so all packages, env vars, and hooks are available\n- `docker run -it <"
+      },
+      "skills": {
+        "hard_pass": true,
+        "hard_pass_rate": 1.0,
+        "hard_pass_count": 5,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 3.4,
+        "judge_correct": false,
+        "judge_issues": [],
+        "answer_excerpt": "Here is the complete solution:\n\n---\n\n## Manifest\n\nYour environment must declare a Linux target system. Add or verify this in `.flox/env/manifest.toml`:\n\n```toml\nversion = 1\n\n[install]\n# your packages here, e.g.:\n# ripgrep.pkg-path = \"ripgrep\"\n# python311.pkg-path = \"python311\"\n\n[options]\nsystems = [\"x86_64-linux\"]   # aarch64-linux for ARM hosts\n```\n\n---\n\n## Command\n\n```bash\nflox containerize --output - | docker load\n```\n\n---\n\n## Explanation\n\n- `flox containerize` builds a reproducible OCI image from the environment \u2014 no Dockerfile needed. It uses Nix under the hood to produce a layered image with exactly the packages declared in `[install]`.\n- `--output -` streams the image tarball to stdout instead of writing a file.\n- `docker load` reads the tarball from stdin and registers the image in the local Docker daemon. No registry involved.\n\nTo tag the image explicitly:\n\n```bash\nflox containerize --tag myapp:latest --output - | docker load\n```\n\nThe resulting image activates the Flox environment as its entrypoint, so `docker run myapp:latest <cmd>` runs `<cmd>` inside the environment."
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": -1.6,
+      "classification": "no-signal"
+    }
+  ]
+}
