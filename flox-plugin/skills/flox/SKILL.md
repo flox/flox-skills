@@ -80,6 +80,21 @@ authoritative; use them inline without opening a reference file.
 **Editing non-interactively**
 - `flox list -c > manifest.toml`, edit the file, then `flox edit -f manifest.toml`.
 
+**Recent CLI (v1.9–v1.13) — features a pre-2026 model may not know**
+- **`flox run -p <pkg> -- <cmd>`** — run a command straight from a catalog
+  package, no install and no `.flox/` needed (npx-like). `-p` is required; always
+  use `--` to separate flox flags from the command. Version constraints (`@`) and
+  output selectors (`^`) are not supported here. Example:
+  `flox run -p curl -- curl https://example.com`.
+- **Auto-activation** — Flox can activate an environment automatically when you
+  enter its directory (direnv-like, via the shell hook). Control it per-directory
+  with `flox activate allow` / `flox activate deny`; the default behavior is the
+  `auto_activate` config option (`flox config`), which defaults to prompting.
+- **`flox activate -m dev|run`** — choose dev vs run activation mode, overriding
+  `options.activate.mode` in the manifest.
+- **`--floxhub-url=<URL>`** — global flag targeting a specific (e.g. enterprise)
+  FloxHub instance for the invocation.
+
 ## Specialized Topics
 
 - **Sharing, composition & layering** — composing environments via `[include]`,
@@ -164,6 +179,8 @@ flox install <pkg>              # Add package
 flox list [-e | -c | -n | -a]   # List installed packages
 flox activate                   # Enter env
 flox activate -- <cmd>          # Run without subshell
+flox activate -r <owner>/<name> # Activate a FloxHub env (one-off, no clone)
+flox run -p <pkg> -- <cmd>      # Run a command from a catalog package, no install
 flox edit                       # Edit manifest interactively
 ```
 
