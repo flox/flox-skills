@@ -12,6 +12,30 @@ correct; these bind the gate), **may** (nice if it triggers), and **stretch**
 prompts deliberately never mention "flox", to test that the skill fires when a
 user just wants "a new project" / "add nodejs 18.4" / "a PyTorch GPU setup".
 
+## Policy: new skill features ship with an eval
+
+**Every PR that adds a new feature or a new piece of guidance to the skill MUST
+add an eval task that verifies the guidance is actually followed.** Reviewers
+should not approve a skill-feature PR without one.
+
+Why: the investigation behind AI-435 showed that modern Claude already knows
+Flox, so most guidance shows no measurable lift — *except* for features the
+model can't already know (post-training-cutoff CLI, Flox-specific idioms). A
+new feature is therefore the one place an eval genuinely discriminates, and the
+task doubles as a conformance check: does the model, with the skill, produce the
+idiom the skill teaches?
+
+How:
+- Write a prompt a user would ask that should invoke the new guidance (e.g.
+  "the catalog only has X 2.12.1 but I need 2.12.2 — how, through Flox?").
+- Add a deterministic `must_match` for the Flox-specific idiom the skill teaches
+  (e.g. `\.flox/pkgs` + `overrideAttrs`), plus a judge rubric. Prefer asserting
+  the *correct* construction (positive `must_match`) over detecting the wrong one
+  (`must_not_match`) — good answers often show the anti-pattern as a labeled
+  counter-example, which false-fires a negative check.
+- Screen it (`screen.py --reps 5`) baseline-vs-skills to confirm the skill arm
+  follows the guidance; promote it into `tasks.jsonl` once it holds.
+
 ## What it does
 
 For every task in `tasks.jsonl`, runs `claude` headless with the Flox plugin
