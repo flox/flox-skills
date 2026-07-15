@@ -24,6 +24,13 @@ authoritative; use them inline without opening a reference file.
 
 **Manifest essentials**
 - Every manifest starts with `version = 1`.
+- **Never invent a package name or version.** Verify names with `flox search
+  <term>` and versions with `flox show <pkg>`; pin only to a version `flox show`
+  actually lists — pick the closest available if the exact one is absent. The
+  same rule covers tool versions you put in hooks (`gem install bundler -v …`,
+  `npm i -g pkg@…`, `pip install pkg==…`): take the version from the project's
+  lockfile (`Gemfile.lock` → BUNDLED WITH, `package-lock.json`, `uv.lock`),
+  never a guessed number.
 - `[vars]` holds STATIC values only — no shell/`$VAR` interpolation. Anything
   dynamic (e.g. prepending to `PATH`) goes in `[hook]` or `[profile]`.
 - `[options] systems = ["x86_64-linux", "aarch64-linux", …]` constrains the
@@ -190,6 +197,12 @@ many versions:
 - **Search first, and clarify if there are multiple matches.** Names don't
   always match upstream expectations (e.g. `python3` vs `python39`), and search
   is case-sensitive.
+- **Never guess — verify before you pin.** Pin only to a name and version that
+  `flox show <pkg>` actually lists; if the exact version isn't there, pick the
+  closest available (or override — see below). Do not invent a version string.
+  This applies equally to versions placed in hooks (e.g. `gem install bundler
+  -v <X>`): read them from the project's lockfile, never a guess. Hallucinated
+  version pins pass a manifest-shape check but fail the moment the env activates.
 - **`flox search <term>` returns only the *latest* version of each name.** Use
   `flox show <pkg>` to see all available versions *and* per-architecture
   availability (e.g. `vim-darwin@9.1.0412 (aarch64-darwin, x86_64-darwin only)`).
