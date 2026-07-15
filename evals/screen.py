@@ -50,49 +50,76 @@ def hard_check(answer: str, must_match: list, must_not_match: list) -> bool:
     return True
 
 
-def _score_arm(candidate: dict, mode: str, allow_tools: list) -> dict:
-    """Run one arm for a candidate and return scored result dict.
+def _score_arm(candidate: dict, mode: str, allow_tools: list, reps: int = 1) -> dict:
+    """Run one arm for a candidate `reps` times and return aggregated scores.
+
+    Aggregation is what makes screening trustworthy: single runs have a high
+    cell-level flip rate (observed ~50% on the baseline arm), so an individual
+    P/F verdict is dominated by sampling noise. With reps>1 we report
+    `hard_pass_rate` (fraction of reps whose deterministic check passed) and a
+    mean judge score; `hard_pass`/`judge_correct` become the majority verdicts
+    used for classification.
 
     For trigger_test candidates the neutral suffix is used (same path as
     run.py's trigger tasks) so the skill fires on its own without any
     Flox-directed bias in the prompt.
     """
     suffix = NEUTRAL_SUFFIX if candidate.get("trigger_test") else ANSWER_SUFFIX
-    answer, err = run_claude(candidate["prompt"] + suffix, mode, allow_tools)
-    if err:
+    prompt = candidate["prompt"] + suffix
+
+    hard_hits = 0
+    judge_scores = []
+    judge_correct_hits = 0
+    first_excerpt = ""
+    errors = []
+    for _ in range(reps):
+        answer, err = run_claude(prompt, mode, allow_tools)
+        if err:
+            errors.append(err)
+            continue
+        if hard_check(answer, candidate.get("must_match", []),
+                      candidate.get("must_not_match", [])):
+            hard_hits += 1
+        verdict = judge(candidate, answer)
+        judge_scores.append(verdict["score"])
+        if verdict["correct"]:
+            judge_correct_hits += 1
+        if not first_excerpt:
+            first_excerpt = answer[:1200]
+
+    ok = reps - len(errors)  # reps that produced a scorable answer
+    if ok == 0:
         return {
-            "hard_pass": False,
-            "judge_score": 0,
-            "judge_correct": False,
-            "judge_issues": [f"arm error: {err}"],
-            "error": err,
-            "answer_excerpt": "",
+            "hard_pass": False, "hard_pass_rate": 0.0, "hard_pass_count": 0,
+            "reps": reps, "ok_reps": 0,
+            "judge_score": 0, "judge_correct": False,
+            "judge_issues": [f"arm error: {errors[0] if errors else 'unknown'}"],
+            "error": errors[0] if errors else "unknown", "answer_excerpt": "",
         }
-    hp = hard_check(
-        answer,
-        candidate.get("must_match", []),
-        candidate.get("must_not_match", []),
-    )
-    verdict = judge(candidate, answer)
+    rate = hard_hits / ok
+    mean_judge = round(sum(judge_scores) / len(judge_scores), 2) if judge_scores else 0
     return {
-        "hard_pass": hp,
-        "judge_score": verdict["score"],
-        "judge_correct": verdict["correct"],
-        "judge_issues": verdict.get("issues", []),
-        "answer_excerpt": answer[:1200],
+        "hard_pass": rate >= 0.5,                 # majority, for classification
+        "hard_pass_rate": round(rate, 3),
+        "hard_pass_count": hard_hits,
+        "reps": reps, "ok_reps": ok,
+        "judge_score": mean_judge,                # mean over reps
+        "judge_correct": judge_correct_hits * 2 >= ok,
+        "judge_issues": [],
+        "answer_excerpt": first_excerpt,
     }
 
 
-def screen_candidate(candidate: dict, allow_tools: list) -> dict:
+def screen_candidate(candidate: dict, allow_tools: list, reps: int = 1) -> dict:
     """Run both arms for one candidate and compute discrimination metrics."""
     cid = candidate["id"]
 
-    baseline = _score_arm(candidate, "baseline", allow_tools)
-    skills = _score_arm(candidate, "skills", allow_tools)
+    baseline = _score_arm(candidate, "baseline", allow_tools, reps)
+    skills = _score_arm(candidate, "skills", allow_tools, reps)
 
     discriminates_hard = skills["hard_pass"] and not baseline["hard_pass"]
     discriminates_judge = skills["judge_correct"] and not baseline["judge_correct"]
-    judge_gap = skills["judge_score"] - baseline["judge_score"]
+    judge_gap = round(skills["judge_score"] - baseline["judge_score"], 2)
 
     # Classification priority:
     #   1. discriminator — skill shows measurable lift
@@ -111,11 +138,13 @@ def screen_candidate(candidate: dict, allow_tools: list) -> dict:
         f" [BASE ERR: {b_err[:60]}]" if b_err else ""
         + f" [SKILLS ERR: {s_err[:60]}]" if s_err else ""
     )
+    def arm_str(a):
+        return f"{a['hard_pass_count']}/{a['ok_reps']}h,j{a['judge_score']}"
     print(
         f"  {cid}  "
-        f"base={'P' if baseline['hard_pass'] else 'F'}/{baseline['judge_score']}  "
-        f"skills={'P' if skills['hard_pass'] else 'F'}/{skills['judge_score']}  "
-        f"gap={judge_gap:+d}  {classification}{err_note}",
+        f"base={arm_str(baseline)}  "
+        f"skills={arm_str(skills)}  "
+        f"gap={judge_gap:+.1f}  {classification}{err_note}",
         flush=True,
     )
 
@@ -123,6 +152,10 @@ def screen_candidate(candidate: dict, allow_tools: list) -> dict:
     def arm_record(arm: dict) -> dict:
         rec = {
             "hard_pass": arm["hard_pass"],
+            "hard_pass_rate": arm.get("hard_pass_rate"),
+            "hard_pass_count": arm.get("hard_pass_count"),
+            "reps": arm.get("reps"),
+            "ok_reps": arm.get("ok_reps"),
             "judge_score": arm["judge_score"],
             "judge_correct": arm["judge_correct"],
             "judge_issues": arm["judge_issues"],
@@ -163,15 +196,17 @@ def print_ranked_table(results: list) -> None:
     print("\n" + hdr)
     print("-" * len(hdr))
 
+    def cell(a):
+        # "<hard_count>/<ok_reps>h j<mean>" — shows the pass-rate, not a lone P/F
+        return f"{a.get('hard_pass_count')}/{a.get('ok_reps')}h j{a['judge_score']}"
+
     for r in sorted_rs:
         b, s = r["baseline"], r["skills"]
-        base_str = f"{'P' if b['hard_pass'] else 'F'}/{b['judge_score']}"
-        skills_str = f"{'P' if s['hard_pass'] else 'F'}/{s['judge_score']}"
         err_flag = " [ERR]" if b.get("error") or s.get("error") else ""
         print(
             f"{r['id']:<{id_w}}  {r['area']:<{area_w}}  "
-            f"{base_str:<16}  {skills_str:<18}  "
-            f"{r['judge_gap']:>+4}  {r['classification']}{err_flag}"
+            f"{cell(b):<16}  {cell(s):<18}  "
+            f"{r['judge_gap']:>+5.1f}  {r['classification']}{err_flag}"
         )
     print()
 
@@ -209,6 +244,15 @@ def main():
         "--plugin-dir",
         help="override the skills-arm plugin dir (e.g. a fixed-skill worktree)",
     )
+    ap.add_argument(
+        "--reps",
+        type=int,
+        default=1,
+        help=(
+            "runs per arm per candidate (default 1). Use >=5 for trustworthy "
+            "pass-rates — single runs have a high cell-level flip rate."
+        ),
+    )
     args = ap.parse_args()
 
     # Propagate model override into run.py's module-level constant so that
@@ -235,13 +279,13 @@ def main():
     n = min(args.concurrency, len(candidates)) or 1
     print(
         f"Screening {len(candidates)} candidate(s) at concurrency {n} "
-        f"(baseline + skills per candidate, model={args.model}) ...",
+        f"(baseline + skills per candidate, reps={args.reps}, model={args.model}) ...",
         flush=True,
     )
 
     with ThreadPoolExecutor(max_workers=n) as ex:
         results = list(
-            ex.map(lambda c: screen_candidate(c, allow_tools), candidates)
+            ex.map(lambda c: screen_candidate(c, allow_tools, args.reps), candidates)
         )
 
     print_ranked_table(results)
@@ -261,8 +305,16 @@ def main():
     ]
     mean_gap = round(sum(r["judge_gap"] for r in scored) / len(scored), 2) if scored else 0.0
 
+    def mean_rate(arm_key):
+        vals = [r[arm_key].get("hard_pass_rate") for r in scored
+                if r[arm_key].get("hard_pass_rate") is not None]
+        return round(sum(vals) / len(vals), 3) if vals else None
+
     summary = {
         "model": args.model,
+        "reps": args.reps,
+        "mean_baseline_hard_pass_rate": mean_rate("baseline"),
+        "mean_skills_hard_pass_rate": mean_rate("skills"),
         "total": len(results),
         "errors": len(errored),
         "discriminators": len(discriminators),
