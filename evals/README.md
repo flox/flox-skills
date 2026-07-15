@@ -31,18 +31,14 @@ used so nothing biases the model toward Flox. The `invokes_flox` hard-check then
 verifies the skill fired anyway and produced Flox guidance. These guard the
 behavior the retired MCP server used to encourage.
 
-Two arms (this is the AI-93 comparison):
-
-| Mode | Flag | Needs |
-|------|------|-------|
-| `skills` | `--strict-mcp-config` (MCP off) | nothing extra |
-| `skills+mcp` | `--mcp-config flox-mcp.json` | nothing extra — `flox-mcp.json` runs the public MCP server via `flox activate -r flox/flox-mcp-server -- flox-mcp` (no FloxHub login required) |
+The harness runs a single arm today (`skills`, `--strict-mcp-config`, MCP
+off); an MCP-assisted arm was measured and retired — see the AI-93 finding
+under Baselines below.
 
 ## Run
 
 ```bash
 python3 run.py --mode skills            # skills-only baseline
-python3 run.py --mode skills+mcp        # skills + MCP (needs flox-mcp)
 python3 run.py --mode skills --only node-env   # single task
 python3 run.py --mode skills --gate     # exit non-zero if binding gates fail (CI)
 ```
@@ -72,11 +68,12 @@ Recorded on the original 7-skill layout (pre-consolidation):
 | Arm | Hard-check pass | Avg judge score | Correct rate | File |
 |-----|-----------------|-----------------|--------------|------|
 | skills-only | 8/8 (100%) | 4.62 / 5 | 8/8 | `results/skills.json` |
-| skills + MCP | 8/8 (100%) | 4.25 / 5 | 8/8 | `results/skills_mcp.json` |
 
-**AI-93 finding:** skills-only is at least as good as skills+MCP (the delta is
-within LLM-judge run-to-run noise; both arms are 100% correct and 100%
-hard-pass). No measurable context gap from removing the MCP.
+**AI-93 finding:** an MCP-assisted arm (skills + the flox-mcp server) was
+measured alongside skills-only and scored 8/8 (100%) hard-pass, 4.25/5 avg
+judge, 8/8 correct — within LLM-judge run-to-run noise of skills-only. No
+measurable context gap from removing the MCP, so the arm was retired and
+the harness now runs skills-only.
 
 ## Gate policy
 
