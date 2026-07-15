@@ -162,15 +162,6 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      # The skill under test lives in a separate repo. Check out the branch that
-      # holds it; retarget to main after the floxify PR merges.
-      - name: Check out claude-plugins (skill under test)
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: flox/claude-plugins
-          ref: add-floxify-skill
-          path: claude-plugins
-
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
@@ -192,7 +183,6 @@ jobs:
         run: |
           python3 evals/floxify/run_floxify.py \
             --gate \
-            --skill-dir "$GITHUB_WORKSPACE/claude-plugins" \
             --out "results/floxify-ci.json"
 
       - name: Upload floxify eval results
@@ -217,15 +207,6 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      # The skill under test lives in a separate repo. Check out the branch that
-      # holds it; retarget to main after the floxify PR merges.
-      - name: Check out claude-plugins (skill under test)
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          repository: flox/claude-plugins
-          ref: add-floxify-skill
-          path: claude-plugins
-
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
@@ -247,7 +228,6 @@ jobs:
         run: |
           python3 evals/floxify/tier2.py \
             --only mastodon \
-            --skill-dir "$GITHUB_WORKSPACE/claude-plugins" \
             --out "results/tier2.json"
 
       - name: Upload floxify Tier 2 eval results

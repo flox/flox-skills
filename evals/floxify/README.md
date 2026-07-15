@@ -79,8 +79,8 @@ python3 run_floxify.py --gate
 # Skip activation (no flox install / network):
 python3 run_floxify.py --skip-activation
 
-# Custom skill dir (if claude-plugins is not a sibling of flox-skills):
-python3 run_floxify.py --skill-dir /path/to/claude-plugins
+# Custom skill dir (skill ships in-repo at flox-plugin/; override if needed):
+python3 run_floxify.py --skill-dir /path/to/flox-plugin
 
 # Custom output path:
 python3 run_floxify.py --out results/my-run.json
@@ -117,20 +117,11 @@ suite with `--out results/floxify-baseline.json` and commit the result.
 
 1. **`claude` CLI** in `PATH`, logged in (`claude auth login` or
    `ANTHROPIC_API_KEY` set)
-2. **claude-plugins repo** on the `add-floxify-skill` branch (or main,
-   after the PR merges):
-
-   ```bash
-   git clone https://github.com/flox/claude-plugins \
-     ../claude-plugins   # sibling to flox-skills
-   cd ../claude-plugins
-   git checkout add-floxify-skill   # or: git checkout main after merge
-   ```
-
-   The default `--skill-dir` is `../../../claude-plugins` relative to
-   this file, resolving to the sibling directory. Override with
-   `--skill-dir` if your layout differs.
-
+2. **The floxify skill** — ships in this repo at
+   `flox-plugin/skills/floxify/`, no separate checkout needed. The
+   default `--skill-dir` resolves to `flox-plugin/` two levels up from
+   this file. Override with `--skill-dir` to point at an alternate
+   flox-plugin directory.
 3. **`flox` CLI** (optional) — needed for activation checks. Without it,
    activation is recorded as skipped.
 
@@ -160,11 +151,11 @@ Instead, the `floxify-evals` job in `.github/workflows/evals.yml` runs:
 - **weekly** (scheduled, Monday 06:00 UTC) as a regression watch, and
 - **on manual dispatch** (`workflow_dispatch` with `run_floxify=true`).
 
-The job checks out the skill from `flox/claude-plugins` (branch
-`add-floxify-skill`; retarget to `main` after that PR merges), installs
-flox, and runs `run_floxify.py --gate`. Its `--gate` still binds on
-should-tier hard-checks — it just runs on a schedule rather than per-PR,
-so a genuine regression surfaces within a week (or immediately on manual
+The job checks out this repo (the skill under test ships in-repo at
+`flox-plugin/skills/floxify/`), installs flox, and runs
+`run_floxify.py --gate`. Its `--gate` still binds on should-tier
+hard-checks — it just runs on a schedule rather than per-PR, so a
+genuine regression surfaces within a week (or immediately on manual
 dispatch) rather than never.
 
 Per-PR floxify regression-catching is therefore **manual/scheduled by
@@ -209,11 +200,12 @@ are **references for the LLM judge**, not byte-exact match targets.
 
 ## Baseline
 
-`results/floxify-baseline.json` — recorded against the `add-floxify-skill`
-PR branch. The `summary.skill` field records a portable identity
-(`<repo>@<branch>`, e.g. `claude-plugins@add-floxify-skill`) rather than
-an absolute host path, so the committed baseline stays reproducible across
-machines. `summary.model` records the pinned judge/agent model.
+`results/floxify-baseline.json` — recorded against the in-repo
+`flox-plugin/skills/floxify/` skill. The `summary.skill` field records
+a portable identity (`<dir-name>@<branch>`, e.g.
+`flox-plugin@main`) rather than an absolute host path, so the committed
+baseline stays reproducible across machines. `summary.model` records
+the pinned judge/agent model.
 
 When activation was not available in the recording environment, it is
 recorded as `"skipped": true` with a note. Hard-checks and judge scores
@@ -368,7 +360,7 @@ python3 tier2.py --only mastodon --activate
 python3 tier2.py --only sentry --clone-timeout 1200 --agent-timeout 2400
 
 # Custom skill dir / output path (same conventions as run_floxify.py):
-python3 tier2.py --skill-dir /path/to/claude-plugins --out results/my-run.json
+python3 tier2.py --skill-dir /path/to/flox-plugin --out results/my-run.json
 ```
 
 Results land in `results/tier2.json` by default. Unlike Tier 1, there's
