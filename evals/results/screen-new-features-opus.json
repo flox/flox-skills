@@ -1,0 +1,54 @@
+{
+  "summary": {
+    "model": "claude-opus-4-8",
+    "reps": 5,
+    "mean_baseline_hard_pass_rate": 1.0,
+    "mean_skills_hard_pass_rate": 1.0,
+    "total": 1,
+    "errors": 0,
+    "discriminators": 0,
+    "skill_gaps": 0,
+    "no_signals": 1,
+    "mean_judge_gap": -0.4,
+    "discriminator_ids": [],
+    "skill_gap_ids": [],
+    "no_signal_ids": [
+      "feat-override-newer-version"
+    ],
+    "error_ids": []
+  },
+  "results": [
+    {
+      "id": "feat-override-newer-version",
+      "area": "builds",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "hard_pass_rate": 1.0,
+        "hard_pass_count": 5,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 4.4,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "The exact scenario you're describing \u2014 the catalog is behind and you need a newer upstream version *now* \u2014 is a documented Flox workflow. You can't force the catalog to update, but you don't have to: you build your own `hello` 2.12.2 locally with a **Nix expression build** that overrides the catalog's package (bumping the version + source), then install that build into your project's environment.\n\nHere's the complete solution.\n\n## 1. The version-override build: `.flox/pkgs/hello.nix`\n\nThe override itself has to live in a Nix expression (`overrideAttrs` can't be expressed in TOML). Create this file \u2014 it takes the catalog's `hello` and just swaps in the 2.12.2 tarball:\n\n```nix\n{ hello, fetchurl }:\nhello.overrideAttrs (finalAttrs: _: {\n  version = \"2.12.2\";\n  src = fetchurl {\n    url = \"mirror://gnu/hello/hello-${finalAttrs.version}.tar.gz\";\n    hash = \"sha256-WpqZbcKSzCTc9BHO6H6S9qrluNE72caBm0x6nc4IGKs=\";\n  };\n})\n```\n\n## 2. The manifest: `.flox/env/manifest.toml`\n\nDo **not** add `hello.pkg-path = \"hello\"` here \u2014 that would pull the catalog's 2.12.1. `hello` comes from your local build (installed in step 3 below via your personal namespace). Put your other project deps in `[install]` "
+      },
+      "skills": {
+        "hard_pass": true,
+        "hard_pass_rate": 1.0,
+        "hard_pass_count": 5,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 4.0,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "Here's the complete solution. The Flox Catalog tracks nixpkgs with a short lag, so a just-released version like `hello 2.12.2` may not be there yet \u2014 but you don't have to wait. You override the existing catalog recipe with a **Nix-expression build** that bumps `version`/`src`, build it, and publish it so it installs like any other package.\n\n## 1. The override recipe\n\nCreate `.flox/pkgs/hello/default.nix` (the filename `hello/default.nix` \u2192 package named `hello`). This takes the catalog's `hello` and only changes the version and source tarball:\n\n```nix\n{ hello, fetchurl }:\nhello.overrideAttrs (finalAttrs: _: {\n  version = \"2.12.2\";\n  src = fetchurl {\n    url = \"mirror://gnu/hello/hello-${finalAttrs.version}.tar.gz\";\n    hash = \"sha256-WpqZbcKSzCTc9BHO6H6S9qrluNE72caBm0x6nc4IGKs=\";\n  };\n})\n```\n\n> **Hash tip:** if you don't know the hash for a new version, set `hash = \"\";` first, run `flox build`, and Flox prints the correct hash in the error \u2014 paste it back in. (The value above is the real hash for hello 2.12.2, so you can use it directly.)\n\n## 2. The commands\n\n```bash\n# In your project (create the env if you don't have one)\nflox init\n\n# Nix-expression builds must be git-tracked\ngit"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": -0.4,
+      "classification": "no-signal"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "summary": {
+    "model": "claude-opus-4-8",
+    "reps": 5,
+    "mean_baseline_hard_pass_rate": 0.0,
+    "mean_skills_hard_pass_rate": 1.0,
+    "total": 1,
+    "errors": 0,
+    "discriminators": 1,
+    "skill_gaps": 0,
+    "no_signals": 0,
+    "mean_judge_gap": 3.8,
+    "discriminator_ids": [
+      "feat-flox-run-oneoff"
+    ],
+    "skill_gap_ids": [],
+    "no_signal_ids": [],
+    "error_ids": []
+  },
+  "results": [
+    {
+      "id": "feat-flox-run-oneoff",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": true,
+      "baseline": {
+        "hard_pass": false,
+        "hard_pass_rate": 0.0,
+        "hard_pass_count": 0,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 1.0,
+        "judge_correct": false,
+        "judge_issues": [],
+        "answer_excerpt": "## The Flox way: an ephemeral environment in a temp directory\n\nFlox always needs a `.flox` directory to hold the environment \u2014 there's no truly \"directoryless\" run. But you can keep it out of your project entirely by creating it in a throwaway temp dir, running your command with `flox activate -- <cmd>`, and deleting it. Nothing lands in your project and nothing is installed system-wide.\n\n### One-liner (throwaway, self-cleaning)\n\n```bash\nd=$(mktemp -d) && flox init -d \"$d\" -q && flox install -d \"$d\" -q jq && flox activate -d \"$d\" -- jq --version; rm -rf \"$d\"\n```\n\nReplace `jq --version` with whatever you actually need to run. The `-d \"$d\"` points every Flox command at the temp dir, `-- <cmd>` runs the command without dropping you into a subshell, and `rm -rf \"$d\"` removes the whole thing (env included) afterward.\n\n### Same thing, readable\n\n```bash\n# 1. Make a throwaway directory for the env\ntmp=$(mktemp -d)\n\n# 2. Create + populate it (nothing touches your project)\nflox init -d \"$tmp\" -q\nflox install -d \"$tmp\" -q jq\n\n# 3. Run your one-off command\nflox activate -d \"$tmp\" -- jq '.foo' somefile.json\n\n# 4. Delete the env and temp dir\nrm -rf \"$tmp\"\n```\n\n- `-d <path>` / `--dir` makes Flox "
+      },
+      "skills": {
+        "hard_pass": true,
+        "hard_pass_rate": 1.0,
+        "hard_pass_count": 5,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 4.8,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "The Flox way to run a one-off command from a CLI tool you don't have installed \u2014 without an environment and without a `.flox/` directory \u2014 is **`flox run`**. It pulls the package straight from the catalog for that single invocation (think `npx`, but for any catalog package).\n\n## Solution\n\n```bash\nflox run -p jq -- jq '.foo' data.json\n```\n\nThat's the whole thing \u2014 no `flox init`, no `flox install`, no `.flox/` directory created. Flox fetches `jq` from the catalog, runs your command in an ephemeral context, and leaves nothing behind in your project.\n\n## Anatomy of the command\n\n```\nflox run -p jq -- jq '.foo' data.json\n         \u2502  \u2502     \u2502  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 the command to run (with its own args)\n         \u2502  \u2502     \u2514\u2500\u2500\u2500\u2500 separates flox's flags from your command \u2014 always include it\n         \u2502  \u2514\u2500\u2500\u2500\u2500 the catalog package to make available\n         \u2514\u2500\u2500\u2500\u2500 run subcommand\n```\n\n- **`-p <pkg>` is required** \u2014 it names the catalog package to provision. (If you're unsure of the catalog name, `flox search jq` / `flox show jq` first; names usually match nixpkgs but not always.)\n- **Always use `--`** to separate flox flags from the command you want to run. Without it, flox may try to interpret your com"
+      },
+      "discriminates_hard": true,
+      "discriminates_judge": true,
+      "judge_gap": 3.8,
+      "classification": "discriminator"
+    }
+  ]
+}
