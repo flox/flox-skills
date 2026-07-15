@@ -94,3 +94,51 @@ chance of an all-green run). So `--gate` is split:
   per-tier breakdown, and `should_trigger_rate`. These are tracked as quality/
   triggering trends (watch for a sustained drop), not pass/fail gates. `may` and
   `stretch` tasks are advisory by definition.
+
+## Screening (`screen.py`)
+
+`screen.py` develops the *discriminating stretch tier*: it runs candidate prompts
+(`candidates*.jsonl`) through the **baseline** arm (bare model) and the **skills**
+arm (plugin loaded) and classifies each as a **discriminator** (skill lifts over
+baseline), a **skill-gap** (both fail — the skill may be missing coverage), or
+**no-signal** (baseline already passes — too easy). Hard-checks are data-driven
+per candidate via `must_match` / `must_not_match` regex lists.
+
+```bash
+python3 screen.py --candidates candidates-pass2.jsonl --reps 5   # screen at n=5
+python3 screen.py --only trap-vars-no-interpolation --reps 5
+python3 screen.py --plugin-dir /path/to/fixed-skill/flox-plugin  # test a skill edit
+```
+
+### Multi-rep policy (required)
+
+Single runs have a **~50% cell-level flip rate** — the baseline arm alone flipped
+hard-pass on 3 of 6 cells between identical runs. A lone P/F is dominated by
+sampling noise. Therefore:
+
+- **`--reps` ≥ 5 is required** for any promote / discard / skill-gap decision.
+  `screen.py` reports `hard_pass_rate` (fraction of reps passing) and mean judge;
+  `hard_pass`/`judge_correct` are majority verdicts.
+- Compare **pass-rates**, not single cells. A discriminator must show a rate gap
+  that survives n≥5.
+
+### Model policy
+
+The discriminating tier screens and gates on the **same model as the functional
+gate — Opus (`claude-opus-4-8`)**. Rationale: content recall does not separate
+modern Claude from itself (Opus *and* Sonnet already know Flox specifics), so the
+tier's value is **triggering + freshness**, which the Opus gate measures directly.
+No separate weaker-model arm.
+
+### Check-design rules (learned the hard way)
+
+- **Prefer positive `must_match` over negative `must_not_match`.** Assert the
+  *correct* construction rather than detecting the wrong one.
+- **A correct answer often illustrates the anti-pattern as a labeled
+  counter-example.** A proximity/negative check then false-fires on good answers
+  (this sank `trap-vars-no-interpolation`: it showed the wrong `[vars]` block to
+  explain why it's wrong, tripping `\[vars\]…PATH`). Fixed by asserting the
+  positive `[profile]/[hook]` + `export PATH` construction instead.
+- **Validate a new/edited check against a real known-good answer** (the
+  `answer_excerpt` fields in `results/*.json`) before trusting it — the check is a
+  pure function of the answer text, so this needs no model calls.
