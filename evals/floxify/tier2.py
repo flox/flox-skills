@@ -27,7 +27,7 @@ Usage:
     python3 tier2.py --only mastodon             # single repo
     python3 tier2.py                              # all registered repos
     python3 tier2.py --activate                   # opt in to flox activate
-    python3 tier2.py --skill-dir /path/to/claude-plugins
+    python3 tier2.py --skill-dir /path/to/flox-plugin
     python3 tier2.py --out results/my-run.json
 
 Pure stdlib — no additional packages required.
@@ -404,8 +404,8 @@ def main():
         "--skill-dir",
         default=str(DEFAULT_SKILL_DIR),
         help=(
-            "Path to the claude-plugins repo with the floxify skill "
-            f"(default: {DEFAULT_SKILL_DIR})."
+            "Path to the flox plugin directory containing the floxify skill "
+            f"(default: {DEFAULT_SKILL_DIR}, the in-repo flox-plugin/)."
         ),
     )
     ap.add_argument(
@@ -447,8 +447,9 @@ def main():
     if not skill_dir.exists():
         print(
             f"ERROR: skill-dir not found: {skill_dir}\n"
-            "Clone or point --skill-dir to the claude-plugins repo with the "
-            "floxify skill.",
+            "The floxify skill ships in this repo at "
+            "flox-plugin/skills/floxify/ — check your checkout, or pass "
+            "--skill-dir to point at an alternate flox-plugin directory.",
         )
         raise SystemExit(1)
 
