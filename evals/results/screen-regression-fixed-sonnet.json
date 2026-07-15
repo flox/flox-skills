@@ -1,0 +1,204 @@
+{
+  "summary": {
+    "model": "claude-sonnet-4-6",
+    "total": 6,
+    "errors": 0,
+    "discriminators": 0,
+    "skill_gaps": 3,
+    "no_signals": 3,
+    "mean_judge_gap": 0.33,
+    "discriminator_ids": [],
+    "skill_gap_ids": [
+      "stretch-build-runtime-packages",
+      "trap-cpp-libstdcxx-unwrapped",
+      "trap-cpp-exact-pkgpaths"
+    ],
+    "no_signal_ids": [
+      "stretch-build-sandbox-pure",
+      "trap-vars-no-interpolation",
+      "trap-containerize-nopush-fixed"
+    ],
+    "error_ids": []
+  },
+  "results": [
+    {
+      "id": "stretch-build-sandbox-pure",
+      "area": "builds",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 4,
+        "judge_correct": true,
+        "judge_issues": [
+          "runtime-packages = [] may be an invented manifest key \u2014 not confirmed in public Flox docs",
+          "${deps} interpolation syntax for cross-build references is plausible but unverified and could mislead",
+          "nix-store -q --references is Nix-layer advice that may not apply to typical Flox users",
+          "macOS sandbox caveat is reasonable but unverifiable without docs \u2014 presented with high confidence"
+        ],
+        "answer_excerpt": "Here is the complete solution for a hermetic manifest build.\n\n---\n\n## Manifest (`manifest.toml`)\n\nThe key is `sandbox = \"pure\"`. For dependencies that require network access (e.g. `go mod download`, `cargo fetch`), use a two-stage build: a network-allowed prefetch stage followed by a sandboxed compile stage.\n\n```toml\n[install]\ngo.pkg-path = \"go\"\n\n# Stage 1: fetch dependencies with network access\n[build.deps]\ncommand = '''\n  go mod download\n  mkdir -p $out/pkg/mod\n  cp -r \"$(go env GOPATH)/pkg/mod\" $out/pkg/\n'''\nsandbox = \"off\"\n\n# Stage 2: hermetic compile \u2014 no network, git-tracked files only\n[build.app]\ncommand = '''\n  export GOPATH=\"$PWD/.gopath\"\n  mkdir -p \"$GOPATH\"\n  cp -r ${deps}/pkg \"$GOPATH/\"\n\n  go build -mod=mod -o $out/bin/myapp ./...\n'''\nversion     = \"1.0.0\"\ndescription = \"My hermetic Go application\"\nsandbox     = \"pure\"\nruntime-packages = []  # exclude build-time tools from runtime closure\n```\n\n---\n\n## Exact commands\n\n```bash\n# 1. Activate the environment so build tools are on PATH\nflox activate\n\n# 2. Build all targets (deps first, then app \u2014 order is inferred from ${deps} reference)\nflox build\n\n# 3. Build only the hermetic stage explicitly\nflox build app\n\n# 4. Inspect w"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "Here is the complete solution.\n\n---\n\n## Hermetic Flox Build\n\n### `.flox/env/manifest.toml`\n\n```toml\nversion = 1\n\n[install]\n# Build-time tools \u2014 must be in the default (toplevel) group; packages with an\n# explicit pkg-group are invisible during flox build.\ngcc.pkg-path     = \"gcc\"\nmake.pkg-path    = \"make\"\n# add more build deps here, all without pkg-group\n\n[build.mypkg]\ncommand = '''\n  make\n  mkdir -p $out/bin\n  cp build/mypkg $out/bin/\n'''\nversion  = \"1.0.0\"\nsandbox  = \"pure\"\n# Declare only the packages that callers actually need at runtime.\n# Omit build-only tools (make, gcc) to keep the installed closure small.\nruntime-packages = []\n```\n\n### Commands\n\n```bash\n# Build\nflox build\n\n# Verbose output (useful for diagnosing sandbox violations)\nflox build -v\n\n# Inspect what's in the result\nls -la result-mypkg/\n\n# Check the runtime closure\nnix-store -q --references result-mypkg\n```\n\n---\n\n### What `sandbox = \"pure\"` enforces\n\n| Guarantee | What happens |\n|---|---|\n| **Host filesystem** | The build sees only Git-tracked files, copied to a temp directory. Nothing else from the host leaks in. |\n| **Network** | Blocked on Linux. (macOS cannot enforce network isolation at the OS sandbox level "
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 1,
+      "classification": "no-signal"
+    },
+    {
+      "id": "stretch-build-runtime-packages",
+      "area": "builds",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": false,
+        "judge_score": 1,
+        "judge_correct": false,
+        "judge_issues": [
+          "Does not use `runtime-packages = [ ... ]` in `[build.<name>]` section \u2014 the correct Flox mechanism for restricting runtime closure",
+          "Uses invented key `go.runtime = false` on an install entry, which is not a real Flox manifest field",
+          "`CGO_ENABLED=0` is a workaround for static linking, not a manifest-level closure control mechanism",
+          "The `[build]` section is not named (`[build.<name>]`) and has no `runtime-packages` key",
+          "Answer describes plausible-sounding but fabricated Flox behavior"
+        ],
+        "answer_excerpt": "The fix is two things in the manifest: mark `go` as `runtime = false` (build-only) and use `CGO_ENABLED=0` in the `[build]` command for a fully static binary.\n\n```toml\nversion = 1\n\n[install]\ngo.pkg-path = \"go\"\ngo.runtime = false   # build-only \u2014 excluded from the runtime closure\n\n[build]\ncommand = \"\"\"\n  CGO_ENABLED=0 go build -o \"$out/bin/myapp\" ./...\n\"\"\"\n```\n\n**Commands:**\n\n```bash\nflox build                  # compiles; artifact lands under result/\nflox publish                # (optional) publish to your catalog\n```\n\n---\n\n**Why this works:**\n\n| Setting | Effect |\n|---|---|\n| `go.runtime = false` | Nix/Flox treats `go` as a build-input only; it is present during `flox build` but pruned from the runtime closure entirely. |\n| `CGO_ENABLED=0` | Disables cgo, so `go build` produces a fully static binary with no glibc dependency. The runtime closure ends up containing *only* your binary. |\n| `$out/bin/myapp` | Flox sets `$out` to the Nix store output path; anything placed there becomes the package contents. |\n\nIf you need CGO (e.g., for SQLite or OS crypto), drop `CGO_ENABLED=0` and add `glibc` (Linux) or the relevant Darwin SDK framework \u2014 they're far smaller than the Go toolchain. `g"
+      },
+      "skills": {
+        "hard_pass": false,
+        "judge_score": 2,
+        "judge_correct": false,
+        "judge_issues": [
+          "Never mentions runtime-packages \u2014 the required Flox mechanism for restricting the runtime closure",
+          "Uses 'nix path-info -r' which is penalized nix-store advice",
+          "Relies entirely on build flags to trim paths from the binary rather than the declarative runtime-packages key",
+          "Missing the [build.<name>] runtime-packages field that is the direct answer to the question"
+        ],
+        "answer_excerpt": "## The root cause\n\nNix's closure scanner finds `/nix/store/<hash>-go-<version>/` strings embedded in your binary \u2014 from DWARF debug info, GOROOT paths in `runtime/debug.BuildInfo`, and CGO wrapper references. Any match pulls the full toolchain in.\n\nThree build flags eliminate all of these vectors.\n\n---\n\n## Complete solution\n\n```toml\nversion = 1\n\n[install]\ngo.pkg-path = \"go\"\n\n[build.myapp]\n  command = '''\n    CGO_ENABLED=0 go build \\\n      -trimpath \\\n      -ldflags=\"-s -w\" \\\n      -o \"$out/bin/myapp\" \\\n      .\n  '''\n```\n\n---\n\n## Commands\n\n```bash\n# Build the artifact\nflox build\n\n# Inspect the runtime closure \u2014 should contain only your binary and glibc\nnix path-info -r ./result\n```\n\n---\n\n## What each flag does\n\n| Flag | What it removes from the binary |\n|---|---|\n| `CGO_ENABLED=0` | C library links and CGO wrapper paths; produces a fully static binary |\n| `-trimpath` | All absolute source paths (GOROOT, module cache) from DWARF and `debug.BuildInfo` \u2014 the single most important flag |\n| `-ldflags=\"-s -w\"` | Symbol table (`-s`) and DWARF debug sections (`-w`); eliminates the remaining path-embedding vectors |\n\n`go` stays in `[install]` because the build environment needs it to run `go"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 1,
+      "classification": "skill-gap"
+    },
+    {
+      "id": "trap-cpp-libstdcxx-unwrapped",
+      "area": "builds",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": false,
+        "judge_score": 1,
+        "judge_correct": false,
+        "judge_issues": [
+          "never mentions gcc-unwrapped, which is the required fix per the rubric",
+          "manually fiddles with LD_LIBRARY_PATH in the hook, which the rubric explicitly marks incorrect",
+          "solution only reinstalls gcc (plus binutils) rather than adding gcc-unwrapped to expose stdlib headers/libs directly",
+          "the root cause explanation about 'wrapped compiler' is partially relevant but leads to the wrong fix"
+        ],
+        "answer_excerpt": "## Root cause\n\nIn Nix-based (Flox) environments, `gcc` is a **wrapped compiler** \u2014 the wrapper script injects correct `-I` and `-L` flags at compile time. Two things typically break C++ even after `flox install gcc`:\n\n1. **Missing `binutils`** \u2014 the wrapper-gcc calls `ld` from `binutils`; without it the linker can't find symbols.\n2. **`libstdc++.so` not on `LD_LIBRARY_PATH`** \u2014 headers are found at compile time (the wrapper handles that), but the shared runtime library must be discoverable when the binary actually runs.\n\n---\n\n## Complete manifest\n\n```toml\nversion = 1\n\n[install]\ngcc.pkg-path     = \"gcc\"\nbinutils.pkg-path = \"binutils\"\ngnumake.pkg-path  = \"gnumake\"    # remove if using cmake or another build system\n\n[vars]\nCC  = \"gcc\"\nCXX = \"g++\"\n\n[hook]\non-activate = \"\"\"\n  # The nixpkgs gcc wrapper sets compile-time include/lib paths automatically.\n  # We only need to expose libstdc++.so for *runtime* dynamic linking.\n  _libstdcxx=\"$(g++ --print-file-name=libstdc++.so.6 2>/dev/null)\"\n  if [ -f \"$_libstdcxx\" ]; then\n    export LD_LIBRARY_PATH=\"$(dirname \"$_libstdcxx\")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n  fi\n  unset _libstdcxx\n\"\"\"\n```\n\n---\n\n## Commands\n\n```bash\n# If starting fresh:\n"
+      },
+      "skills": {
+        "hard_pass": false,
+        "judge_score": 2,
+        "judge_correct": false,
+        "judge_issues": [
+          "Never mentions gcc-unwrapped \u2014 the required fix per rubric",
+          "Manifest only installs gcc (the wrapper), not gcc-unwrapped which exposes stdlib headers/libs directly",
+          "Diagnosis misattributes the failure to not running flox activate rather than to gcc lacking unwrapped headers",
+          "Suggested fix (flox install gcc + flox activate) does not resolve the stated problem"
+        ],
+        "answer_excerpt": "## Root Cause\n\nIn Flox (which is Nix-backed), the `gcc` package ships as a **wrapped compiler**. The wrapper scripts inject the correct `-isystem` flags for C++ headers (pointing into `/nix/store/.../include/c++/...`) and `-L` flags for `libstdc++` \u2014 but **only when the environment is activated**. Outside of `flox activate`, those wrapper scripts aren't on `PATH`, so even if `gcc` is installed, the system `gcc` (or nothing) is found instead, and standard library headers don't resolve.\n\n---\n\n## The Fix\n\n### `manifest.toml`\n\n```toml\nversion = 1\n\n[install]\ngcc.pkg-path       = \"gcc\"       # includes g++, libstdc++, and the cc-wrapper\nbinutils.pkg-path  = \"binutils\"  # ld, ar, etc.\ngnumake.pkg-path   = \"gnumake\"   # make\n\n[vars]\nCC  = \"gcc\"\nCXX = \"g++\"\n```\n\n`binutils` is needed because the Nix-wrapped linker (`ld`) also needs to find `libstdc++`; without it you can get symbol-resolution errors at link time even when compilation succeeds.\n\n---\n\n### Commands\n\n```bash\n# 1. Edit or initialize the manifest\nflox init                       # only if you don't have a .flox/ directory yet\n\n# 2. Install (or let the manifest above do it on first activate)\nflox install gcc binutils gnumake\n\n# 3. A"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 1,
+      "classification": "skill-gap"
+    },
+    {
+      "id": "trap-cpp-exact-pkgpaths",
+      "area": "builds",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": false,
+        "judge_score": 2,
+        "judge_correct": false,
+        "judge_issues": [
+          "Uses 'benchmark' as pkg-path for Google Benchmark, but the correct catalog pkg-path is 'gbenchmark'",
+          "The rubric explicitly flags 'benchmark' as an incorrect guess",
+          "catch2_3 is correct, so one of two pkg-paths is right"
+        ],
+        "answer_excerpt": "Here's the complete answer.\n\n**Manifest `[install]` block:**\n\n```toml\n[install]\nbenchmark.pkg-path = \"benchmark\"\ncatch2.pkg-path = \"catch2_3\"\n```\n\n- `benchmark` \u2014 nixpkgs attribute for Google Benchmark (the upstream package is `google-benchmark`; nixpkgs exposes it as `benchmark`)\n- `catch2_3` \u2014 nixpkgs attribute for Catch2 v3; distinct from `catch2` which tracks v2\n\nThe left-hand key (`benchmark`, `catch2`) is your local install ID \u2014 rename it to whatever alias you prefer. `pkg-path` is what the Flox catalog resolves against.\n\n**Equivalent `flox install` commands** (if you prefer the CLI over editing the manifest directly):\n\n```sh\nflox install benchmark catch2_3\n```\n\nFlox will populate the `[install]` stanza automatically with the above entries.\n\n**Verify the pkg-paths against the live catalog:**\n\n```sh\nflox search benchmark\nflox search catch2\n```\n\n`flox search catch2` will show both `catch2` (v2) and `catch2_3` (v3) \u2014 confirm you pick `catch2_3`."
+      },
+      "skills": {
+        "hard_pass": false,
+        "judge_score": 2,
+        "judge_correct": false,
+        "judge_issues": [
+          "Google Benchmark pkg-path is 'benchmark' but correct catalog path is 'gbenchmark'",
+          "Rubric explicitly marks 'benchmark' as an incorrect guess"
+        ],
+        "answer_excerpt": "Here is the complete solution based on nixpkgs catalog paths used by Flox:\n\n```toml\n[install]\nbenchmark.pkg-path = \"benchmark\"\ncatch2_3.pkg-path = \"catch2_3\"\n```\n\n**Flox commands to install them:**\n\n```sh\nflox install benchmark catch2_3\n```\n\nOr one at a time:\n\n```sh\nflox install benchmark\nflox install catch2_3\n```\n\n**Explanation:**\n\n| Library | `pkg-path` | Notes |\n|---|---|---|\n| Google Benchmark | `benchmark` | nixpkgs attribute `pkgs.benchmark` \u2014 Google's microbenchmark library |\n| Catch2 v3 | `catch2_3` | nixpkgs keeps v2 (`catch2`) and v3 (`catch2_3`) as separate attrs; using `catch2_3` pins you to the v3 series |\n\nThe install ID (the key on the left, e.g. `catch2_3`) is just a local label in the manifest and can be anything valid; matching it to `pkg-path` keeps things readable. After installing, both headers and CMake targets (`benchmark::benchmark`, `Catch2::Catch2WithMain`) will be available inside the activated Flox environment."
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0,
+      "classification": "skill-gap"
+    },
+    {
+      "id": "trap-vars-no-interpolation",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": false,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "**No \u2014 `[vars]` is the wrong section for this.** Values in `[vars]` are static literals; `$PATH` would not be expanded, so you'd overwrite PATH with the literal string `./node_modules/.bin:$PATH`. You'd lose your entire PATH.\n\nThe right section is **`[profile]`**. Profile entries are shell scripts that are *sourced* into the user's shell on activation, so shell variable expansion works normally.\n\n---\n\n## The manifest\n\n```toml\nversion = 1\n\n[install]\n# your packages here\n\n[profile]\ncommon = \"\"\"\n  export PATH=\"$FLOX_ENV_PROJECT/node_modules/.bin:$PATH\"\n\"\"\"\n\n[options]\nsystems = [\"aarch64-darwin\", \"x86_64-darwin\", \"aarch64-linux\", \"x86_64-linux\"]\n```\n\n`$FLOX_ENV_PROJECT` is a variable Flox sets automatically \u2014 it points to the directory containing `.flox/`, i.e. your project root. This is more robust than a bare `./node_modules/.bin`, which would only work if your CWD happens to be the project root when a shell command runs.\n\n---\n\n## The commands\n\n**Edit the manifest in your `$EDITOR`:**\n```sh\nflox edit\n```\nMake the `[profile]` change and save.\n\n**Re-enter the environment to pick up the change:**\n```sh\nflox activate\n```\n\n**Verify it worked:**\n```sh\nwhich <some-local-cli>   # e.g. which "
+      },
+      "skills": {
+        "hard_pass": false,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "`[vars]` is the wrong section \u2014 it sets variables as **literal strings with no shell expansion**, so `PATH = \"./node_modules/.bin:$PATH\"` would stomp `$PATH` with the literal text `$PATH`, breaking your environment.\n\nThe right section is **`[profile]`**, which is sourced directly into the user's interactive shell after activation and does support shell expansion.\n\n## The manifest\n\n```toml\nversion = 1\n\n[install]\n# ... your packages ...\n\n[profile]\ncommon = \"\"\"\n  export PATH=\"./node_modules/.bin:$PATH\"\n\"\"\"\n\n[options]\nsystems = [\"aarch64-darwin\", \"x86_64-darwin\", \"aarch64-linux\", \"x86_64-linux\"]\n```\n\n`common` runs in bash, zsh, and fish (via a compatibility shim). If you need fish-specific syntax for other things you can also set `bash`, `zsh`, and `fish` keys independently \u2014 but `export PATH=...` works fine under `common`.\n\n## Commands\n\n```bash\n# Open the manifest in your $EDITOR:\nflox edit\n\n# Paste in the [profile] block, save, and quit.\n# Flox validates and applies immediately \u2014 no separate apply step.\n\n# Re-activate to pick up the change in your current shell:\nflox activate\n```\n\nIf the environment is already active in a subshell you'll need to exit and re-activate; the profile scri"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0,
+      "classification": "no-signal"
+    },
+    {
+      "id": "trap-containerize-nopush-fixed",
+      "area": "containers",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## Turning Your Flox Environment Into a Local Docker Image\n\nNo Dockerfile, no registry push needed.\n\n### Manifest (`manifest.toml` \u2014 optional `[containerize.config]` block)\n\n```toml\n[containerize.config]\ncmd = [\"your-entrypoint\", \"arg\"]   # omit to get an interactive shell\nworking-dir = \"/app\"\nexposed-ports = [\"8080/tcp\"]\nuser = \"1000:1000\"\n```\n\nThe `[containerize.config]` block is entirely optional. If you omit it, `flox containerize` still works \u2014 the container just drops you into an activated shell when you `docker run -it` it.\n\n### The single command\n\n```bash\nflox containerize --runtime docker\n```\n\nThat's it. Flox builds the image and loads it directly into your local Docker daemon \u2014 no `.tar` file, no `docker load`, no registry.\n\n**What it does:** reads your `.flox/env/manifest.toml`, builds a hermetic image with all your packages and activation hooks baked in, and calls `docker load` under the hood. The resulting image runs `flox activate` as its entrypoint, so every package and env variable is available inside the container exactly as it is in your dev shell.\n\n**Variants worth knowing:**\n```bash\nflox containerize --runtime docker --tag myapp:v1.0   # name the image\nflox cont"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 4,
+        "judge_correct": true,
+        "judge_issues": [
+          "Task asked for a single command but answer includes unrequested manifest.toml boilerplate and extended explanation; the correct command `flox containerize --runtime docker` is present and primary"
+        ],
+        "answer_excerpt": "Here's the complete solution:\n\n---\n\n## Manifest (`manifest.toml`)\n\nAdd a `[containerize.config]` section to configure the container. Everything else is standard Flox:\n\n```toml\nversion = 1\n\n[install]\n# your packages here, e.g.:\nripgrep.pkg-path = \"ripgrep\"\n\n[hook]\non-activate = \"\"\"\n  # environment setup runs at container start\n\"\"\"\n\n[containerize.config]\ncmd = [\"bash\"]                  # default command run inside the activation\nworking-dir = \"/app\"            # optional: set working directory\n# exposed-ports = [\"8080/tcp\"]  # optional: declare ports\n# user = \"myuser\"               # optional: run as specific user\n```\n\nThe `[containerize.config]` section is optional \u2014 omitting it gives you a bare interactive shell. `cmd` is what runs *inside* the Flox activation (equivalent to `flox activate -- <cmd>`).\n\n---\n\n## Commands\n\n**Single command \u2014 load directly into Docker daemon (no Dockerfile, no registry):**\n\n```bash\nflox containerize --runtime docker\n```\n\nWith a specific tag:\n\n```bash\nflox containerize --runtime docker -t myapp:latest\n```\n\n---\n\n## How it works\n\n- `--runtime docker` tells Flox to pipe the OCI tar stream directly into `docker load` for you \u2014 no intermediate `.tar` file, n"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": -1,
+      "classification": "no-signal"
+    }
+  ]
+}

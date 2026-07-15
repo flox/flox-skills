@@ -205,11 +205,17 @@ def main():
         default=_run.MODEL,
         help=f"model id for agent and judge (default {_run.MODEL})",
     )
+    ap.add_argument(
+        "--plugin-dir",
+        help="override the skills-arm plugin dir (e.g. a fixed-skill worktree)",
+    )
     args = ap.parse_args()
 
     # Propagate model override into run.py's module-level constant so that
     # both run_claude and judge pick it up without reimplementing the call.
     _run.MODEL = args.model
+    if args.plugin_dir:
+        _run.PLUGIN_DIR = Path(args.plugin_dir).resolve()
 
     # Skill and Read tools allowed; for the baseline arm no plugin is loaded
     # so the Skill tool is effectively unavailable — passing it is harmless.
