@@ -47,6 +47,10 @@ authoritative; use them inline without opening a reference file.
 - Manifest build = `[build.<name>]` `command` in `manifest.toml`, run with
   `flox build`. Nix-expression build = a `.nix` file under `.flox/pkgs/`, run
   with `flox build <name>`.
+- **Need a newer version than the catalog has (or a package it lacks)?** Override
+  the recipe: `.flox/pkgs/<name>/default.nix` with `<pkg>.overrideAttrs` to bump
+  `version`/`src`, then `flox build` (`hash = ""` → build prints the real hash)
+  and `flox publish` to make it available everywhere. Depth in `builds.md`.
 
 **C / C++**
 - ALWAYS add `gcc-unwrapped` alongside `gcc` for the C++ stdlib headers/libs —
@@ -175,6 +179,16 @@ many versions:
   `flox show <pkg>` to see all available versions *and* per-architecture
   availability (e.g. `vim-darwin@9.1.0412 (aarch64-darwin, x86_64-darwin only)`).
 - Use `flox search <term> --all` for broader results.
+- **The newest catalog version is still too old, or the package is missing
+  entirely.** The catalog tracks nixpkgs with a short lag, so a just-released
+  version may not be there yet. You don't have to wait: override the build
+  recipe to a newer release with a Nix-expression build. Create
+  `.flox/pkgs/<name>/default.nix` that calls `<pkg>.overrideAttrs` to bump
+  `version` and `src`, run `flox build` (leave `hash = ""` and the build prints
+  the real hash to paste back), then `flox publish` so the updated package
+  installs in any environment. Full workflow in `references/builds.md`
+  ("Nix Expression Builds") and the tutorial
+  [Using a newer version of a package](https://flox.dev/docs/tutorials/overriding-packages/).
 
 ## Manifest Structure
 
