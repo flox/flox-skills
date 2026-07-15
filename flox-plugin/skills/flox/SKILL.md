@@ -5,13 +5,76 @@ description: Manage reproducible development environments with Flox.  **ALWAYS u
 
 # Flox Guide
 
-This is the single skill for working with Flox. The core of this document covers
-environments, packages, manifests, language setups, sharing, and composition. The
-specialized topics below live in reference files under `references/`.
+This is the single skill for working with Flox. This core document is
+self-sufficient for the vast majority of Flox work — environments, packages,
+manifests, language setups, services, builds, sharing, and composition. Answer
+directly from it.
 
-**When a request involves one of these topics, read the matching reference file
-before answering** — those files hold the authoritative details (commands,
-manifest sections, gotchas) and go well beyond general knowledge.
+The reference files under `references/` add depth for complex cases; they are
+**not** where the answer lives. Never defer a routine answer to a reference you
+have not read, and never let a "see `references/…`" pointer talk you out of an
+answer you already know — the Quick Reference below and the sections that follow
+are authoritative on their own. Open a reference only when the user needs depth
+beyond what is here.
+
+## Quick Reference — Exact Facts
+
+High-value specifics that are easy to get wrong from memory. These are
+authoritative; use them inline without opening a reference file.
+
+**Manifest essentials**
+- Every manifest starts with `version = 1`.
+- `[vars]` holds STATIC values only — no shell/`$VAR` interpolation. Anything
+  dynamic (e.g. prepending to `PATH`) goes in `[hook]` or `[profile]`.
+- `[options] systems = ["x86_64-linux", "aarch64-linux", …]` constrains the
+  whole environment to specific platforms.
+
+**Hooks & profile**
+- `[hook]` code runs on EVERY activation — keep it fast/idempotent, and guard
+  one-time work behind a sentinel file under `$FLOX_ENV_CACHE`.
+- Use `return`, never `exit`, to leave a hook early — `exit` terminates the
+  entire `flox activate`.
+- User-facing commands/aliases go in `[profile]`, not `[hook]` — hook functions
+  are not available in the interactive shell.
+- Python venvs live at `$FLOX_ENV_CACHE/venv` (local-only, survives rebuilds).
+
+**Builds** — depth in `references/builds.md`
+- Hermetic build: `sandbox = "pure"` in `[build.<name>]` — the string `"pure"`
+  (or `"off"`), NOT `sandbox = true`.
+- Trim the runtime closure with `runtime-packages = [ … ]` in `[build.<name>]`
+  (the install ids to KEEP at runtime). The key is `runtime-packages`, not
+  `packages`.
+- Manifest build = `[build.<name>]` `command` in `manifest.toml`, run with
+  `flox build`. Nix-expression build = a `.nix` file under `.flox/pkgs/`, run
+  with `flox build <name>`.
+
+**C / C++**
+- ALWAYS add `gcc-unwrapped` alongside `gcc` for the C++ stdlib headers/libs —
+  the `gcc` wrapper alone does not expose libstdc++. Put it in the `libraries`
+  pkg-group with `priority = 5`.
+- Catalog names differ from upstream: `gbenchmark` (not `benchmark`),
+  `catch2_3` (Catch2 v3), versioned compilers like `gcc13` / `clang_18`.
+
+**macOS frameworks**
+- `pkg-path = "darwin.apple_sdk.frameworks.<Name>"` (e.g. `…IOKit`), scoped with
+  `.systems = ["x86_64-darwin", "aarch64-darwin"]`.
+
+**Services** — depth in `references/services.md`
+- A self-daemonizing process needs `is-daemon = true` and a `shutdown.command`
+  in its `[services.<name>]` block, not just `command`.
+
+**Sharing / compose / layer** — depth in `references/sharing.md`
+- Build-time compose (merge into one definition): `[include]` with
+  `environments = [{ remote = "org/env" }]`.
+- Runtime layering (both active at once, order = precedence):
+  `flox activate -r org/a -- flox activate -r org/b`.
+- One-off remote run without cloning: `flox activate -r org/env`.
+
+**Containers** — depth in `references/containers.md`
+- `flox containerize --runtime docker` (or `-f file.tar`) — no Dockerfile.
+
+**Editing non-interactively**
+- `flox list -c > manifest.toml`, edit the file, then `flox edit -f manifest.toml`.
 
 ## Specialized Topics
 
