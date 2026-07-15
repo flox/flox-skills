@@ -1,0 +1,706 @@
+{
+  "summary": {
+    "model": "claude-sonnet-4-6",
+    "total": 24,
+    "errors": 0,
+    "discriminators": 3,
+    "skill_gaps": 3,
+    "no_signals": 18,
+    "mean_judge_gap": -0.33,
+    "discriminator_ids": [
+      "stretch-manifest-vs-nix-build",
+      "stretch-implicit-monorepo",
+      "trap-uv-venv-invocation"
+    ],
+    "skill_gap_ids": [
+      "stretch-build-sandbox-pure",
+      "stretch-build-runtime-packages",
+      "trap-cpp-libstdcxx-unwrapped"
+    ],
+    "no_signal_ids": [
+      "stretch-service-daemon-shutdown",
+      "stretch-compose-include-remote",
+      "stretch-vars-static-env",
+      "stretch-options-systems",
+      "stretch-remote-activate",
+      "stretch-venv-cache-location",
+      "stretch-publish-prereqs",
+      "stretch-cuda-torch-linux",
+      "trap-hook-return-not-exit",
+      "trap-cpp-exact-pkgpaths",
+      "trap-darwin-framework-attrpath",
+      "trap-vars-no-interpolation",
+      "trap-alias-profile-not-hook",
+      "trap-hook-runs-every-activation",
+      "trap-manifest-syntax-lockout",
+      "trap-noninteractive-edit-idiom",
+      "trap-containerize-nopush-fixed",
+      "trap-layer-vs-compose-fixed"
+    ],
+    "error_ids": []
+  },
+  "results": [
+    {
+      "id": "stretch-build-sandbox-pure",
+      "area": "builds",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 4,
+        "judge_correct": true,
+        "judge_issues": [
+          "nix-store -q --references is Nix-level tooling, not Flox-native \u2014 minor since the manifest key is correctly named",
+          "runtime-packages = [] field and ${deps} inter-stage reference syntax are unverified Flox manifest features that may not exist as described",
+          "two-stage off\u2192pure pattern is plausible but not confirmed Flox documentation \u2014 presented as 'the standard approach' without caveat"
+        ],
+        "answer_excerpt": "Here's the complete solution for a fully hermetic Flox manifest build.\n\n---\n\n## Hermetic build manifest\n\nThe key is `sandbox = \"pure\"`, which restricts the build to git-tracked files only and blocks network access (on Linux). Because pure builds can't fetch dependencies at build time, you use a two-stage pattern: fetch with `sandbox = \"off\"`, then build with `sandbox = \"pure\"`.\n\n```toml\n[install]\ngo.pkg-path = \"go\"\n\n# Stage 1 \u2014 fetch dependencies (network allowed, host FS accessible)\n[build.deps]\ncommand = '''\n  go mod vendor\n  mkdir -p $out/vendor\n  cp -r vendor/* $out/vendor/\n'''\nsandbox = \"off\"\n\n# Stage 2 \u2014 hermetic compile (no network, no host FS, git-tracked files only)\n[build.app]\ncommand = '''\n  cp -r ${deps}/vendor ./vendor\n  go build -mod=vendor -o $out/bin/myapp ./...\n'''\nversion     = \"1.0.0\"\ndescription = \"My hermetic Go application\"\nsandbox     = \"pure\"\nruntime-packages = []   # exclude build tools from the runtime closure\n```\n\n**What `sandbox = \"pure\"` enforces:**\n- **Filesystem** \u2014 only git-tracked files, copied to a temporary directory; the host filesystem is not visible\n- **Network** \u2014 blocked on Linux (allowed on macOS, which is a kernel-level constraint)\n- **Repr"
+      },
+      "skills": {
+        "hard_pass": false,
+        "judge_score": 2,
+        "judge_correct": false,
+        "judge_issues": [
+          "Sets sandbox = true instead of the correct sandbox = \"pure\"",
+          "Comment claims 'sandbox = true is the default', implying hermetic builds are the default \u2014 penalized per rubric",
+          "The string value \"pure\" is the documented key for fully hermetic/pure sandboxing; boolean true is a different (weaker or non-existent) option",
+          "No invented CLI flags or pure Nix-only advice \u2014 those aspects are clean"
+        ],
+        "answer_excerpt": "The skill loaded references `flox-builds` as a related skill for the `[build]` section, but doesn't include that detail inline. I'll give you the answer from what I know about Flox's build system (which is built on Nix's sandbox).\n\n---\n\n## Hermetic Flox Build Manifest\n\n```toml\nversion = 1\n\n[install]\n# Every build-time tool must be declared here.\n# These are the ONLY binaries/libraries available during the build.\ngcc.pkg-path = \"gcc\"\ngnumake.pkg-path = \"gnumake\"\npkg-config.pkg-path = \"pkg-config\"\n# ... add any other build deps; nothing from the host leaks in\n\n[build.mypackage]\n# sandbox = true is the default and enforces:\n#   - no outbound network (fetches fail at socket level)\n#   - no host /home, /usr, /opt, or other filesystem paths\n#   - PATH is restricted to declared [install] packages\n#   - only $out, $src, and declared inputs are writable\nsandbox = true\ncommand = \"\"\"\n  set -euo pipefail\n  \n  cd \"$FLOX_ENV_PROJECT\"\n  \n  ./configure --prefix=\"$out\"\n  make -j\"$(nproc)\"\n  make install\n\"\"\"\n```\n\n---\n\n## Commands\n\n```bash\n# Initialize (if not already done)\nflox init\n\n# Install build-time tools declared above\nflox install gcc gnumake pkg-config\n\n# Run the hermetic build\nflox build\n\n#"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": -2,
+      "classification": "skill-gap"
+    },
+    {
+      "id": "stretch-build-runtime-packages",
+      "area": "builds",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 4,
+        "judge_correct": true,
+        "judge_issues": [
+          "Uses `nix-store -q --references` for verification \u2014 explicitly penalized by the rubric",
+          "`-ldflags='-s -w'` is strip-adjacent (removes debug tables/DWARF); rubric penalizes strip hacks, though this is a compiler flag not a manual post-build `strip` command \u2014 borderline"
+        ],
+        "answer_excerpt": "Here is the complete solution.\n\n---\n\n## Root cause\n\nBy default, **every package in `[install]`'s `toplevel` group becomes a runtime dependency of your build's closure** \u2014 so `go` is dragged in even though the compiled binary doesn't need it. Additionally, without `-trimpath`, Go embeds `/nix/store/\u2026go\u2026/` source paths directly in the binary, which Nix follows as closure edges.\n\n---\n\n## The fix: `runtime-packages = []` + build flags\n\n```toml\nversion = 1\n\n[install]\ngo.pkg-path = \"go\"          # available during build (toplevel group = build env)\n\n[build.myapp]\ncommand = '''\n  export CGO_ENABLED=0\n  go build \\\n    -trimpath \\\n    -ldflags=\"-s -w\" \\\n    -o \"$out/bin/myapp\" \\\n    .\n'''\ndescription = \"My Go application\"\nruntime-packages = []       # \u2190 Go toolchain excluded from runtime closure\n```\n\nFor network-isolated (pure) builds with vendored modules, use a two-stage pattern:\n\n```toml\nversion = 1\n\n[install]\ngo.pkg-path = \"go\"\n\n[build.vendor]\ncommand = '''\n  go mod vendor\n  mkdir -p $out/vendor\n  cp -r vendor/* $out/vendor/\n'''\nsandbox = \"off\"\n\n[build.myapp]\ncommand = '''\n  cp -r ${vendor}/vendor ./vendor\n  export CGO_ENABLED=0\n  go build \\\n    -trimpath \\\n    -mod=vendor \\\n    -ldflag"
+      },
+      "skills": {
+        "hard_pass": false,
+        "judge_score": 2,
+        "judge_correct": false,
+        "judge_issues": [
+          "Uses [build.<name>].packages for go instead of the correct runtime-packages = [...] key in [build.<name>]",
+          "runtime-packages is the canonical key to restrict which installed packages appear in the runtime closure \u2014 the answer invents a different mechanism",
+          "Recommends 'nix path-info -r' which is penalized nix-store advice per rubric",
+          "Leaves [install] empty rather than showing how runtime-packages filters a populated [install] section"
+        ],
+        "answer_excerpt": "The root cause: packages listed in `[install]` are included in the runtime closure. Go only needs to be present at build time \u2014 the compiled binary doesn't need the toolchain to run.\n\nThe fix is to move `go` into the `packages` list under your `[build.<name>]` section. Those packages are available in the build sandbox but are **not** added to the runtime closure.\n\n---\n\n**`manifest.toml`**\n\n```toml\nversion = 1\n\n[build.myapp]\ncommand = \"\"\"\n  export CGO_ENABLED=0\n  go build -o \"$out/bin/myapp\" .\n\"\"\"\npackages = [\"go\"]   # build-only \u2014 excluded from runtime closure\n\n[install]\n# intentionally empty for a pure-Go binary:\n# a CGO_ENABLED=0 binary has no runtime deps\n# if you need CGO, add only the specific C libs here, e.g.:\n#   glibc.pkg-path = \"glibc\"\n```\n\n---\n\n**Commands**\n\n```sh\n# Build the binary (go toolchain is available inside the sandbox only)\nflox build myapp\n\n# Inspect what's in the runtime closure \u2014 should be just your binary + glibc loader\nnix path-info -r ./result\n```\n\n---\n\n**Why this works**\n\n| Location | Included in runtime closure? |\n|---|---|\n| `[install]` | Yes |\n| `[build.<name>].packages` | No \u2014 sandbox only |\n\nWith `CGO_ENABLED=0`, Go produces a fully static binary. N"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": -2,
+      "classification": "skill-gap"
+    },
+    {
+      "id": "stretch-service-daemon-shutdown",
+      "area": "services",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "Here is the complete solution.\n\n## The Problem\n\nA self-daemonizing process double-forks so the child outlives the shell that started it. Flox's service manager loses track of the PID unless you tell it to expect this. And sending SIGTERM to a process that requires a clean shutdown (flushing state, releasing locks, notifying peers) will corrupt it.\n\nTwo manifest keys solve both problems: `is-daemon = true` and `[services.<name>.shutdown]`.\n\n---\n\n## Manifest (`manifest.toml`)\n\n```toml\n[services.myapp]\n# The start command. The process will double-fork and exit the shell immediately;\n# Flox will track the daemonized child, not this shell process.\ncommand = \"myapp start --config $FLOX_ENV_CACHE/myapp/myapp.conf\"\nis-daemon = true\n\n[services.myapp.shutdown]\n# Run instead of SIGTERM. Flox waits for it to exit before declaring the\n# service stopped. Must be able to locate the running daemon on its own\n# (e.g. via a pidfile, a socket, or a well-known port).\ncommand = \"myapp stop --config $FLOX_ENV_CACHE/myapp/myapp.conf\"\n\n[vars]\nMYAPP_HOST = \"127.0.0.1\"\nMYAPP_PORT = \"9000\"\n\n[hook]\non-activate = '''\n  mkdir -p \"$FLOX_ENV_CACHE/myapp\"\n  # Write config so both the start and stop commands can fi"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 4,
+        "judge_correct": true,
+        "judge_issues": [
+          "'pidfile' is potentially an invented key \u2014 not confirmed in the Flox manifest spec, and the answer overstates it as 'Required when is-daemon = true'",
+          "$FLOX_ENV is described as 'writable-at-runtime' but it typically resolves to the read-only Nix store path, making $FLOX_ENV/var/run/ a dubious write location"
+        ],
+        "answer_excerpt": "## Flox Service for a Self-Daemonizing Process\n\nTwo manifest keys handle this case:\n\n- **`is-daemon = true`** \u2014 tells Flox the process will double-fork and its parent will exit. Flox won't try to supervise the parent; instead it tracks the daemon via a PID file.\n- **`pidfile`** \u2014 path where the daemon writes its PID after forking. Required when `is-daemon = true`.\n- **`[services.<name>.shutdown]`** \u2014 `command` replaces the default SIGTERM; `timeout` is how long to wait before sending SIGKILL.\n\n```toml\nversion = 1\n\n[services.myapp]\ncommand = \"myapp --config $FLOX_ENV/etc/myapp.conf\"\nis-daemon = true\npidfile = \"$FLOX_ENV/var/run/myapp.pid\"\n\n[services.myapp.shutdown]\ncommand = \"myapp-ctl stop --graceful\"\ntimeout = 30\n```\n\n### How it works\n\n1. Flox runs `command`; the process double-forks and the launcher exits normally \u2014 Flox does not treat that exit as a crash because `is-daemon = true`.\n2. The daemon writes its PID to `pidfile`; Flox reads that file to know which process to monitor and, when needed, to send a final SIGKILL after the shutdown timeout.\n3. On stop, Flox runs `shutdown.command` instead of `kill -TERM <pid>`. After `timeout` seconds, if the process is still alive, Flox s"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": -1,
+      "classification": "no-signal"
+    },
+    {
+      "id": "stretch-compose-include-remote",
+      "area": "composition",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [
+          "version pinning syntax `{ remote = \"...\", version = \"v1.2.3\" }` may be speculative \u2014 Flox docs do not clearly document this key",
+          "claim that `priority` resolves package conflicts in `[include]` compositions may be speculative"
+        ],
+        "answer_excerpt": "## Merging FloxHub Environments via Composition\n\nFlox merges shared environments at **build time** using the `[include]` section of your manifest. No runtime layering needed \u2014 packages, vars, services, and hooks from the included environments are all folded in when the environment is built.\n\n### The manifest\n\n```toml\n# .flox/env/manifest.toml\nversion = 1\n\n[include]\nenvironments = [\n    { remote = \"team/postgres\" },\n    { remote = \"team/redis\" }\n]\n\n[install]\n# your project-specific packages go here alongside the included ones\nmyapp.pkg-path = \"myapp\"\n\n[vars]\n# You can override vars from the included environments here\nPOSTGRES_PORT = \"5432\"\nREDIS_PORT    = \"6379\"\n\n[hook.on-activate]\n# runs after all included hooks \u2014 safe to reference postgres/redis here\necho \"Stack ready: postgres + redis\"\n\n[services]\n# project-level services; team/postgres and team/redis services are merged in automatically\n```\n\n### The commands\n\n```bash\n# 1. Initialize your project environment (if you haven't already)\nflox init\n\n# 2. Edit the manifest to add the [include] block shown above\nflox edit\n\n# 3. Activate \u2014 Flox fetches and merges team/postgres and team/redis at build time\nflox activate\n\n# 4. (Optional) St"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "The right mechanism here is the `[include]` section, which merges remote FloxHub environments into your project's environment at lock/build time \u2014 not at runtime like layering does. Packages, vars, hooks, and services from the included environments all come along.\n\n---\n\n### Commands\n\n```bash\n# From inside your project directory (where .flox/ lives):\nflox include -r team/postgres\nflox include -r team/redis\n```\n\nEach command rewrites your manifest to add the include entry and re-locks immediately. You can also edit the manifest directly with `flox edit` and paste the block below.\n\n---\n\n### Resulting manifest\n\n```toml\nversion = 1\n\n[include]\nenvironments = [\n  { remote = \"team/postgres\" },\n  { remote = \"team/redis\" },\n]\n\n[install]\n# your project-specific packages here\n# (postgres/redis binaries and libs arrive via the includes above)\n\n[vars]\n# project-specific vars; included envs' vars are merged in automatically\n\n[hook]\non-activate = '''\n  # project-specific setup; included envs' on-activate hooks run first,\n  # so postgres/redis services will already be initialised when this runs\n'''\n\n[services]\n# project-specific services; team/postgres and team/redis services\n# (e.g. postgres, redi"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0,
+      "classification": "no-signal"
+    },
+    {
+      "id": "stretch-vars-static-env",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "Use the `[vars]` section in your manifest \u2014 that's exactly what it's for.\n\n**Manifest snippet:**\n\n```toml\n[vars]\nAPI_MODE = \"staging\"\n```\n\n**Full minimal manifest example:**\n\n```toml\nversion = 1\n\n[install]\n# ... your packages ...\n\n[vars]\nAPI_MODE = \"staging\"\n```\n\n**To apply it:**\n\n```bash\n# Option A \u2014 edit interactively (opens $EDITOR on the manifest):\nflox edit\n\n# Option B \u2014 edit non-interactively:\nflox list -c > /tmp/manifest.toml\n# add the [vars] block, then:\nflox edit -f /tmp/manifest.toml\n```\n\n**How it works:** Variables declared under `[vars]` are set in the environment on every `flox activate` \u2014 they're baked into the environment definition, not sourced from a shell hook. No `[hook]` or `[profile]` block needed. The value is available immediately after activation as a regular env var: `echo $API_MODE` \u2192 `staging`.\n\nIf you ever need to override it at runtime without changing the manifest, you can still do `API_MODE=production flox activate`."
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## Static environment variable in Flox\n\nFlox has a dedicated `[vars]` table in the manifest for exactly this \u2014 no hook needed.\n\n### manifest.toml\n\n```toml\nversion = 1\n\n[vars]\nAPI_MODE = \"staging\"\n```\n\n### Commands\n\n```sh\n# Open the manifest editor (adds/edits .flox/env/manifest.toml):\nflox edit\n\n# \u2014 or, if you prefer a one-liner to set it from the CLI directly:\nflox edit --add-var API_MODE=staging   # (not a real flag \u2014 use flox edit)\n```\n\nThe canonical workflow is:\n\n```sh\nflox edit          # opens manifest in $EDITOR; add the [vars] block, save, quit\nflox activate      # verify: `echo $API_MODE` should print \"staging\"\n```\n\n### Explanation\n\n- `[vars]` is the static variable table \u2014 values are set verbatim on activation, before any hook runs, with no shell evaluation.\n- This is distinct from `[hook.on-activate]` (a shell script block) and `[profile]` (sourced into interactive shells). `[vars]` is the right choice when you want a plain key=value binding with no scripting.\n- The variable is visible to every process spawned inside `flox activate`, including subshells, scripts, and services."
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0,
+      "classification": "no-signal"
+    },
+    {
+      "id": "stretch-options-systems",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "No existing manifest found. Here's the complete answer.\n\n---\n\n## Manifest\n\nAdd (or update) the `[options]` section in `.flox/env/manifest.toml`:\n\n```toml\nversion = 1\n\n[install]\n# your packages here\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-linux\"]\n```\n\nThe `systems` list is the only declaration needed. Any system not listed \u2014 including `x86_64-darwin` and `aarch64-darwin` \u2014 will be rejected at resolve time with an unsupported-system error.\n\n---\n\n## Commands\n\n**If the environment already exists**, open the manifest in your editor and add/update `[options].systems`:\n\n```sh\nflox edit\n```\n\n**If you're creating a new environment**, initialize it and then restrict the systems:\n\n```sh\nflox init\nflox edit   # add the [options] block shown above\n```\n\n**To verify** the constraint is in effect before pushing/sharing:\n\n```sh\nflox envs --json   # confirms active environment path\ncat .flox/env/manifest.toml  # confirms the systems list\n```\n\n---\n\n## How it works\n\nFlox uses Nix system doubles (`<arch>-<os>`). By listing only `x86_64-linux` and `aarch64-linux` in `options.systems`, the lockfile will only be generated for those two targets. On macOS (`x86_64-darwin` / `aarch64-darwin`), `flox a"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "No existing Flox environment in this repo yet. Here's the complete solution:\n\n---\n\n## Manifest\n\nEdit `.flox/env/manifest.toml` and add or update the `[options]` section:\n\n```toml\nversion = 1\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-linux\"]\n\n[install]\n# your packages here\n\n[vars]\n# your environment variables here\n\n[hook]\n# your hook scripts here\n```\n\nThe key is the `systems` list under `[options]`. Flox will refuse to activate or lock the environment on any platform not in that list \u2014 including `x86_64-darwin` and `aarch64-darwin` (macOS).\n\n---\n\n## Commands\n\n**If the environment doesn't exist yet:**\n\n```bash\nflox init\nflox edit   # add systems = [...] to [options], save and quit\n```\n\n**If the environment already exists:**\n\n```bash\nflox edit   # opens manifest.toml in $EDITOR; add/update [options].systems\n```\n\n**To verify the constraint is in effect:**\n\n```bash\nflox list --config   # shows resolved manifest\n```\n\n---\n\n## Brief explanation\n\n`systems` in `[options]` is the authoritative allowlist of Nix system tuples. Flox checks it at lock time: if the running platform isn't in the list, resolution aborts with an error before any packages are fetched. Using `[\"x86_64-linux\", \"aar"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0,
+      "classification": "no-signal"
+    },
+    {
+      "id": "stretch-remote-activate",
+      "area": "sharing",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 4,
+        "judge_correct": true,
+        "judge_issues": [
+          "Includes unnecessary teammate manifest content \u2014 the task is about consuming an environment, not authoring one",
+          "Option C (eval subshell form) may not be a documented Flox pattern and could mislead",
+          "flox gc / nix-collect-garbage equivalence is imprecise"
+        ],
+        "answer_excerpt": "No manifest needed on your side \u2014 your teammate owns that. Here's the complete picture:\n\n---\n\n## Teammate's published manifest (`org/tools`)\n\nThis is what they wrote and pushed to FloxHub. You don't touch it.\n\n```toml\nversion = 1\n\n[install]\nripgrep.pkg-path = \"ripgrep\"\njq.pkg-path = \"jq\"\nhttpie.pkg-path = \"httpie\"\n# ... whatever tools they packaged\n\n[options]\nsystems = [\n  \"x86_64-linux\",\n  \"aarch64-linux\",\n  \"x86_64-darwin\",\n  \"aarch64-darwin\",\n]\n```\n\n---\n\n## Your one-off commands\n\n**Option A \u2014 subshell (cleanest, zero residue):**\n```bash\nflox activate -r org/tools\n# tools are live; do your work\nexit                          # back to original shell, nothing left behind\n```\n\n**Option B \u2014 single command, no shell at all:**\n```bash\nflox activate -r org/tools -- jq '.key' data.json\n```\n\n**Option C \u2014 activate into your *current* shell (no subshell):**\n```bash\neval \"$(flox activate -r org/tools)\"\n```\nUse this when you need the env vars/aliases in the exact running shell (e.g. inside a script). The environment persists only for the lifetime of that shell session.\n\n---\n\n## Why this works\n\n- `-r org/tools` pulls directly from FloxHub \u2014 no `git clone`, no local `.flox/` directory created.\n"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "Here's the complete solution:\n\n---\n\n## Teammate's manifest (stored on FloxHub as `org/tools`)\n\n```toml\nversion = 1\n\n[install]\nripgrep.pkg-path = \"ripgrep\"\njq.pkg-path = \"jq\"\nfd.pkg-path = \"fd\"\ngh.pkg-path = \"gh\"\nhttpie.pkg-path = \"httpie\"\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-linux\", \"x86_64-darwin\", \"aarch64-darwin\"]\n```\n\n---\n\n## The exact commands\n\n**Drop into a subshell with the tools available:**\n```bash\nflox activate -r org/tools\n```\nExit with `exit` or `Ctrl-D` \u2014 the subshell closes and nothing is left behind.\n\n**Run a single command and exit immediately (most ephemeral):**\n```bash\nflox activate -r org/tools -- rg \"TODO\" .\n```\n\n---\n\n## How it works\n\n`-r` (`--remote`) pulls the environment definition from FloxHub at activation time. No clone, no local `.flox/` directory, no install step \u2014 Flox fetches the closure into its own cache (`~/.cache/flox/`) and activates it in a subprocess. When the subshell exits, your original `PATH` and environment are fully restored.\n\nThe `-- <cmd>` form is even cleaner for one-offs: it never opens an interactive subshell at all, so there's no shell to exit."
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 1,
+      "classification": "no-signal"
+    },
+    {
+      "id": "stretch-venv-cache-location",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## Put the virtualenv at `$FLOX_ENV_CACHE/.venv`\n\n**Why this path satisfies all three constraints:**\n\n| Constraint | How `$FLOX_ENV_CACHE` satisfies it |\n|---|---|\n| Per-machine | Resolves to `~/.cache/flox/environments/<name>.<system>/cache/` \u2014 local to the machine, never synced |\n| Never committed | Lives entirely outside the project tree; nothing to add to `.gitignore` |\n| Survives rebuilds | Flox only replaces `$FLOX_ENV` (the Nix store path) on rebuild; the cache dir is untouched |\n\n---\n\n### Complete manifest\n\n```toml\nversion = 1\n\n[install]\npython3.pkg-path = \"python3\"\n\n[hook]\non-activate = \"\"\"\n  if [ ! -d \"$FLOX_ENV_CACHE/.venv\" ]; then\n    echo \"Creating virtualenv at $FLOX_ENV_CACHE/.venv\"\n    python -m venv \"$FLOX_ENV_CACHE/.venv\"\n  fi\n\n  # Upgrade pip silently on first create\n  \"$FLOX_ENV_CACHE/.venv/bin/pip\" install --quiet --upgrade pip\n\"\"\"\n\n[profile]\nbash = \"\"\"\n  source \"$FLOX_ENV_CACHE/.venv/bin/activate\"\n\"\"\"\nzsh = \"\"\"\n  source \"$FLOX_ENV_CACHE/.venv/bin/activate\"\n\"\"\"\n```\n\n**`[hook] on-activate`** \u2014 runs in a plain subshell at activation time; creates the venv once if absent.  \n**`[profile]`** \u2014 runs in the user's interactive shell after the hook, so the venv is alrea"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## Answer\n\n**Path:** `$FLOX_ENV_CACHE/venv`\n\n**Why:** `$FLOX_ENV_CACHE` is a machine-local writable directory that Flox manages outside the project tree \u2014 it is never committed to git, is not inside `.flox/` (which is committed), and is stable across environment rebuilds of the same named environment. It survives even `flox delete` of the environment itself.\n\n---\n\n### Manifest (`.flox/env/manifest.toml`)\n\n```toml\nversion = 1\n\n[install]\npython3.pkg-path = \"python3\"\nuv.pkg-path = \"uv\"\n\n[hook]\non-activate = '''\n  venv=\"$FLOX_ENV_CACHE/venv\"\n\n  if [ ! -d \"$venv\" ]; then\n    uv venv \"$venv\" --python python3\n  fi\n\n  if [ -f \"$venv/bin/activate\" ]; then\n    source \"$venv/bin/activate\"\n    uv pip install -r \"$FLOX_ENV_PROJECT/requirements.txt\" --quiet\n  fi\n\n  cd \"$FLOX_ENV_PROJECT\"\n'''\n```\n\n---\n\n### Flox commands\n\n```bash\nflox init                  # create the environment (once, in project root)\nflox install python3 uv    # add Python and uv to the manifest\nflox edit                  # paste in the [hook] block above\nflox activate              # activates env, creates venv, installs deps\n```\n\nAdd `.venv/` to `.gitignore` only if you ever want a local fallback venv in the project tree \u2014 it"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0,
+      "classification": "no-signal"
+    },
+    {
+      "id": "stretch-publish-prereqs",
+      "area": "publish",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 3,
+        "judge_correct": false,
+        "judge_issues": [
+          "Missing the requirement that the Flox environment itself must be on FloxHub (pushed there) before publish can succeed \u2014 authentication alone is not sufficient",
+          "Answer correctly covers [build.<name>] section requirement",
+          "Answer correctly covers git clean/committed/remote requirements",
+          "Answer correctly covers org catalog namespace publishing",
+          "No penalizable errors: does not claim loose files work or that git state is irrelevant"
+        ],
+        "answer_excerpt": "Here is the complete picture.\n\n## Prerequisites for `flox publish` to succeed\n\n### 1. Authentication\n\n```bash\nflox auth login\n```\n\nYou must be authenticated (or have `FLOX_AUTH_TOKEN` set in CI) before any publish attempt.\n\n---\n\n### 2. A valid `manifest.toml` with a `[build]` section\n\nThe environment must define at least one package in `[build]`, and at least one entry in `[install]` (even if only build-time deps). Example for a compiled app:\n\n```toml\nversion = 1\n\n[install]\ngcc.pkg-path = \"gcc\"\nmake.pkg-path = \"make\"\nopenssl.pkg-path = \"openssl\"\n\n[build.myapp]\ncommand = '''\n  make\n  mkdir -p $out/bin\n  cp myapp $out/bin/\n'''\nversion = \"1.2.0\"\ndescription = \"My organization's internal CLI tool\"\nsandbox = \"pure\"\nruntime-packages = [\"openssl\"]\n```\n\n---\n\n### 3. Git repository state must be clean and pushed\n\nAll four conditions must hold simultaneously:\n\n| Condition | How to satisfy |\n|---|---|\n| Inside a Git repo with a configured remote | `git remote -v` shows a remote URL |\n| No uncommitted changes | `git status` is clean |\n| Current commit pushed to remote | `git push origin <branch>` |\n| All build-relevant files tracked by Git | `git add .flox/ src/ && git commit` |\n\n```bash\ngit ad"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 3,
+        "judge_correct": false,
+        "judge_issues": [
+          "Missing the rubric requirement that the environment itself must be on FloxHub (pushed via `flox push`) before publishing succeeds",
+          "Otherwise accurate on all other rubric points: [build.<name>] section, clean/committed/pushed git state with remote, and org catalog namespace"
+        ],
+        "answer_excerpt": "Here is the complete answer, drawn directly from the repo's own documentation.\n\n---\n\n## Prerequisites for `flox publish` to succeed\n\n### 1. Authenticated session\n\n```bash\nflox auth login\n# or in CI:\nflox auth login --token \"$FLOX_AUTH_TOKEN\"\n```\n\nYou must be authenticated before the first publish. Organization publishing is a paid feature; you must be a member of the target org.\n\n---\n\n### 2. A valid manifest\n\nThe `.flox/env/manifest.toml` must have **both**:\n\n- At least one package in `[install]` (build tools live here)\n- At least one package defined in a `[build.<name>]` section (or a `.nix` file in `.flox/pkgs/`)\n\n```toml\n# .flox/env/manifest.toml\n\n[install]\ngcc.pkg-path = \"gcc\"\nmake.pkg-path = \"make\"\n\n[build.myapp]\ncommand = '''\n  make\n  mkdir -p $out/bin\n  cp myapp $out/bin/\n'''\nversion = \"1.0.0\"\ndescription = \"My application\"\nruntime-packages = []   # only list true runtime deps, not build tools\n```\n\n---\n\n### 3. Git repository state \u2014 all four conditions must hold\n\n| Condition | How to satisfy it |\n|---|---|\n| Environment is inside a Git repo with a configured remote | `git remote -v` must show at least one remote |\n| Working tree is clean \u2014 no uncommitted changes | `git statu"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0,
+      "classification": "no-signal"
+    },
+    {
+      "id": "stretch-manifest-vs-nix-build",
+      "area": "builds",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 3,
+        "judge_correct": false,
+        "judge_issues": [
+          "Nix expression invocation uses flake-style '.#myapp' syntax; the correct syntax is plain 'flox build <name>' for both manifest and Nix expression builds",
+          "runtime-packages is not a documented manifest.toml field and may be fabricated",
+          "Conflates distinction in invocation \u2014 rubric requires showing 'flox build <name>' works the same for both, not a different syntax for Nix"
+        ],
+        "answer_excerpt": "## Manifest `[build]` vs. Nix-expression builds\n\n### When to use each\n\n| | Manifest `[build]` | Nix expression |\n|---|---|---|\n| **Sweet spot** | Existing projects with their own build scripts; fast iteration | Fully reproducible, hermetic packages; Nixpkgs ecosystem reuse |\n| **Isolation** | Optional (`sandbox = \"pure\"`) | Always isolated (Nix sandbox) |\n| **Language** | Bash | Nix language |\n| **Learning curve** | Low | Steep |\n\n---\n\n### Manifest build\n\n**Where the definition lives:** `.flox/manifest.toml` in your project root, under a `[build.<name>]` table.\n\n```toml\n[install]\nclang.pkg-path = \"clang\"\ncmake.pkg-path = \"cmake\"\n\n[build.myapp]\ncommand = '''\n  cmake -B build -DCMAKE_BUILD_TYPE=Release\n  cmake --build build -j$(nproc)\n  mkdir -p $out/bin\n  cp build/myapp $out/bin/\n'''\nversion = \"1.0.0\"\ndescription = \"My C++ application\"\nsandbox = \"pure\"\nruntime-packages = [\"clang\"]   # exclude cmake from the runtime closure\n```\n\n**Build it:**\n```bash\nflox build           # build all [build.*] targets\nflox build myapp     # build only this one\nflox build -v        # verbose\n```\n\nResult lands at `./result-myapp` \u2192 `/nix/store/...-myapp-1.0.0`. Run it with `./result-myapp/bin/myapp`.\n\n-"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 4,
+        "judge_correct": true,
+        "judge_issues": [
+          "Nix-expression build invocation shown as 'flox build .#myapp' (flake output syntax) rather than the correct 'flox build <name>' form specified in the rubric",
+          "Claim that 'flox build also picks up .flox/pkgs/*.nix automatically' is unverified and potentially conflates manifest-target discovery with Nix-package discovery"
+        ],
+        "answer_excerpt": "Here's the complete answer:\n\n---\n\n## Manifest `[build]` vs. Nix Expression Build\n\n### When to use each\n\n**Manifest `[build]`** \u2014 use this by default. It's a Bash script that runs in your activated environment. Best when you have an existing build system (`make`, `cargo`, `npm`, etc.) and want to get something packaged quickly. Supports optional sandboxing (`sandbox = \"pure\"`) for reproducibility.\n\n**Nix expression build** \u2014 use when you need guaranteed hermetic, purely-functional builds with Nix-ecosystem features (e.g., `rustPlatform.buildRustPackage`, `overrideAttrs`, `fetchurl` hashes). Steeper learning curve; required when you need to override or compose packages from nixpkgs directly.\n\n---\n\n### Where the build definition lives\n\n| Approach | File location |\n|---|---|\n| Manifest build | `.flox/env/manifest.toml` (in your project, committed to git) |\n| Nix expression build | `.flox/pkgs/<name>.nix` **or** `.flox/pkgs/<name>/default.nix` |\n\n---\n\n### Manifest build \u2014 complete example\n\n```toml\n# .flox/env/manifest.toml\n\n[install]\ngcc.pkg-path = \"gcc13\"\nmake.pkg-path = \"make\"\n\n[build.myapp]\ncommand = '''\n  make\n  mkdir -p $out/bin\n  cp build/myapp $out/bin/\n'''\nversion = \"1.0.0\"\ndesc"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": true,
+      "judge_gap": 1,
+      "classification": "discriminator"
+    },
+    {
+      "id": "stretch-implicit-monorepo",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": true,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 4,
+        "judge_correct": false,
+        "judge_issues": [
+          "Onboarding requires two commands (flox activate + flox services start) rather than the single command the rubric specifies",
+          "Variable interpolation of $FLOX_ENV_CACHE inside [vars] string literals may not expand at parse time in all Flox versions",
+          "on-activate hook starts and stops postgres mid-hook just to create the DB \u2014 fragile race condition if the port is briefly busy"
+        ],
+        "answer_excerpt": "Here's a complete Flox-based solution. Flox gives you one command (`flox activate`) that installs all toolchains from Nix, runs first-time setup, and drops you into a fully configured shell. `flox services start` then brings up all three processes.\n\n---\n\n## Directory layout\n\n```\nmyapp/\n\u251c\u2500\u2500 .flox/\n\u2502   \u2514\u2500\u2500 env/\n\u2502       \u2514\u2500\u2500 manifest.toml      \u2190 the entire environment definition\n\u251c\u2500\u2500 backend/\n\u2502   \u251c\u2500\u2500 main.py\n\u2502   \u2514\u2500\u2500 requirements.txt\n\u2514\u2500\u2500 frontend/\n    \u2514\u2500\u2500 package.json\n```\n\n---\n\n## `.flox/env/manifest.toml`\n\n```toml\nversion = 1\n\n# \u2500\u2500 Packages \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n[install]\nnodejs_20.pkg-path    = \"nodejs_20\"\npython311.pkg-path    = \"python311\"\nuv.pkg-path           = \"uv\"          # fast Python package installer\npostgresql_16.pkg-path = \"postgresql_16\"\n\n# \u2500\u2500 Environment variables \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n[vars]\n# PostgreSQL \u2014 stored inside the Flox cache dir so it survives deactivation\n# but is never checked in\nPGDATA     = \"$FLOX_ENV_CACHE/pgdata\"\nPGHOST     = \"127.0.0.1\"\nPGPORT     = \"5432\"\nPGDATABASE = \"appdb\"\n# Python venv location\nVIRTUAL_ENV = \"$FLOX_ENV_CACHE/venv\"\n\n# Convenience: a single DATABASE_URL both"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 4,
+        "judge_correct": true,
+        "judge_issues": [
+          "[vars] entries like PGDATA = \"$FLOX_ENV_CACHE/pgdata\" may not expand at set time \u2014 Flox treats [vars] values as literal strings, so $PGDATA in the hook would be the unexpanded string \"$FLOX_ENV_CACHE/pgdata\"; the paths should be computed inside the hook instead",
+          "flox activate --start-services is the given onboarding command rather than plain flox activate, though this is a minor deviation and still a single command"
+        ],
+        "answer_excerpt": "## Reproducible Monorepo Dev Environment with Flox\n\n**Why Flox:** one `manifest.toml` pins every tool (Node 20, Python 3.11, PostgreSQL) at the Nix layer, so `flox activate` gives every dev an identical environment \u2014 no version managers, no brew install, no \"works on my machine.\"\n\n---\n\n### Monorepo layout\n\n```\nmy-app/\n\u251c\u2500\u2500 .flox/\n\u2502   \u2514\u2500\u2500 env/\n\u2502       \u2514\u2500\u2500 manifest.toml   \u2190 the whole dev environment lives here\n\u251c\u2500\u2500 frontend/\n\u2502   \u251c\u2500\u2500 package.json\n\u2502   \u2514\u2500\u2500 src/\n\u251c\u2500\u2500 backend/\n\u2502   \u251c\u2500\u2500 requirements.txt\n\u2502   \u2514\u2500\u2500 app/\n\u2502       \u2514\u2500\u2500 main.py\n\u2514\u2500\u2500 README.md\n```\n\n---\n\n### `.flox/env/manifest.toml`\n\n```toml\nversion = 1\n\n# \u2500\u2500 Pinned tools \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n[install]\nnodejs_20.pkg-path     = \"nodejs_20\"\npython311.pkg-path     = \"python311\"\nuv.pkg-path            = \"uv\"           # fast Python package installer\npostgresql.pkg-path    = \"postgresql\"\n\n# \u2500\u2500 Shared env vars (available to hook, services, and the shell) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n[vars]\nPGDATA     = \"$FLOX_ENV_CACHE/pgdata\"\nPGHOST     = \"localhost\"\nPGPORT     = \"5432\"\nPGUSER     = \"dev\"\nPGDATABASE = \"appdb\"\nDATABASE_URL = \"postgresql://dev@localhost:5432/appdb\"\nVENV       = \"$FLOX_ENV_CACHE/venv\"\n\n# \u2500\u2500 First-activat"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": true,
+      "judge_gap": 0,
+      "classification": "discriminator"
+    },
+    {
+      "id": "stretch-cuda-torch-linux",
+      "area": "cuda",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 3,
+        "judge_correct": false,
+        "judge_issues": [
+          "PyTorch itself is installed via pip from pytorch.org wheels, not from the Flox catalog \u2014 the rubric explicitly penalizes pip-only PyTorch advice and calls for a CUDA-enabled pytorch from the catalog",
+          "systems constraint includes aarch64-linux in addition to x86_64-linux; the task asks for x86_64-linux and there is no [options] section globally constraining the environment to that system",
+          "Inconsistent cudart package path: cuda_cudart uses 'flox-cuda/cudaPackages.cuda_cudart' (no version suffix) while all other CUDA packages use 'cudaPackages_12_8.*' \u2014 likely a copy-paste error that would cause a resolution failure",
+          "on-activate hook comment says 'Runs once per build' but on-activate fires on every activation; the sentinel-file guard works around this but the explanation is misleading"
+        ],
+        "answer_excerpt": "Here is the complete solution.\n\n---\n\n## Manifest\n\n```toml\nversion = 1\n\n[install]\n# CUDA compiler \u2014 highest priority to win LICENSE-file conflicts\ncuda_nvcc.pkg-path       = \"flox-cuda/cudaPackages_12_8.cuda_nvcc\"\ncuda_nvcc.priority       = 1\ncuda_nvcc.systems        = [\"x86_64-linux\", \"aarch64-linux\"]\n\n# CUDA runtime library (libcudart.so)\ncuda_cudart.pkg-path     = \"flox-cuda/cudaPackages.cuda_cudart\"\ncuda_cudart.priority     = 2\ncuda_cudart.systems      = [\"x86_64-linux\", \"aarch64-linux\"]\n\n# BLAS + cuDNN \u2014 required by PyTorch at load time\nlibcublas.pkg-path       = \"flox-cuda/cudaPackages_12_8.libcublas\"\nlibcublas.priority       = 2\nlibcublas.systems        = [\"x86_64-linux\", \"aarch64-linux\"]\n\ncudnn.pkg-path           = \"flox-cuda/cudaPackages_12_8.cudnn_9_11\"\ncudnn.priority           = 2\ncudnn.systems            = [\"x86_64-linux\", \"aarch64-linux\"]\n\n# Python + package manager\npython313Full.pkg-path   = \"python313Full\"\nuv.pkg-path              = \"uv\"\n\n# libstdc++ \u2014 needed by PyTorch C++ extensions; lower priority\ngcc-unwrapped.pkg-path   = \"gcc-unwrapped\"\ngcc-unwrapped.priority   = 5\n\n[vars]\n# Tells nvcc / CMake / PyTorch where the CUDA installation lives\nCUDA_HOME                "
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 3,
+        "judge_correct": false,
+        "judge_issues": [
+          "Missing `priority` values on all CUDA packages \u2014 skill docs confirm this is required to resolve LICENSE file conflicts; omitting them causes activation failures",
+          "No explicit CUDA toolkit components (cuda_nvcc, cuda_cudart, libcublas, cudnn) installed \u2014 only Python torch packages listed; CUDA runtime libs won't be present",
+          "Recommended approach per authoritative docs is uv pip install with --index-url https://download.pytorch.org/whl/cu129 in a hook, not direct flox-cuda/python3Packages.torch catalog install",
+          "Uses pkg-group for conflict resolution instead of priority integers, which is what CUDA packages actually need",
+          "Option B (nixpkgs torchWithCuda) not documented or validated in the flox-cuda skill"
+        ],
+        "answer_excerpt": "Here's the complete solution based on verified catalog data:\n\n---\n\n## Two Options\n\n### Option A \u2014 `flox-cuda` catalog (recommended, PyTorch 2.10 / Python 3.13)\n\nThe `flox-cuda` catalog is purpose-built for GPU work and carries newer PyTorch than nixpkgs.\n\n```toml\nversion = 1\n\n[install]\ntorch.pkg-path = \"flox-cuda/python3Packages.torch\"\ntorch.systems = [\"x86_64-linux\"]\ntorch.pkg-group = \"cuda\"\n\ntorchvision.pkg-path = \"flox-cuda/python3Packages.torchvision\"\ntorchvision.systems = [\"x86_64-linux\"]\ntorchvision.pkg-group = \"cuda\"\n\ntorchaudio.pkg-path = \"flox-cuda/python3Packages.torchaudio\"\ntorchaudio.systems = [\"x86_64-linux\"]\ntorchaudio.pkg-group = \"cuda\"\n\n[profile]\ncommon = \"\"\"\nexport LD_LIBRARY_PATH=\"$FLOX_ENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n\"\"\"\n\n[options]\nsystems = [\"x86_64-linux\"]\n\n[options.allow]\nunfree = true\n```\n\n### Option B \u2014 nixpkgs `torchWithCuda` (stable, PyTorch 2.5.1 / Python 3.11)\n\n```toml\nversion = 1\n\n[install]\ntorch.pkg-path = \"python311Packages.torchWithCuda\"\ntorch.systems = [\"x86_64-linux\"]\ntorch.pkg-group = \"cuda\"\n\npython.pkg-path = \"python311\"\npython.systems = [\"x86_64-linux\"]\npython.pkg-group = \"cuda\"\n\n[profile]\ncommon = \"\"\"\nexport LD_LIBRARY_PATH=\"$FLOX"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0,
+      "classification": "no-signal"
+    },
+    {
+      "id": "trap-hook-return-not-exit",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## Early exit from a Flox activation hook\n\n**Use `return`** \u2014 the `on-activate` hook is **sourced** into the user's shell, not executed as a subprocess. That means:\n\n| Mechanism | Effect |\n|---|---|\n| `return` | Exits the hook script early \u2014 correct |\n| `exit` | Kills the user's entire shell session \u2014 wrong |\n| `(...)` subshell wrapper | Contains `exit`, but variables/exports set inside don't reach the parent shell \u2014 anti-pattern |\n\n### Example manifest\n\n```toml\nversion = 1\n\n[install]\ncurl.pkg-path = \"curl\"\n\n[hook]\non-activate = \"\"\"\n  if ! command -v docker &>/dev/null; then\n    echo \"docker is required but not found \u2014 skipping docker setup\" >&2\n    return 1\n  fi\n\n  if [ -z \"${DOCKER_HOST:-}\" ]; then\n    echo \"DOCKER_HOST is not set \u2014 skipping docker setup\" >&2\n    return 1\n  fi\n\n  export DOCKER_CONTEXT=\"my-project\"\n\"\"\"\n```\n\n### Commands\n\n```bash\nflox init          # create the environment\nflox edit          # paste in the manifest above\nflox activate      # test it\n```\n\n### Why `return 1` and not just `return`\n\n`return` alone (exit code 0) signals success. Using `return 1` (or any non-zero code) signals the guard failed, which is the honest signal and lets outer scripts detect the"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 4,
+        "judge_correct": true,
+        "judge_issues": [
+          "Exit consequence described as 'kills the parent shell / terminal disappears' rather than the more precise 'terminates the entire flox activate process and any layered activation' \u2014 slightly overstated and misses the layered-activation angle",
+          "No mention of layered activation being affected by exit"
+        ],
+        "answer_excerpt": "## Bailing out early from a Flox activation hook\n\n### The core rule\n\nThe `[hook] on-activate` script is **sourced** into the activating shell \u2014 it is not run in a subshell. That means:\n\n- **Use `return`** to leave early. It exits the sourced script and returns control to the shell.\n- **Never use `exit`** in a hook. Because the script is sourced, `exit` terminates the *parent shell session* \u2014 the user's terminal disappears.\n\n---\n\n### Complete example\n\n```toml\nversion = 1\n\n[hook]\non-activate = \"\"\"\n  # Bail out early if Docker is not running\n  if ! docker info &>/dev/null 2>&1; then\n    echo \"warning: Docker is not available \u2014 skipping Docker setup\" >&2\n    return 1\n  fi\n\n  # Prerequisite met \u2014 proceed with the rest of the hook\n  export DOCKER_BUILDKIT=1\n  echo \"Docker is ready.\"\n\"\"\"\n```\n\n---\n\n### Flox commands\n\n```bash\n# Create a new environment (or work with an existing one)\nflox init\n\n# Open the manifest in your editor to add/edit the hook\nflox edit\n\n# Activate to test the hook\nflox activate\n```\n\n---\n\n### Why `return`, not `exit`\n\n| | `return` | `exit` |\n|---|---|---|\n| In a **sourced** script | Exits the script, shell continues | **Kills the parent shell** |\n| In a subshell (`bash"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": -1,
+      "classification": "no-signal"
+    },
+    {
+      "id": "trap-cpp-libstdcxx-unwrapped",
+      "area": "builds",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [
+          "priority = 5 on gcc-unwrapped is unexplained and could cause silent conflicts with gcc wrapper",
+          "claims headers land in $FLOX_ENV/include/c++/... which may not hold in all Flox catalog versions \u2014 unverified"
+        ],
+        "answer_excerpt": "The root cause: `gcc` in Nix/Flox is a **wrapper script** that injects include/lib paths at compile time, but it does **not** expose the raw `libstdc++` headers and libraries into `$FLOX_ENV`. You need `gcc-unwrapped` alongside `gcc` for the standard library to be visible to build tools and linkers.\n\n---\n\n## Complete Manifest\n\n```toml\nversion = 1\n\n[install]\ngcc.pkg-path = \"gcc\"\ngcc.pkg-group = \"compilers\"\n\ngcc-unwrapped.pkg-path = \"gcc-unwrapped\"\ngcc-unwrapped.pkg-group = \"libraries\"\ngcc-unwrapped.priority = 5\n\ngnumake.pkg-path = \"gnumake\"\ngnumake.pkg-group = \"build\"\n\n[vars]\nCC = \"gcc\"\nCXX = \"g++\"\n```\n\nIf you use CMake instead of Make, swap `gnumake` for `cmake`:\n\n```toml\ncmake.pkg-path = \"cmake\"\ncmake.pkg-group = \"build\"\n```\n\n---\n\n## Commands\n\n```bash\n# From your project directory (where .flox/ lives):\nflox install gcc gcc-unwrapped gnumake\n\n# Or edit the manifest directly:\nflox edit   # paste the [install] block above, save, exit\n\n# Activate and verify:\nflox activate\ng++ --version\necho '#include <vector>' | g++ -x c++ - -fsyntax-only && echo \"OK\"\n```\n\n---\n\n## Why This Works\n\n| Package | What it provides |\n|---|---|\n| `gcc` | The wrapped `gcc`/`g++` binaries \u2014 know how to find Nix"
+      },
+      "skills": {
+        "hard_pass": false,
+        "judge_score": 2,
+        "judge_correct": false,
+        "judge_issues": [
+          "never mentions gcc-unwrapped, which is the correct fix per the rubric",
+          "fiddles with LIBRARY_PATH by hand in the on-activate hook, which the rubric explicitly marks as incorrect",
+          "the core claim that gcc alone includes all C++ headers and nothing extra needs to be installed is wrong \u2014 gcc-unwrapped is specifically needed to expose stdlib headers/libs in Nix/Flox",
+          "all proposed fixes (CC/CXX vars, LIBRARY_PATH hook) work around the real problem rather than solving it"
+        ],
+        "answer_excerpt": "## Root Cause\n\nTwo common issues compound here:\n\n1. **`gcc` \u2260 `g++`** \u2014 Invoking `gcc` on a `.cpp` file won't auto-link libstdc++ or add C++ header search paths; you need the `g++` driver.\n2. **Build system bypasses the Nix wrapper** \u2014 In Nix/Flox, `gcc` is a shell-script *wrapper* that injects `-I` and `-L` flags pointing into the Nix store. If CMake, Make, or your shell finds `/usr/bin/gcc` first, none of those paths are injected.\n\nThe `gcc` package in nixpkgs *does* include g++, libstdc++, and all C++ standard headers \u2014 nothing extra needs to be installed. You just need to point at the right binary and make sure the wrapper is what your build uses.\n\n---\n\n## Complete Manifest\n\n```toml\nversion = 1\n\n[install]\ngcc.pkg-path = \"gcc\"\n\n[vars]\n# Force build systems to use the Flox-wrapped compilers, not /usr/bin/gcc\nCC  = \"gcc\"\nCXX = \"g++\"\n\n[hook]\non-activate = \"\"\"\n  # Expose libstdc++ to build systems that call the linker directly (e.g. CMake's\n  # try_compile, pkg-config consumers, hand-written Makefiles using $(LD)).\n  # g++ -print-file-name resolves the Nix store path of the actual library.\n  _libstdcxx_dir=\"$(dirname \"$(g++ -print-file-name=libstdc++.so.6)\" 2>/dev/null)\"\n  if [ -n \""
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": -3,
+      "classification": "skill-gap"
+    },
+    {
+      "id": "trap-cpp-exact-pkgpaths",
+      "area": "builds",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "Based on Nixpkgs attribute paths used by the Flox catalog:\n\n```toml\n[install]\ngbenchmark.pkg-path = \"gbenchmark\"\ncatch2_3.pkg-path = \"catch2_3\"\n```\n\n**The `flox install` commands:**\n\n```sh\nflox install gbenchmark\nflox install catch2_3\n```\n\nEach command appends one entry to your `manifest.toml` automatically. The install ID (left-hand key) defaults to the last component of the pkg-path, so you get `gbenchmark` and `catch2_3` as the IDs.\n\n**Quick explanation:**\n\n| Package | Nixpkgs/Flox attribute | Notes |\n|---|---|---|\n| Google Benchmark | `gbenchmark` | The `benchmark` alias also exists but `gbenchmark` is canonical |\n| Catch2 v3 | `catch2_3` | Distinct from `catch2` (v2); the `_3` suffix selects v3 |\n\n**To confirm the exact paths before editing the manifest manually:**\n\n```sh\nflox search benchmark\nflox search catch2\n```\n\nThis will show the available `pkg-path` values and versions in the active catalog so you can pin a specific version if needed (e.g., `catch2_3.version = \"3.7.1\"`)."
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "The skill's C/C++ section names both packages explicitly. Here's the complete answer:\n\n---\n\n## Manifest `[install]` entries\n\n```toml\n[install]\ngbenchmark.pkg-path = \"gbenchmark\"\ngbenchmark.pkg-group = \"testing\"\n\ncatch2.pkg-path = \"catch2_3\"\ncatch2.pkg-group = \"testing\"\n```\n\n---\n\n## Flox commands to add them\n\n```bash\nflox install gbenchmark catch2_3\n```\n\nOr if you want to set a version constraint (e.g., pin to Catch2 3.x):\n\n```bash\nflox install gbenchmark\nflox install catch2_3\n```\n\nThen manually edit the manifest to add `version = \"^3.0\"` on the `catch2` entry if needed.\n\n---\n\n## Key points\n\n- **`gbenchmark`** \u2014 not `benchmark` or `google-benchmark`. The Flox/Nixpkgs name differs from the upstream project name.\n- **`catch2_3`** \u2014 the `_3` suffix is required to select Catch2 v3; plain `catch2` resolves to v2.\n- Grouping both under `\"testing\"` keeps them on the same resolution channel so they upgrade together."
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0,
+      "classification": "no-signal"
+    },
+    {
+      "id": "trap-darwin-framework-attrpath",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## Flox Manifest Entry for IOKit (macOS-only)\n\nAdd this to your `.flox/env/manifest.toml` under `[install]`:\n\n```toml\n[install]\nIOKit.pkg-path = \"darwin.apple_sdk.frameworks.IOKit\"\nIOKit.systems = [\"aarch64-darwin\", \"x86_64-darwin\"]\n```\n\n## How to apply it\n\n**Option A \u2014 edit the manifest directly (recommended for system frameworks):**\n```sh\nflox edit\n```\nThen add the two lines above under `[install]` and save.\n\n**Option B \u2014 one-liner via `flox install` with system scoping:**\n```sh\nflox install darwin.apple_sdk.frameworks.IOKit --systems aarch64-darwin,x86_64-darwin\n```\n`flox install` will populate the `pkg-path` and `systems` fields for you; the result in the manifest will be identical to Option A.\n\n---\n\n**Why `darwin.apple_sdk.frameworks.IOKit`?**\n\nIOKit is an Apple SDK system framework, not a standalone nixpkgs package. In nixpkgs the entire Apple SDK frameworks tree lives under `darwin.apple_sdk.frameworks.*`. Flox's `pkg-path` maps directly to that nixpkgs attribute path, so you reference it as a dotted string rather than a simple package name.\n\nThe `systems` array restricts installation to macOS architectures only \u2014 the package is silently skipped on Linux systems so your mani"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## Manifest Entry\n\n```toml\n[install.IOKit]\npkg-path = \"darwin.apple_sdk.frameworks.IOKit\"\nsystems = [\"aarch64-darwin\", \"x86_64-darwin\"]\n```\n\nThe `systems` field restricts installation to macOS only (both Apple Silicon and Intel). Without it, Flox would attempt to resolve the package on Linux where it doesn't exist.\n\n## Applying It\n\n**Option 1 \u2014 edit the manifest directly (recommended for system-scoped entries):**\n\n```sh\nflox edit\n```\n\nAdd the `[install.IOKit]` block above, then save. Flox validates and locks on exit.\n\n**Option 2 \u2014 install first, then constrain:**\n\n```sh\nflox install darwin.apple_sdk.frameworks.IOKit   # installs on current system\nflox edit                                          # add `systems = [...]` to the generated entry\n```\n\n## Why `darwin.apple_sdk.frameworks.IOKit`\n\n- `darwin.apple_sdk.frameworks` is the nixpkgs attribute path for the macOS SDK framework wrappers.\n- `IOKit` is the specific framework \u2014 it exposes `/Library/Frameworks/IOKit.framework` headers and the stub dylib to the build environment.\n- These are **link-only** wrappers (no source); they let your build system find the system framework without vendoring it.\n\nAfter `flox activate`, `$NIX_LDFLA"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0,
+      "classification": "no-signal"
+    },
+    {
+      "id": "trap-vars-no-interpolation",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": false,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "`[vars]` is the wrong section for this \u2014 it sets variables as **static literals** with no shell interpolation, so `$PATH` would be treated as the literal string `$PATH`, not expanded. You'd end up replacing PATH rather than prepending to it.\n\nThe right section is `[hook]` \u2192 `on-activate`, which runs as a bash script during environment activation and can export fully-interpolated values:\n\n```toml\nversion = 1\n\n[install]\n\n[hook]\non-activate = '''\n  export PATH=\"$FLOX_ENV_PROJECT/node_modules/.bin:$PATH\"\n'''\n\n[vars]\n\n[options]\nsystems = [\"aarch64-darwin\", \"x86_64-darwin\", \"aarch64-linux\", \"x86_64-linux\"]\n```\n\n**Why `$FLOX_ENV_PROJECT` instead of `./node_modules/.bin`:** Flox sets `$FLOX_ENV_PROJECT` to the directory containing `.flox/`, so the path is absolute and correct regardless of what directory you're in when the environment is active. A relative `./` would resolve to wherever your shell's CWD happens to be at activation time.\n\n**Commands:**\n\n```bash\n# Open the manifest in your $EDITOR\nflox edit\n\n# After saving, re-activate to pick up the change (in a new shell, or):\nflox activate\n```\n\nIf you're already inside an active environment, you need to exit and re-activate \u2014 `on-activate"
+      },
+      "skills": {
+        "hard_pass": false,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "`[vars]` is not right for this \u2014 it sets variables as **literal strings** with no shell expansion, so `$PATH` would not be interpolated. You'd get a literal `$PATH` in your PATH variable, breaking it entirely.\n\nThe correct section is `[hook] on-activate`, which runs as a shell script at activation time and can reference existing environment variables. Use `$FLOX_ENV_PROJECT` (Flox's built-in variable pointing to the project root, i.e. where `.flox/` lives) instead of a bare `./` so the path is absolute and works regardless of your current working directory.\n\n**Manifest:**\n\n```toml\nversion = 1\n\n[install]\n# your packages here\n\n[hook]\non-activate = '''\n  export PATH=\"$FLOX_ENV_PROJECT/node_modules/.bin:$PATH\"\n'''\n\n[options]\nsystems = [\"aarch64-darwin\", \"x86_64-darwin\", \"aarch64-linux\", \"x86_64-linux\"]\n```\n\n**Commands:**\n\n```sh\n# Open the manifest in your editor\nflox edit\n\n# After saving, verify PATH is set correctly\nflox activate -- bash -c 'echo $PATH' | tr ':' '\\n' | head -5\n```\n\n**Why each section matters:**\n\n| Section | Shell expansion | When it runs | Good for PATH? |\n|---|---|---|---|\n| `[vars]` | No | Always | No \u2014 literals only |\n| `[hook] on-activate` | Yes (bash) | At `flox "
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0,
+      "classification": "no-signal"
+    },
+    {
+      "id": "trap-alias-profile-not-hook",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 4,
+        "judge_correct": true,
+        "judge_issues": [
+          "'flox activate --' (with no command after) is not standard syntax for dropping into an activated shell; the correct form is just 'flox activate' or 'eval \"$(flox activate)\"'"
+        ],
+        "answer_excerpt": "## Where it goes: `[profile]`\n\nThe `[profile]` section is sourced into the user's **interactive shell** after activation, just like `.bashrc` or `.zshrc`. Anything defined there \u2014 functions, aliases, exports \u2014 is live in the shell session.\n\nThe `[hook]` section (specifically `on-activate`) runs in a **non-interactive subshell** during activation and its environment is not inherited by the user's shell, so shell functions defined there vanish. `[services]` is for long-running background daemons, not interactive commands.\n\n## Complete solution\n\n```toml\n# .flox/env/manifest.toml\n\n[install]\npython3.pkg-path = \"python3\"\n\n[profile]\ncommon = \"\"\"\n  serve() {\n    local port=\"${1:-8000}\"\n    echo \"Serving on http://localhost:${port}\"\n    python3 -m http.server \"$port\"\n  }\n\"\"\"\n\n[options]\nsystems = [\"aarch64-darwin\", \"x86_64-darwin\", \"aarch64-linux\", \"x86_64-linux\"]\n```\n\n## Commands to install and use\n\n```bash\n# Enter the environment (activates and sources [profile])\nflox activate\n\n# Now 'serve' is available as a shell function\nserve          # serves on port 8000\nserve 3000     # serves on port 3000\n```\n\nOr in one shot without entering a subshell:\n\n```bash\nflox activate --\n# (drops you into t"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## Shell commands for interactive use go in `[profile]`\n\n**Why `[profile]` and not `[hook]`:**\n\n| Section | When it runs | Shell context |\n|---|---|---|\n| `[hook.on-activate]` | Once, at activation time | Non-interactive subshell \u2014 functions defined here vanish |\n| `[profile]` | Sourced into the user's shell after activation | Interactive shell \u2014 functions and aliases persist for the session |\n\nBecause `serve` needs to be callable by the developer after activation, it belongs in `[profile]`.\n\n---\n\n## The manifest\n\n```toml\nversion = 1\n\n[install]\n# your project packages here, e.g.:\n# nodejs.pkg-path = \"nodejs\"\n\n[profile]\nbash = \"\"\"\n  serve() {\n    local port=\"${1:-3000}\"\n    echo \"Starting dev server on port $port...\"\n    npm run dev -- --port \"$port\"\n  }\n\"\"\"\nzsh = \"\"\"\n  serve() {\n    local port=\"${1:-3000}\"\n    echo \"Starting dev server on port $port...\"\n    npm run dev -- --port \"$port\"\n  }\n\"\"\"\n```\n\nProfile scripts are shell-specific, so you define `bash` and `zsh` keys separately (they can share the same body).\n\n---\n\n## Flox commands\n\nEdit the manifest directly:\n```sh\nflox edit\n```\n\nOr create the environment first if it doesn't exist yet:\n```sh\nflox init\nflox edit      # paste the"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 1,
+      "classification": "no-signal"
+    },
+    {
+      "id": "trap-uv-venv-invocation",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": false,
+        "judge_score": 3,
+        "judge_correct": false,
+        "judge_issues": [
+          "Uses VIRTUAL_ENV env-var targeting instead of the rubric-specified --python flag form",
+          "uv pip install --python \"$FLOX_ENV_CACHE/venv/bin/python\" -r requirements.txt is the required form",
+          "VIRTUAL_ENV approach is functionally equivalent and not one of the explicitly wrong patterns, but does not satisfy the strict rubric"
+        ],
+        "answer_excerpt": "## The exact uv command for the hook\n\n```\nVIRTUAL_ENV=\"$FLOX_ENV_CACHE/venv\" uv pip install -r requirements.txt\n```\n\nSetting `VIRTUAL_ENV` is how uv discovers which environment to target without activating it first.\n\n---\n\n## Complete manifest\n\n```toml\nversion = 1\n\n[install]\nuv.pkg-path = \"uv\"\npython3.pkg-path = \"python3\"\n\n[hook]\non-activate = \"\"\"\n  if [ ! -d \"$FLOX_ENV_CACHE/venv\" ]; then\n    uv venv \"$FLOX_ENV_CACHE/venv\"\n  fi\n  VIRTUAL_ENV=\"$FLOX_ENV_CACHE/venv\" uv pip install -r requirements.txt\n\"\"\"\n\n[profile]\nbash = 'source \"$FLOX_ENV_CACHE/venv/bin/activate\"'\nzsh  = 'source \"$FLOX_ENV_CACHE/venv/bin/activate\"'\n```\n\n## Flox commands\n\n```bash\n# Edit the manifest directly:\nflox edit\n\n# Then activate to run the hook:\nflox activate\n```\n\nOr if starting from scratch in the project directory:\n\n```bash\nflox init\nflox edit   # paste the manifest above\nflox activate\n```\n\n---\n\n**Why this works:**\n\n- `[hook] on-activate` runs in a subshell during activation \u2014 good for side effects like pip installs.\n- `VIRTUAL_ENV=...` is uv's standard way to target a venv without sourcing an activate script; no `--python` flag needed.\n- The `if [ ! -d ... ]` guard makes the hook idempotent \u2014 skips venv cr"
+      },
+      "skills": {
+        "hard_pass": false,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "```bash\nuv pip install -r requirements.txt --python $FLOX_ENV_CACHE/venv/bin/python\n```\n\nThat's the exact command. `uv pip install` accepts `--python` to target a specific interpreter (and by extension its venv), so you don't need to activate the venv first.\n\nIn context, your activation hook in `manifest.toml` would look like:\n\n```toml\n[profile]\ncommon = \"\"\"\n  if [ ! -d \"$FLOX_ENV_CACHE/venv\" ]; then\n    uv venv \"$FLOX_ENV_CACHE/venv\"\n  fi\n  uv pip install -r \"$FLOX_ENV/requirements.txt\" --python \"$FLOX_ENV_CACHE/venv/bin/python\"\n  export PATH=\"$FLOX_ENV_CACHE/venv/bin:$PATH\"\n  export VIRTUAL_ENV=\"$FLOX_ENV_CACHE/venv\"\n\"\"\"\n```\n\nA few notes:\n- `$FLOX_ENV_CACHE` persists across activations but is per-environment, making it the right place for a venv.\n- `$FLOX_ENV` points to the environment's store path where you can co-locate `requirements.txt`, or use a repo-relative path like `\"$PWD/requirements.txt\"` if you prefer.\n- Setting `VIRTUAL_ENV` (without activating) is enough for most tools to discover the venv's packages.\n- The existence check on the venv dir keeps activation fast after the first run; if you want `uv pip install` to also be skipped when nothing changed, you'd need a sen"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": true,
+      "judge_gap": 2,
+      "classification": "discriminator"
+    },
+    {
+      "id": "trap-hook-runs-every-activation",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "One-time init goes in `[hook.on-activate]`, guarded by a sentinel file in `$FLOX_ENV_CACHE`. The hook runs on **every** activation, so the sentinel is what makes it truly one-time.\n\n---\n\n## The manifest\n\n```toml\nversion = 1\n\n[install]\npostgresql.pkg-path = \"postgresql\"\n\n[hook]\non-activate = \"\"\"\n  seed_database() {\n    local sentinel=\"$FLOX_ENV_CACHE/.db_seeded\"\n\n    # Skip if already done\n    [ -f \"$sentinel\" ] && return 0\n\n    echo \"First activation: seeding database...\"\n\n    # Your actual seed command \u2014 paths via $FLOX_ENV_PROJECT, not hardcoded\n    psql -d myapp -f \"$FLOX_ENV_PROJECT/db/seed.sql\" || {\n      echo \"Seed failed \u2014 fix the error and delete $sentinel to retry\"\n      return 1\n    }\n\n    touch \"$sentinel\"\n  }\n\n  seed_database\n\n  cd \"$FLOX_ENV_PROJECT\"\n\"\"\"\n```\n\n---\n\n## The commands\n\n```bash\n# First-time setup (creates env, installs packages, runs hook)\nflox activate\n\n# To force re-seed on any machine (e.g. after a schema change)\nrm \"$FLOX_ENV_CACHE/.db_seeded\" && flox activate\n```\n\n---\n\n## What to be careful about\n\n**`$FLOX_ENV_CACHE` survives `flox delete`** \u2014 it's stored outside the environment closure, so the sentinel persists even if the user rebuilds. That's usually"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "The key constraint from the skill: **hooks run on every `flox activate`**, so \"one-time\" behavior requires a sentinel file. `$FLOX_ENV_CACHE` is the right place for it \u2014 it's persistent and local-only (not committed to git), so every fresh clone gets a fresh cache and the seed runs exactly once per machine.\n\n---\n\n## The Manifest\n\n```toml\nversion = 1\n\n[install]\npostgresql.pkg-path = \"postgresql\"\n\n[vars]\nDB_NAME = \"myapp_dev\"\nDB_USER = \"myapp\"\n\n[hook.on-activate]\nrun = \"\"\"\n  setup_db() {\n    local data_dir=\"$FLOX_ENV_CACHE/pgdata\"\n    local seed_marker=\"$FLOX_ENV_CACHE/.db_seeded\"\n\n    # Initialize the cluster on first run\n    if [ ! -d \"$data_dir\" ]; then\n      initdb -D \"$data_dir\" --username=\"$DB_USER\" --no-locale --encoding=UTF8\n    fi\n\n    # Start a temporary pg instance to run the seed\n    pg_ctl -D \"$data_dir\" -l \"$FLOX_ENV_CACHE/pg.log\" start -w\n\n    # Create the database if it doesn't exist\n    createdb -U \"$DB_USER\" \"$DB_NAME\" 2>/dev/null || true\n\n    # Seed exactly once \u2014 guard with sentinel file\n    if [ ! -f \"$seed_marker\" ]; then\n      psql -U \"$DB_USER\" -d \"$DB_NAME\" -f \"$FLOX_ENV_PROJECT/db/seed.sql\" \\\n        && touch \"$seed_marker\"\n    fi\n\n    pg_ctl -D \"$data_dir\" "
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0,
+      "classification": "no-signal"
+    },
+    {
+      "id": "trap-manifest-syntax-lockout",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## Not bricked \u2014 here's how to recover\n\nThe manifest is a plain file on disk. `flox edit` fails because it validates on save, but you can bypass it entirely by editing the file directly with any text editor.\n\n---\n\n### 1. Find the manifest file\n\n**Local environment** (the common case \u2014 a `.flox/` directory in your project):\n```\n.flox/env/manifest.toml\n```\n\n**Named environment** (created with `flox create -n myenv`):\n```\n~/.local/share/flox/environments/myenv/env/manifest.toml\n```\n\n---\n\n### 2. Fix the file directly\n\nOpen it with any editor (`nano`, `vim`, `code`, etc.) \u2014 do **not** use `flox edit` yet \u2014 and correct the TOML syntax. Common culprits: unclosed quotes, invalid escape sequences, stray brackets, or a bare `=` with no value.\n\n---\n\n### 3. Reference: a minimal valid manifest\n\nIf you're unsure what a clean baseline looks like, here is the minimal valid Flox manifest:\n\n```toml\nversion = 1\n\n[install]\n\n[vars]\n\n[hook]\n\n[profile]\n\n[options]\n  systems = [\"aarch64-darwin\", \"aarch64-linux\", \"x86_64-darwin\", \"x86_64-linux\"]\n```\n\nOnly `version = 1` is strictly required; all sections are optional and can be omitted or left empty.\n\n---\n\n### 4. Resume normally\n\nOnce the TOML is valid, both"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 3,
+        "judge_correct": false,
+        "judge_issues": [
+          "Recommends `flox list -c` to locate the manifest path, but this flox subcommand would itself be blocked by the same TOML error \u2014 violates the rubric's explicit disqualifier",
+          "Does not clearly state that ALL flox commands are blocked; only implies `flox edit` fails, leaving the reader uncertain whether other commands work",
+          "Recovery steps are otherwise correct (direct text editor fix, manual TOML validation), and the minimal valid manifest example is useful"
+        ],
+        "answer_excerpt": "## The environment is not bricked \u2014 the manifest is just a file on disk\n\n`flox edit` is a thin wrapper around `$EDITOR` + a TOML validator. When it bails out, the underlying file is still there and you can fix it directly.\n\n---\n\n### Where the manifest lives\n\n| Environment type | Path |\n|---|---|\n| Local (project) | `.flox/env/manifest.toml` (relative to your project root) |\n| Named environment | `~/.local/share/flox/environments/local/<name>/.flox/env/manifest.toml` |\n\nFind it with:\n```\nflox list -c   # shows the config path for every known environment\n```\nor for a local env just look for `.flox/env/manifest.toml` in the current directory.\n\n---\n\n### Recovery steps\n\n**1. Fix the file with any editor (bypass `flox edit` entirely):**\n```bash\n$EDITOR .flox/env/manifest.toml\n# or\nnano .flox/env/manifest.toml\n```\n\n**2. Optionally validate the TOML before trying Flox again:**\n```bash\npython3 -c \"import tomllib; tomllib.load(open('.flox/env/manifest.toml','rb'))\"\n```\n\n**3. Confirm Flox is happy:**\n```bash\nflox activate\n```\n\n---\n\n### Minimal valid manifest to reset to if you want a clean slate\n\n```toml\nversion = 1\n\n[install]\n\n[vars]\n\n[hook]\n\n[profile]\n\n[services]\n\n[options]\n```\n\nPaste this "
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": -2,
+      "classification": "no-signal"
+    },
+    {
+      "id": "trap-noninteractive-edit-idiom",
+      "area": "environments",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "The idiom is `flox edit -f <file>`, which replaces the manifest non-interactively. In CI:\n\n1. Write the complete desired manifest to a temp file.\n2. Apply it with `flox edit -f`.\n\n---\n\n**manifest.toml**\n\n```toml\nversion = 1\n\n[install]\nripgrep.pkg-path = \"ripgrep\"\njq.pkg-path = \"jq\"\nnodejs.pkg-path = \"nodejs\"\nnodejs.version = \"^20.0\"\n\n[hook]\non-activate = \"\"\"\n  export PATH=\"$FLOX_ENV/bin:$PATH\"\n  npm ci --prefix \"$FLOX_ENV_PROJECT\"\n\"\"\"\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-linux\", \"x86_64-darwin\", \"aarch64-darwin\"]\n```\n\n---\n\n**CI commands**\n\n```bash\n# Initialize (if the env doesn't exist yet)\nflox init\n\n# Write the manifest and apply it in one shot\nflox edit -f manifest.toml\n```\n\nIf you need to patch an existing env rather than replace it wholesale:\n\n```bash\n# Dump the current manifest, edit it, then apply\nflox list -c > /tmp/manifest.toml\n# ... sed/awk/python edits to /tmp/manifest.toml ...\nflox edit -f /tmp/manifest.toml\n```\n\n---\n\n**Key points:**\n\n- `flox edit -f <file>` is the only non-interactive path \u2014 it bypasses `$EDITOR` entirely and validates + applies in one step. It will error and abort if the TOML is invalid, so CI fails loudly on a bad manifest rather than sile"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "The idiom is `flox edit -f <file>`, which replaces the manifest atomically and non-interactively.\n\n---\n\n**Two-step pattern for CI:**\n\n```bash\n# 1. (Optional) start from the current manifest\nflox list -c > /tmp/manifest.toml\n\n# 2. Overwrite with your desired content (heredoc, envsubst, etc.)\ncat > /tmp/manifest.toml << 'EOF'\n<your full manifest \u2014 see below>\nEOF\n\n# 3. Apply it\nflox edit -f /tmp/manifest.toml\n```\n\n---\n\n**Example manifest:**\n\n```toml\nversion = 1\n\n[install]\nripgrep.pkg-path = \"ripgrep\"\njq.pkg-path = \"jq\"\ncurl.pkg-path = \"curl\"\n\n[hook]\non-activate = \"\"\"\n  export MY_TOOL_HOME=\"$FLOX_ENV_CACHE/mytool\"\n  mkdir -p \"$MY_TOOL_HOME\"\n\"\"\"\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-linux\", \"x86_64-darwin\", \"aarch64-darwin\"]\n```\n\n---\n\n**Explanation:**\n\n| Command | What it does |\n|---|---|\n| `flox list -c` | Dumps the current raw manifest TOML to stdout \u2014 useful to start from existing state |\n| `flox edit -f <path>` | Replaces the manifest with the file at `<path>`, validates it, and exits non-interactively (no `$EDITOR` opened) |\n\nKey points:\n- `flox edit -f` is the only supported non-interactive manifest write path. Don't write directly to `.flox/env/manifest.toml` \u2014 Flox won'"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0,
+      "classification": "no-signal"
+    },
+    {
+      "id": "trap-containerize-nopush-fixed",
+      "area": "containers",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## Turn Your Flox Environment into a Local Docker Image\n\n### Manifest (`.flox/env/manifest.toml`)\n\nAdd this section to configure the container image metadata:\n\n```toml\n[containerize.config]\ncmd = [\"bash\"]          # default entrypoint command\nworking-dir = \"/app\"    # optional: set working directory\n# exposed-ports = [\"8080/tcp\"]   # optional: declare ports\n# user = \"appuser\"               # optional: run as non-root\n```\n\n### The single command\n\n```bash\nflox containerize --runtime docker\n```\n\n### What it does\n\n- `flox containerize` builds an OCI image from your environment (all packages, env vars, hooks) \u2014 no Dockerfile needed.\n- `--runtime docker` loads it directly into your local Docker daemon (no tar file written to disk, no registry push).\n- The resulting image activates your Flox environment on startup, so `docker run -it <image>` drops you into a shell with everything available.\n\nAfter the command completes, the image appears in `docker images` and can be run immediately:\n\n```bash\ndocker run -it <image-id>\n```"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 3,
+        "judge_correct": false,
+        "judge_issues": [
+          "Uses `--tag myapp:latest` instead of `--runtime docker` or `-f -`; without `-f -`, containerize may not write to stdout so the pipe to `docker load` likely won't work",
+          "Correct forms per rubric are `flox containerize --runtime docker` or `flox containerize -f - | docker load`",
+          "Extra manifest boilerplate shown is not wrong but is beyond the single-command scope asked"
+        ],
+        "answer_excerpt": "## Flox \u2192 Docker (no Dockerfile, no registry)\n\n### Manifest (`.flox/env/manifest.toml`)\n\n```toml\nversion = 1\n\n[install]\npython311.pkg-path = \"python311Full\"\nuv.pkg-path = \"uv\"\nripgrep.pkg-path = \"ripgrep\"\n# \u2026 your packages\n\n[vars]\nAPP_ENV = \"production\"\n\n[hook]\non-activate = '''\n  export PATH=\"$FLOX_ENV/bin:$PATH\"\n'''\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-linux\"]\n```\n\n### The single command\n\n```bash\nflox containerize --tag myapp:latest | docker load\n```\n\n### What it does\n\n| Step | What happens |\n|---|---|\n| `flox containerize` | Builds an OCI image from the activated environment \u2014 Nix closures only, no Dockerfile |\n| `--tag myapp:latest` | Names the image; omit to get an auto-generated name |\n| `\\| docker load` | Streams the tar archive directly into the local daemon \u2014 nothing pushed to a registry |\n\nAfter it completes, `docker images` will show `myapp:latest` and you can run it with `docker run --rm myapp:latest`.\n\n**Notes:**\n- `flox containerize` only works on Linux targets; if you're on macOS, either run it inside a Linux VM/container or limit `options.systems` to `x86_64-linux`/`aarch64-linux` in the manifest.\n- The resulting image has no shell or OS userland beyond wh"
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": -2,
+      "classification": "no-signal"
+    },
+    {
+      "id": "trap-layer-vs-compose-fixed",
+      "area": "sharing",
+      "tier": "stretch",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## Flox Runtime Environment Layering\n\nNo compositor manifest is needed \u2014 this is **layering**, a pure runtime composition with no merged definition.\n\n### The Command Pattern\n\n```bash\nflox activate -r owner/env-low-priority -- flox activate -r owner/env-high-priority\n```\n\n**Precedence rule:** the rightmost (inner) environment wins. It's activated last, so its `PATH` entries are prepended on top. Left = base, right = override.\n\n**Examples:**\n```bash\n# env-B overrides env-A on conflicts\nflox activate -r org/env-A -- flox activate -r org/env-B\n\n# Three-way: env-C has highest priority, env-A lowest\nflox activate -r org/env-A -- flox activate -r org/env-B -- flox activate -r org/env-C\n```\n\n---\n\n### Manifests for Each Separate Environment\n\nDesign each environment to be a good citizen in a layered stack \u2014 prefix names to avoid collisions:\n\n**`org/env-A` manifest** (lower priority / base layer):\n```toml\nversion = 1\n\n[install]\nripgrep.pkg-path = \"ripgrep\"\njq.pkg-path = \"jq\"\n\n[vars]\nENV\u0410_PORT = \"8080\"\n\n[profile.common]\nenva_help() { echo \"env-A tools: rg, jq\"; }\n\n[hook.on-activate]\necho \"env-A active\"\n```\n\n**`org/env-B` manifest** (higher priority / override layer):\n```toml\nversion = 1\n\n[inst"
+      },
+      "skills": {
+        "hard_pass": true,
+        "judge_score": 5,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "Flox layering is a **runtime-only** operation \u2014 there's no manifest involved (a manifest would merge them, which you've ruled out). The complete solution is just the command pattern.\n\n## The Command Pattern\n\n```bash\nflox activate -r owner/env-low-priority -- flox activate -r owner/env-high-priority\n```\n\n**Precedence rule: the innermost (rightmost) environment wins.** Each `flox activate` prepends its paths to `PATH`, so the last one activated ends up at the front.\n\n## Concrete Example\n\nYou have `team/base` and `team/tools`, and you want `team/tools` to take precedence when there are conflicts:\n\n```bash\nflox activate -r team/base -- flox activate -r team/tools\n```\n\n- `team/base` is activated first (outer shell)\n- `team/tools` is activated inside that shell, prepending its paths\n- Result: `team/tools` binaries shadow `team/base` binaries in `$PATH`\n\nTo flip precedence, flip the order:\n\n```bash\nflox activate -r team/tools -- flox activate -r team/base\n```\n\n## Why No Manifest\n\nThe skill confirms: layering is a runtime stacking operation. A manifest `[include]` section does static composition \u2014 it merges environments at build time into one, which is exactly what you don't want. The CLI "
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0,
+      "classification": "no-signal"
+    }
+  ]
+}
