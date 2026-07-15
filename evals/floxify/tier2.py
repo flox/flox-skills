@@ -368,6 +368,32 @@ def process_task(entry, skill_dir, reps=1, activate=False, clone_timeout=900,
     }
 
 
+# --- summary --------------------------------------------------------------
+
+def _flatten_runs(results):
+    """Flatten per-repo results to a flat list of individual runs.
+
+    A reps>1 entry is an aggregate carrying its individual runs under
+    "runs" and no top-level "judge" key; a reps==1 entry is itself a
+    single run. `_stats` only counts entries with a "judge" key, so an
+    unflattened aggregate would be silently dropped and the summary would
+    report all-zeros even when every run passed. Flattening makes every
+    run visible to the stats regardless of reps.
+    """
+    return [run for entry in results for run in entry.get("runs", [entry])]
+
+
+def _summarize(results, skill_id):
+    flat = _flatten_runs(results)
+    return {
+        "skill": skill_id,
+        "model": MODEL,
+        "n_repos": len(results),
+        "n_errors": sum(1 for r in flat if "error" in r),
+        **_stats(flat),
+    }
+
+
 # --- main ---------------------------------------------------------------------
 
 def main():
@@ -452,13 +478,7 @@ def main():
             )
         )
 
-    summary = {
-        "skill": _skill_identity(skill_dir),
-        "model": MODEL,
-        "n_repos": len(results),
-        "n_errors": sum(1 for r in results if "error" in r),
-        **_stats(results),
-    }
+    summary = _summarize(results, _skill_identity(skill_dir))
 
     out_name = args.out
     if Path(out_name).is_absolute():
