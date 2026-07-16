@@ -40,13 +40,56 @@ Flox CLI 1.13.2. Catalog = nixpkgs.
 
 | Package | Verified via | Result |
 |---------|--------------|--------|
-| `elixir` | `flox show elixir` | latest **1.18.4** (floor 1.11.x). `.tool-versions` 1.20.2 is not in catalog, but 1.18.4 satisfies mix.exs `~> 1.18`. |
+| `elixir` | `flox show elixir` | latest **1.18.4** (floor 1.11.x). `.tool-versions` 1.20.2 is not in catalog, but 1.18.4 satisfies mix.exs `~> 1.18`. SUPERSEDED — see AI-457 re-verification below: `elixir_1_19` also exists and is closer to the repo's pin. |
 | elixir → OTP | `nix eval nixpkgs#elixir.erlang.version` and buildInputs | **erlang-28.5.0.3** is the elixir buildInput → OTP **28.5.0.3 is bundled**, matching `.tool-versions` `erlang 28.5.0.3` exactly. No separate `erlang` install needed. |
 | `erlang` (standalone) | `flox show erlang` | latest 28.5.0.3 — confirms OTP 28 line is current; **not installed** (bundled in elixir). |
 | `nodejs_23` | `flox show nodejs_23` | **23.11.0** (range 23.6.0–23.11.0). Same major as pin 23.2.0 / Dockerfile 23.11.1. |
-| `postgresql` | `flox show postgresql` | **18.4** (also 17.x, 16.5). Matches prod `postgres:18`. |
+| `postgresql` | `flox show postgresql` | **18.4** (also 17.x, 16.5). Matches prod `postgres:18`. See AI-457 re-verification below: latest 18.4 lacks an x86_64-darwin build. |
 | `clickhouse` | `flox search --all clickhouse` / `flox show clickhouse` | **present**, latest **26.6.1.1193-stable** (down to 25.12.x shown). See decision below. |
 | `gnumake` | `flox show gnumake` | **4.4.1**. |
+
+### AI-457 re-verification (2026-07-16)
+
+**Elixir pin was wrong — `elixir_1_19` exists and was missed.** The
+original pass checked only the bare `elixir` pkg-path and concluded 1.18.4
+was the catalog ceiling. `flox show elixir_1_19` shows a separate,
+newer-line versioned pkg-path topping out at **1.19.5** — much closer to
+the repo's `.tool-versions` pin (1.20.2-otp-28) and still well inside
+mix.exs's `~> 1.18` floor (permits any `1.x >= 1.18`). Live-verified the
+OTP bundling claim directly rather than via `nix eval` (unavailable in
+this sandbox without a pinned nixpkgs flake ref):
+
+```
+$ flox run -p elixir_1_19 -- elixir --version
+Erlang/OTP 28 [erts-16.4.0.3] ...
+Elixir 1.19.5 (compiled with Erlang/OTP 28)
+```
+
+Confirms OTP 28 is bundled in `elixir_1_19` too, same as bare `elixir` —
+no separate `erlang` install needed either way. Manifest now pins
+`elixir_1_19` at `1.19.5`.
+
+**postgresql systems mismatch.** `flox show postgresql`'s latest (18.4,
+matching prod's `postgres:18`) carries a systems parenthetical excluding
+x86_64-darwin — confirmed live. `elixir_1_19` and `nodejs_23` both build
+on all four systems, so rather than dropping x86_64-darwin from the whole
+environment (over-constraining two packages that don't need it), the
+manifest scopes `postgresql.systems` to the three platforms 18.4 actually
+supports.
+
+**Activation validation.** `flox activate` (x86_64-linux, throwaway
+directory, no real plausible checkout) failed with `constraints for group
+'toplevel' are too tight` even with the elixir fix and postgresql systems
+scoping in place -- bisected to `elixir_1_19@1.19.5` specifically (bare
+`elixir@1.18.4` in the same slot activates fine; the toplevel group has no
+single catalog page containing `elixir_1_19` together with `nodejs_23`/
+`postgresql`/`gnumake`). Giving `elixir` its own `pkg-group` (and, for the
+same reason, giving the systems-scoped `postgresql` its own group too)
+resolved it; the manifest now activates cleanly (`mix` correctly reports
+its cache path as `elixir/1-19-otp-28`, confirming elixir_1_19 is what
+actually gets installed; hook errors past that point are only from the
+missing `assets/package.json`/`tracker/package.json` in the scratch test
+directory, expected without a real checkout).
 
 ## ClickHouse: Flox service vs Docker (the decision)
 
@@ -93,9 +136,10 @@ guidance and the repo's OTP 28 requirement exactly.
 ## ✗ Items (gaps / imperfect matches — honest)
 
 - **✗ Exact elixir pin unavailable.** `.tool-versions` wants `elixir 1.20.2`;
-  catalog max is `1.18.4`. Chosen `elixir` (1.18.4) satisfies the *governing*
-  constraint (`mix.exs: "~> 1.18"`) and provides the required OTP 28, but the
-  exact `.tool-versions` patch pin is not reproducible from the catalog.
+  catalog max (across all versioned elixir pkg-paths) is `elixir_1_19@1.19.5`.
+  Chosen `elixir_1_19` (1.19.5) satisfies the *governing* constraint
+  (`mix.exs: "~> 1.18"`) and provides the required OTP 28, but the exact
+  `.tool-versions` patch pin is not reproducible from the catalog.
 - **✗ Exact Node pin unavailable.** Pin is 23.2.0; `nodejs_23` resolves to
   23.11.0 (Dockerfile itself uses 23.11.1, so the newer patch is arguably
   more faithful to CI than the `.tool-versions` value).
