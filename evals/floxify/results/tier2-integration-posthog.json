@@ -1,0 +1,56 @@
+{
+  "summary": {
+    "skill": "flox-plugin@bill/floxify-integration",
+    "model": "claude-opus-4-8",
+    "n_repos": 1,
+    "n_errors": 0,
+    "n": 1,
+    "hard_pass_rate": 0.0,
+    "avg_judge_score": 2.0,
+    "judge_correct_rate": 0.0,
+    "activation_ok": 0,
+    "activation_skipped": 1
+  },
+  "results": [
+    {
+      "id": "posthog",
+      "repo_url": "https://github.com/PostHog/posthog",
+      "sha": "55525a19f353",
+      "hard_checks": {
+        "manifest_created": true,
+        "valid_toml": true,
+        "no_abs_paths": true,
+        "pins_python3": false,
+        "pins_nodejs_24": true,
+        "has_service_postgres": false,
+        "has_service_redis": false,
+        "has_service_clickhouse": false
+      },
+      "hard_pass": false,
+      "activation": {
+        "ok": null,
+        "skipped": true,
+        "notes": "activation timed out after 120 s"
+      },
+      "judge": {
+        "score": 2,
+        "correct": false,
+        "issues": [
+          "No Python interpreter pinned at all \u2014 [install] omits python313/python3 and defers to `uv sync` fetching an interpreter at activation, so the expected 3.13.13 pin from pyproject.toml is never expressed in the manifest",
+          "[services] section is entirely empty (only a commented-out `db.command` stub) \u2014 postgres, redis, and clickhouse are all unwired",
+          "Missing ClickHouse entirely (no package, no service, no compose fallback) despite it being PostHog's primary analytics store",
+          "No Redis package or service; FLAGS_REDIS_URL points at redis://localhost:6379 with nothing to serve it",
+          "postgresql_14 installed as a client-only convenience (comment says `psql`), diverging from docker-compose.base.yml's postgres:15.12-alpine, and no [services.postgres] block, initdb, or PGDATA under $FLOX_ENV_CACHE",
+          "[vars] sets OPENSSL_ROOT_DIR/OPENSSL_LIB_DIR/OPENSSL_INCLUDE_DIR/LDFLAGS/CPPFLAGS to literal \"$FLOX_ENV\" strings \u2014 [vars] are not expanded, so these carry unexpanded text (the manifest's own comment acknowledges this hazard for UV_PROJECT_ENVIRONMENT but repeats it here)",
+          "hook.on-activate delegates entirely to `$FLOX_ENV_PROJECT/.flox/env/on-activate.sh`, an out-of-manifest file, making the environment non-self-describing",
+          "Profile scripts depend on repo-specific scripts (bin/hogli, bin/phw, bin/dev-sandbox-shims) that are not part of the onboarding and are unverifiable",
+          "[install] sprawls into subpackage tooling (rust toolchain, go, emscripten, ffmpeg_5, watchman, nodemon) while omitting the primary Python runtime \u2014 breadth without resolving the main interpreter",
+          "schema-version 1.10.0 rather than a current version",
+          "pnpm handled via corepack priority juggling but no `pnpm install` visible in the manifest itself (hidden in the sourced script)"
+        ]
+      },
+      "manifest_excerpt": "#\n# This is a Flox environment manifest.\n# Visit flox.dev/docs/concepts/manifest/\n# or see flox-edit(1), manifest.toml(5) for more information.\n#\n# Flox manifest version managed by Flox CLI\nschema-version = \"1.10.0\"\n\n# List packages you wish to install in your environment inside\n# the `[install]` section.\n[install]\n# Python - Python itself is installed on activation via `uv sync`\nuv = { pkg-path = \"uv\", pkg-group = \"uv\", version = \"^0.11.14\" }\nxmlsec = { pkg-path = \"xmlsec\", version = \"1.3.7\" }\nfreetds = { pkg-path = \"freetds\" } # For pymssql\n# Node\nnodejs = { pkg-path = \"nodejs_24\", pkg-group = \"nodejs\", version = \"24.13.0\" } # Same maj.min ver as in Dockerfile; diverges from patch ver\n# Set a lower priority on corepack so it takes precedence over nodejs (both bundle pnpm)\n# https://flox.dev/docs/man/manifest.toml/#catalog-descriptors\ncorepack = { pkg-path = \"corepack_24\", pkg-group = \"nodejs\", version = \"24.13.0\", priority = 4 } # Same maj.min as in Dockerfile; diverges from patch ver\nbrotli = { pkg-path = \"brotli\", pkg-group = \"nodejs\" }\nzstd = { pkg-path = \"zstd\", pkg-group = \"nodejs\" }\nopenssl = { pkg-path = \"openssl\", version = \"3.4.1\", pkg-group = \"openssl\", outputs = [\"bin\", \"man\", \"dev\", \"out\"] }\nnodemon = { pkg-path = \"nodemon\" }\n# Rust toolchain (based on https://flox.dev/docs/cookbook/languages/rust/)\ncargo = { pkg-path = \"cargo\", pkg-group = \"rust-toolchain\", version = \"1.91.1\" }\nrustc = { pkg-path = \"rustc\", pkg-group = \"rust-toolchain\" }\nclippy = { pkg-path = \"clippy\", pkg-group = \"rust-toolchain\" }\nrustfmt = { pkg-path = \"rustfmt\", pkg-group = \"rust-toolchain\" }\nrust-lib-src = { pkg-path = \"rustPlatform.rustLibSrc\", pkg-group = \"rust-toolchain\" }\nlibiconv = { pkg-path = \"libiconv\", systems = [\"aarch64-darwin\"], pkg-group = \"rust-toolchain\" }\nrust-analyzer = { pkg-path = \"rust-analyzer\", pkg-group = \"rust-analyzer\" } # rust-analyzer should be isolated in its own group, details in cookbook example\nlld = { pkg-path = \"lld\", systems = [\"aarch64-darwin\"] } # Faster linker for Rust dev builds on macOS\nsccache = { pkg-path = \"sccache\" } # Compilation cache for Rust (also used in CI)\n# Go\ngo = { pkg-path = \"go\", version = \"1.25.5\", pkg-group = \"go\" }\ngolangci-lint = { pkg-path = \"golangci-lint\", pkg-group = \"go\" }\nair = { pkg-path = \"air\" }\n# CLI tools\ngit-lfs = { pkg-path = \"git-lfs\" }\nripgrep = { pkg-path = \"ripgrep\" }\nmprocs = { pkg-path = \"mprocs\" }\nutil-linux = { pkg-path = \"util-linux\" } # flock\ncmake = { pkg-path = \"cmake\", version = \"3.31.5\", pkg-group = \"cmake\" }\nsqlx-cli = { pkg-path = \"sqlx-cli\", version = \"0.8.3\" } # sqlx\npostgresql = { pkg-path = \"postgresql_14\" } # psql\nffmpeg = { pkg-path = \"ffmpeg_5\", version = \"5.1.4\", pkg-group = \"ffmpeg\" }\nprotobuf = { pkg-path = \"protobuf\" } # protoc compiler for gRPC code generation\nninja.pkg-path = \"ninja\"\nemscripten = { pkg-path = \"emscripten\", pkg-group = \"emscripten\", version = \"4.0.23\" }\nlibpthread-stubs = { pkg-path = \"libpthread-stubs\", pkg-group = \"emscripten\" }\nwatchman = { p",
+      "agent_output_excerpt": "I stopped before writing anything. Here's what I found and why I changed course.\n\n## PostHog is already Floxified \u2014 by PostHog, and better than floxify would do\n\nThe task said \"floxify this repo,\" but `.flox/env/` already contains a mature, hand-maintained Flox environment: a 10KB `manifest.toml` (40+ packages) plus a 21KB `on-activate.sh`. It's not a stub \u2014 `.envrc` auto-activates Flox via direnv, making **Flox the project's primary documented dev entry point**. Overwriting that with a generated manifest would have destroyed real work I didn't create, so I ran the skill's own prescribed path for this case (`.flox` exists \u2192 audit, never modify) and left the manifest byte-identical.\n\nI still ran the full scan and catalog resolution, so here's the gap analysis.\n\n**Everything floxify would re"
+    }
+  ]
+}
