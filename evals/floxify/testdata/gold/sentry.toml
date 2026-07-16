@@ -1,0 +1,135 @@
+schema-version = "1.13.0"
+# Golden reference for sentry @ 68d439d41d66
+#
+# getsentry/sentry is a Python 3.13 + Node 24 monorepo. Python deps are
+# managed by uv (uv.lock + [tool.uv] in pyproject.toml); the frontend is
+# managed by pnpm (packageManager = "pnpm@10.30.2"). Its dev service
+# topology is NOT a root docker-compose.yml -- it lives in
+# devservices/config.yml and is driven by the `devservices` tool. That
+# file declares postgres + redis directly (as remote getsentry/
+# sentry-shared-* repos) and pulls ClickHouse + Kafka in TRANSITIVELY via
+# the `snuba` dependency plus the Kafka-consumer supervisor programs.
+#
+# This manifest wires the two catalog-friendly, direct datastores
+# (postgres, redis) as native Flox services, and defers the rest of the
+# service graph (snuba/ClickHouse, Kafka, relay, symbolicator, ...) to
+# Sentry's own `devservices up` orchestrator. See sentry-notes.md.
+
+[install]
+# --- Language runtimes ---
+python313.pkg-path = "python313"          # .python-version -> 3.13.1
+nodejs_24.pkg-path = "nodejs_24"          # .node-version -> 24.14.0 (catalog nearest 24.14.1)
+
+# --- Package managers (mirror Sentry's dev bootstrap) ---
+uv.pkg-path = "uv"                        # pyproject [tool.uv] + uv.lock; `uv sync`
+pnpm_10.pkg-path = "pnpm_10"              # package.json packageManager = pnpm@10.30.2
+
+# --- Direct datastores (wired as Flox services below) ---
+postgresql.pkg-path = "postgresql"        # devservices dep `postgres` (sentry-shared-postgres)
+postgresql.version = "14"                 # repo does not pin; 14 = Sentry's documented default
+redis.pkg-path = "redis"                  # devservices dep `redis` (sentry-shared-redis)
+redis.version = "7.2"                     # repo does not pin; 7.2 = stable Sentry-aligned major
+
+# --- Native build deps for Sentry's C-extension Python packages ---
+# xmlsec>=1.3.17 + python3-saml need the xmlsec C lib, libxml2, libxslt,
+# openssl; lxml>=6.1.0 needs libxml2/libxslt; cryptography needs openssl.
+# pkg-config lets the build find them. (Sentry's own flow avoids these by
+# pulling prebuilt wheels from a private index -- see notes.)
+xmlsec.pkg-path = "xmlsec"
+libxml2.pkg-path = "libxml2"
+libxslt.pkg-path = "libxslt"
+openssl.pkg-path = "openssl"
+pkg-config.pkg-path = "pkg-config"
+
+# --- Dev tooling ---
+# watchman: Brewfile + devenv REQUIRED_APT_PKGS; used by `pnpm test -u`
+# and file watching.
+watchman.pkg-path = "watchman"
+
+[vars]
+# Convenience defaults so `psql` / `redis-cli` reach the dev services.
+PGHOST = "/tmp/sentry-postgres"
+PGPORT = "5432"
+PGUSER = "postgres"
+PGDATABASE = "sentry"
+
+[hook]
+on-activate = '''
+  # --- Python: uv-managed venv under the env cache (no absolute paths) ---
+  export VIRTUAL_ENV="$FLOX_ENV_CACHE/venv"
+  export UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV"
+  if [ ! -x "$VIRTUAL_ENV/bin/python" ]; then
+    uv venv --python "$(command -v python3)" "$VIRTUAL_ENV"
+  fi
+  export PATH="$VIRTUAL_ENV/bin:$PATH"
+
+  # Sync pinned Python deps, mirroring `devenv sync` (uv sync --frozen).
+  # NOTE: pyproject pins uv's default index to Sentry's private mirror
+  # (pypi.devinfra.sentry.io); outside Sentry's network this step needs
+  # network access to that index or an override. See sentry-notes.md.
+  uv sync --frozen --inexact --active || \
+    echo "uv sync failed (private index / offline?) -- see sentry-notes.md"
+
+  # Install sentry editably without a build backend (Sentry's own idiom).
+  python3 -m tools.fast_editable --path . 2>/dev/null || true
+
+  # --- Frontend: pnpm install, mirroring `devenv sync` ---
+  export CI=true
+  export NODE_ENV=development
+  pnpm install --frozen-lockfile --reporter=append-only || \
+    echo "pnpm install failed -- check node/pnpm availability"
+
+  echo "Sentry env ready. Datastores: 'flox services start postgres redis'."
+  echo "Remaining services (snuba/ClickHouse, Kafka, relay, ...): 'devservices up'."
+'''
+
+# Postgres: direct devservices dependency. State under $FLOX_ENV_CACHE,
+# unix socket in /tmp, trust auth (dev only). Bootstraps the `sentry` DB.
+[services.postgres]
+command = '''
+  export PGDATA="$FLOX_ENV_CACHE/postgres/data"
+  export PGSOCKET="/tmp/sentry-postgres"
+  mkdir -p "$PGSOCKET"
+  if [ ! -s "$PGDATA/PG_VERSION" ]; then
+    initdb --username=postgres --auth=trust --no-locale --encoding=UTF8 -D "$PGDATA"
+  fi
+  # Create the `sentry` database once the server accepts connections.
+  ( until pg_isready -q -h "$PGSOCKET" -p 5432; do sleep 0.5; done
+    createdb -h "$PGSOCKET" -p 5432 -U postgres sentry 2>/dev/null || true ) &
+  exec postgres -D "$PGDATA" -k "$PGSOCKET" -h 127.0.0.1 -p 5432
+'''
+
+# Redis: direct devservices dependency. State under $FLOX_ENV_CACHE,
+# TCP on 127.0.0.1:6379 plus a /tmp socket, no auth/persistence (dev only).
+[services.redis]
+command = '''
+  export REDIS_DIR="$FLOX_ENV_CACHE/redis"
+  mkdir -p "$REDIS_DIR"
+  exec redis-server \
+    --port 6379 \
+    --bind 127.0.0.1 \
+    --unixsocket /tmp/sentry-redis.sock \
+    --dir "$REDIS_DIR" \
+    --save ""
+'''
+
+# --------------------------------------------------------------------------
+# NOT wired as Flox services -- deferred to Sentry's `devservices` tool:
+#
+#   snuba (-> ClickHouse + Kafka), relay, symbolicator, vroom, taskbroker,
+#   objectstore, and the Kafka-consumer supervisor programs
+#   (ingest-events, ingest-transactions, post-process-forwarder-*, ...).
+#
+# ClickHouse and Kafka DO exist in the Flox catalog (clickhouse@26.x,
+# apacheKafka_3_x), but a bare catalog server would NOT be functional for
+# Sentry: they arrive transitively through `snuba`'s own containerized
+# devservices graph, which owns the pinned versions, ClickHouse schema,
+# and Kafka topic setup. Reproducing that correctly is exactly what
+# `devservices up` does. Run it alongside this Flox env:
+#
+#   devservices up                 # default mode: snuba, postgres, relay, ...
+#   devservices up --mode migrations   # what `devenv sync` uses (postgres, redis)
+#
+# `devservices` itself is a dev dependency (installed into the venv by the
+# uv sync above), so it is available once the hook completes.
+# --------------------------------------------------------------------------

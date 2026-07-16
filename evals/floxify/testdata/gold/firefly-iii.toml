@@ -1,0 +1,141 @@
+schema-version = "1.13.0"
+# Golden reference for firefly-iii @ a0d70228bc14
+# Repo: https://github.com/firefly-iii/firefly-iii
+#   Laravel PHP application + Node frontend (personal finance manager).
+# Ecosystem: php (composer). App default DB: MySQL/MariaDB; Redis optional.
+# All catalog names/versions verified with `flox show` / `flox search --all`
+# on flox 1.13.2 (nixpkgs catalog). See firefly-iii-notes.md for provenance.
+
+[install]
+# --- PHP interpreter --------------------------------------------------------
+# composer.json  require.php ">=8.5"; config.platform.php "8.5".
+# .github/workflows/release.yml  php-version "8.5".
+# The bare `php` catalog pkg-path is 8.4 only (php@8.4.23); the 8.5 series is
+# the versioned `php85` pkg-path -> php85@8.5.8 (verified).
+php85.pkg-path = "php85"
+
+# --- Composer ---------------------------------------------------------------
+# composer.lock present -> `composer install`. Composer is NOT a top-level
+# catalog package; it lives under the php-version-specific package set and is
+# built against that interpreter: php85Packages.composer@2.10.2 (verified).
+composer.pkg-path = "php85Packages.composer"
+
+# --- Node (frontend build) --------------------------------------------------
+# package.json declares workspaces resources/assets/v1 (laravel-mix/webpack,
+# Vue 2) and v2 (vite pinned "=8.1.0", Vue3/Alpine/Bootstrap 5). No engines
+# pin anywhere; vite 8 requires Node >=20.19 || >=22.12. nodejs_22@22.23.1
+# (current LTS, verified) satisfies both frontends.
+nodejs.pkg-path = "nodejs_22"
+
+# --- Database server (app default) ------------------------------------------
+# .env.example  DB_CONNECTION=mysql, DB_PORT=3306 -> MySQL/MariaDB is the
+# app default. mariadb is nixpkgs' drop-in MySQL server: mariadb@11.4.12
+# (verified). pdo_mysql (the required driver) is in the default php85 build.
+# ALTERNATE: for DB_CONNECTION=pgsql swap this line for `postgresql`
+#   (postgresql@18.4 verified); pdo_pgsql is also in the default php85 build.
+#   sqlite is likewise supported (pdo_sqlite/sqlite3 are default too).
+mariadb.pkg-path = "mariadb"
+
+# --- Redis (optional cache/session/queue) -----------------------------------
+# .env.example REDIS_* block; CACHE_DRIVER/SESSION_DRIVER default to `file`
+# but redis is a supported backend. Client is predis/predis (pure PHP) -> no
+# phpredis extension required. redis@8.8.0 (verified).
+redis.pkg-path = "redis"
+
+# ===========================================================================
+# PHP EXTENSION REALITY (ext-* entries in composer.json `require`)
+# ---------------------------------------------------------------------------
+# Required by firefly: bcmath curl fileinfo iconv intl json mbstring openssl
+#                      pdo session simplexml tokenizer xml xmlwriter
+#
+# The `php85` catalog package is nixpkgs `php.buildEnv` with a FIXED default
+# extension set baked in. That set (verified against nixpkgs
+# interpreters/php/default.nix + top-level/php-packages.nix) COVERS:
+#   bcmath  curl  fileinfo  iconv  intl  mbstring  openssl  pdo  pdo_mysql
+#   pdo_pgsql  session  simplexml  tokenizer  xmlwriter          (13 of 14)
+#   ext-json is compiled into PHP core (8.0+) and is always present; there is
+#   deliberately no `php85Extensions.json` catalog package.
+#
+# NOT COVERED: ext-xml (the expat/SAX `xml` extension).
+#   * `xml` is absent from the default php85 enabled set.
+#   * It is NOT pulled in transitively: nixpkgs `dom`, `simplexml`, and
+#     `xmlwriter` depend only on libxml2 (no internalDeps on `xml`);
+#     `xmlreader`'s only internalDep is `dom`. Verified in
+#     pkgs/top-level/php-packages.nix.
+#   * `php85Extensions.xml@8.5.8` exists as a catalog package, but installing
+#     it standalone drops a .so into the env WITHOUT wiring it into the
+#     prebuilt php85 binary's ini/extension_dir, so it will not load.
+#   * Idiomatic fix = rebuild the interpreter with the extension enabled,
+#     e.g. a Flox manifest [build] running `php85.withExtensions (e: ...)`.
+#     That is out of scope for this [install]-only golden manifest, so the
+#     on-activate bootstrap below skips the ext-xml platform check as a
+#     clearly-flagged workaround (XML-import code paths may still need it).
+# ===========================================================================
+
+[services.mariadb]
+# Dev-only MySQL/MariaDB server. State under $FLOX_ENV_CACHE; TCP on
+# 127.0.0.1:3306 to match .env DB_HOST/DB_PORT; unix socket in the cache dir
+# (avoids the 107-char /tmp sun_path limit). Root has no password (dev only).
+command = """
+set -euo pipefail
+DATADIR="$FLOX_ENV_CACHE/mariadb"
+SOCKET="$FLOX_ENV_CACHE/mariadb/mysql.sock"
+if [ ! -d "$DATADIR/mysql" ]; then
+  mariadb-install-db --datadir="$DATADIR" \
+    --auth-root-authentication-method=normal --skip-test-db >/dev/null
+fi
+exec mariadbd --datadir="$DATADIR" --socket="$SOCKET" \
+  --port=3306 --bind-address=127.0.0.1
+"""
+
+[services.redis]
+# Dev-only Redis. State under $FLOX_ENV_CACHE; TCP on 6379 to match
+# .env REDIS_HOST/REDIS_PORT; no auth (dev only), persistence off.
+command = """
+mkdir -p "$FLOX_ENV_CACHE/redis"
+exec redis-server --dir "$FLOX_ENV_CACHE/redis" --port 6379 \
+  --save '' --appendonly no
+"""
+
+[hook]
+# Idempotent bootstrap. Run from the firefly-iii repo root (no absolute paths).
+on-activate = """
+if [ ! -f .env ]; then
+  cp .env.example .env
+  echo "[firefly] copied .env.example -> .env"
+fi
+
+# PHP deps from composer.lock. ext-xml platform check skipped because the
+# prebuilt php85 lacks that extension (see [install] notes); for real XML
+# support rebuild via php85.withExtensions instead.
+if [ ! -d vendor ]; then
+  composer install --no-interaction --ignore-platform-req=ext-xml
+fi
+
+# Frontend workspace deps (v1 laravel-mix, v2 vite).
+if [ ! -d node_modules ]; then
+  npm install
+fi
+
+cat <<'GUIDE'
+[firefly] next steps (not auto-run):
+  flox services start                      # start mariadb + redis
+  # in .env set: DB_HOST=127.0.0.1  DB_PORT=3306
+  mariadb -h127.0.0.1 -uroot <<'SQL'
+    CREATE DATABASE IF NOT EXISTS firefly;
+    CREATE USER IF NOT EXISTS 'firefly'@'%'
+      IDENTIFIED BY 'secret_firefly_password';
+    GRANT ALL ON firefly.* TO 'firefly'@'%';
+  SQL
+  php artisan key:generate                 # sets APP_KEY in .env
+  php artisan migrate --seed               # create + seed schema
+  npm run prod --workspace=v1              # build legacy frontend
+  npm run build --workspace=v2             # build vite frontend
+  php artisan serve                        # http://localhost:8000
+GUIDE
+"""
+
+[options]
+# php85 is built for aarch64-darwin, aarch64-linux, x86_64-linux only.
+# x86_64-darwin (Intel mac) is intentionally excluded: no php85 build there.
+systems = ["aarch64-darwin", "aarch64-linux", "x86_64-linux"]

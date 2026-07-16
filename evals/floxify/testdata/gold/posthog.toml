@@ -1,0 +1,108 @@
+schema-version = "1.13.0"
+# Golden reference for posthog @ 55525a19f353
+
+# PostHog is a python(uv) + node(pnpm monorepo) app. Postgres and Redis are
+# wired as native Flox services; ClickHouse runs via PostHog's own configured
+# docker-compose service (see [hook]) because it needs server-side config files
+# and a Kafka/ZooKeeper backing that a bare package cannot reproduce.
+
+[install]
+# Python 3.13.13 — pyproject.toml `requires-python = "==3.13.13"`
+python3.pkg-path = "python313"
+python3.version = "3.13.13"
+
+# Node 24 — .nvmrc `v24.13.0`; package.json engines.node ">=24 <25"
+nodejs.pkg-path = "nodejs_24"
+nodejs.version = "24.13.0"
+
+# uv — uv.lock present; pyproject.toml has [tool.uv] (the Python package manager)
+uv.pkg-path = "uv"
+
+# PostgreSQL 15 server+client — docker-compose.base.yml `db` = postgres:15.12-alpine
+# Provides initdb/postgres/createdb/pg_isready for [services.postgres].
+postgresql.pkg-path = "postgresql_15"
+postgresql.version = "15.12"
+
+# Redis 7.2 server — docker-compose.base.yml `redis7` = redis:7.2-alpine
+# Provides redis-server for [services.redis].
+redis.pkg-path = "redis"
+redis.version = "7.2.7"
+
+# docker-compose — brings up ClickHouse (and its kafka/zookeeper deps) from
+# PostHog's pre-configured image. ClickHouse mounts config.xml/users-dev.xml/
+# user_defined_function.xml + init scripts (docker/clickhouse/) that a plain
+# catalog package can't supply. See [hook].
+docker-compose.pkg-path = "docker-compose"
+
+[vars]
+# Dev-only credentials mirror docker-compose.base.yml (posthog/posthog/posthog).
+PGUSER = "posthog"
+PGDATABASE = "posthog"
+PGPASSWORD = "posthog"
+PGHOST = "/tmp"
+PGPORT = "5432"
+REDIS_PORT = "6379"
+# NOTE: UV_PROJECT_ENVIRONMENT is intentionally NOT set here — [vars] values are
+# literal strings (a "$FLOX_ENV_CACHE/venv" here would not expand). It is
+# exported with expansion in [hook] on-activate and [profile] common instead.
+
+[hook]
+on-activate = '''
+  # --- Python: uv-managed venv under $FLOX_ENV_CACHE (never ./venv) ---
+  export UV_PROJECT_ENVIRONMENT="$FLOX_ENV_CACHE/venv"
+  uv sync --frozen || uv sync
+
+  # --- Node: corepack activates the pinned pnpm@10.29.3 into a writable
+  #     cache dir (the Nix nodejs store path is read-only) ---
+  export COREPACK_HOME="$FLOX_ENV_CACHE/corepack"
+  mkdir -p "$FLOX_ENV_CACHE/node-bin"
+  corepack enable --install-directory "$FLOX_ENV_CACHE/node-bin" pnpm
+  export PATH="$FLOX_ENV_CACHE/node-bin:$PATH"
+  pnpm install --frozen-lockfile
+
+  # --- ClickHouse: PostHog's configured compose service (pulls kafka +
+  #     zookeeper via depends_on). Only when a Docker daemon is reachable. ---
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    docker-compose -f docker-compose.dev.yml up -d clickhouse
+  else
+    echo "[flox] Docker not reachable — ClickHouse not started." >&2
+    echo "[flox] Run: docker-compose -f docker-compose.dev.yml up -d clickhouse" >&2
+  fi
+'''
+
+[profile]
+common = '''
+  # Re-activate the uv venv and expose the pnpm shim on every shell entry.
+  export UV_PROJECT_ENVIRONMENT="$FLOX_ENV_CACHE/venv"
+  [ -f "$FLOX_ENV_CACHE/venv/bin/activate" ] && \
+    source "$FLOX_ENV_CACHE/venv/bin/activate"
+  export PATH="$FLOX_ENV_CACHE/node-bin:$PATH"
+'''
+
+[services.postgres]
+# Data under $FLOX_ENV_CACHE, socket in /tmp, trust auth (dev only).
+command = '''
+  export PGDATA="$FLOX_ENV_CACHE/postgres"
+  if [ ! -d "$PGDATA" ]; then
+    initdb -D "$PGDATA" -U "$PGUSER" --auth=trust >/dev/null
+  fi
+  postgres -D "$PGDATA" -k /tmp -c listen_addresses=127.0.0.1 -p "$PGPORT" &
+  pg_pid=$!
+  until pg_isready -h /tmp -p "$PGPORT" -U "$PGUSER" >/dev/null 2>&1; do
+    sleep 0.5
+  done
+  createdb -h /tmp -p "$PGPORT" -U "$PGUSER" "$PGDATABASE" 2>/dev/null || true
+  wait "$pg_pid"
+'''
+
+[services.redis]
+# Data under $FLOX_ENV_CACHE, socket in /tmp; mirrors compose maxmemory config.
+command = '''
+  mkdir -p "$FLOX_ENV_CACHE/redis"
+  exec redis-server \
+    --port "$REDIS_PORT" \
+    --unixsocket /tmp/posthog-redis.sock \
+    --maxmemory 200mb \
+    --maxmemory-policy allkeys-lru \
+    --dir "$FLOX_ENV_CACHE/redis"
+'''
