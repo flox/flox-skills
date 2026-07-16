@@ -370,9 +370,16 @@ Resolving packages...
 
 - **Node.js**: search `"nodejs <major>"` — prefer `nodejs_22` over `nodejs`
 - **Python**: search `"python <major.minor>"` — prefer `python312` over `python`
+- **Go**: search `"go <major.minor>"` — prefer the versioned `go_1_23` over bare `go`
 - **PostgreSQL**: search `"postgresql <major>"` not `"postgres"` — catalog name differs
 - **Rust**: search `"cargo"` and `"rustc"` separately; also `"clippy"` and `"rustfmt"` for dev tooling
 - **Elixir**: search `"elixir"` only — Erlang/OTP is bundled; do NOT search "erlang" separately
+- **PHP**: search `"php <major.minor>"`; the catalog exposes PHP as a versioned
+  package (verify the exact name with `flox show`). Extensions come from a `php`
+  variant, not separate `ext-*` packages — resolve what you can and list the rest in ✗
+- **Deno**: a `deno.json`/`deno.jsonc` or a `*-edge-runtime` compose image (e.g.
+  Supabase edge functions) means a SECOND runtime — search `"deno"` and pin it
+  alongside `nodejs`. A monorepo that pins only Node silently drops the edge-functions runtime
 - **Flutter**: search `"flutter"` only — Dart SDK is bundled; do NOT search "dart" separately
 - **Mise / asdf** (`.mise.toml` / `.tool-versions`): each `key = "version"` is an independent search; `python = "3.12.3"` → search `"python 3.12"`
 - **Conda** (`environment.yml`): search top-level `dependencies:` binaries only; skip `- pip:` entries (handle via uv)
@@ -386,6 +393,15 @@ Resolving packages...
 2. For unversioned tools, pick the plain name (`redis`, `cmake`, `jq`)
 3. If ambiguous, read the description in results to confirm intent
 4. If no match after 1–2 attempts: add to ✗ section, don't install
+
+**Resolve the VERSIONED name for a pinned runtime — the bare name can mislead.**
+When a runtime is pinned (`.ruby-version`, `.nvmrc`, `go.mod`, `requires-python`),
+`flox show <versioned>` (`flox show ruby_4_0`, `nodejs_24`, `go_1_23`, `python313`)
+is authoritative. The bare `flox show ruby` may report a *lower* ceiling that
+belongs to a different catalog entry — trusting it silently downgrades the
+runtime. Mastodon pins Ruby 4.0.6: `flox show ruby` tops out at 3.4.x, but
+`ruby_4_0` exists at 4.0.5. Search the versioned `pkg-path` first; fall back to
+the bare name only for genuinely unversioned tools.
 
 **Version mismatches:** If the catalog is one patch version behind the project's pin
 (e.g. project pins `node 24.14.0`, catalog has `24.13.0`): install the closest available,
