@@ -506,7 +506,8 @@ pin the actual contract.
 
 The registry's prose `gold` field characterizes the *right answer* in words.
 `testdata/gold/<id>.toml` goes one better: a concrete, hand-curated,
-catalog-verified reference manifest for each registered repo — the manifest a
+per-package verified reference manifest for each registered repo (not
+whole-manifest lock-tested — see the caveat below) — the manifest a
 careful engineer would write after reading the repo in full. When one exists,
 `_judge_tier2` passes it to the judge alongside the prose characterization, so
 grading compares the produced manifest against a real target rather than a
@@ -527,10 +528,13 @@ nonexistent version), the golden just runs `bundle install` and lets the
 bundler shipped with `ruby_4_0` resolve the lockfile — no hallucinated pin.
 
 Captured so far: `mastodon`, `posthog`, `sentry`, `supabase`, `gitea`,
-`plausible`, `lemmy`, `firefly-iii` — grounded + catalog-verified, not
-activation-tested (these dev envs are too heavy to activate on the recording
-machine; every `pkg-path` and version was confirmed via `flox show` /
-`flox search`). Each golden passes its own registry entry's structural checks.
+`plausible`, `lemmy`, `firefly-iii` — grounded + per-package verified; not
+whole-manifest lock-tested (these dev envs are too heavy to activate on the
+recording machine; every `pkg-path` and version was confirmed individually
+via `flox show` / `flox search`, but the manifest as a whole was never
+resolved through `flox activate` or `flox lock`). Each golden passes its
+own registry entry's structural checks and the deterministic golden lint
+(`test_golden_lint.py`, AI-456/AI-457).
 
 ### Registry (`tier2.jsonl`)
 
@@ -551,7 +555,7 @@ One JSON object per line:
 
 | id | sha | ecosystem | expected runtimes | expected services | status |
 |----|-----|-----------|-------------------|--------------------|--------|
-| `mastodon` | `52e9ec7814fc` | ruby | ruby, nodejs_24 | postgres, redis | **run** + golden |
+| `mastodon` | `52e9ec7814fc` | ruby | ruby_4_0, nodejs_24 | postgres, redis | **run** + golden |
 | `posthog` | `55525a19f353` | python | python3 (3.13), nodejs_24 | postgres, redis | golden, run pending |
 | `sentry` | `68d439d41d66` | python | python3 (3.13), nodejs | postgres, redis | golden, run pending |
 | `supabase` | `963182f58e91` | javascript | nodejs_22, deno | postgres | golden, run pending |

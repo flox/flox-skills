@@ -301,7 +301,7 @@ class TestRegistryPatternDriftGuard(unittest.TestCase):
         )
         manifest = (here / "testdata" / "mastodon-manifest.toml").read_text()
         checks = tier2._structural_checks(entry, manifest)
-        self.assertTrue(checks["pins_ruby"], checks)
+        self.assertTrue(checks["pins_ruby_4_0"], checks)
         self.assertTrue(checks["pins_nodejs_24"], checks)
         self.assertTrue(checks["has_service_postgres"], checks)
         self.assertTrue(checks["has_service_redis"], checks)

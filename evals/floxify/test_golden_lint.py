@@ -68,28 +68,15 @@ LIVE_CATALOG = os.environ.get("FLOXIFY_GOLDEN_LINT_LIVE_CATALOG", "1") != "0"
 
 # (fixture id, rule, pkg-path) -> tracking ticket. `pkg-path` is matched
 # EXACTLY against the violation's structured `pkg_path` field.
-# Recorded from a live `flox show` run against nixpkgs on 2026-07-16 — see
-# the AI-461 PR description for the exact violation list. AI-457 burns this
-# down by fixing the golden content; new entries here should be rare and
-# always tagged with the ticket that will resolve them.
-KNOWN_VIOLATIONS = {
-    ("mastodon", "catalog-systems-mismatch", "nodejs_24"): "AI-457",
-    ("mastodon", "catalog-systems-mismatch", "ffmpeg"): "AI-457",
-    ("mastodon", "catalog-systems-mismatch", "libidn"): "AI-457",
-    ("gitea", "catalog-systems-mismatch", "nodejs_26"): "AI-457",
-    ("gitea", "catalog-systems-mismatch", "pnpm"): "AI-457",
-    ("gitea", "catalog-systems-mismatch", "sqlite"): "AI-457",
-    ("posthog", "catalog-version-missing", "python313"): "AI-457",
-    ("posthog", "catalog-systems-mismatch", "uv"): "AI-457",
-    ("posthog", "catalog-systems-mismatch", "docker-compose"): "AI-457",
-    ("plausible", "catalog-systems-mismatch", "postgresql"): "AI-457",
-    ("sentry", "catalog-systems-mismatch", "python313"): "AI-457",
-    ("sentry", "catalog-systems-mismatch", "nodejs_24"): "AI-457",
-    ("sentry", "catalog-systems-mismatch", "uv"): "AI-457",
-    ("sentry", "catalog-systems-mismatch", "pnpm_10"): "AI-457",
-    ("sentry", "catalog-systems-mismatch", "openssl"): "AI-457",
-    ("supabase", "catalog-systems-mismatch", "deno"): "AI-457",
-}
+#
+# Populated from a live `flox show` run against nixpkgs on 2026-07-16 (see
+# the AI-461 PR description for that snapshot) and burned down to empty by
+# AI-457, which fixed every golden's content instead of leaving it
+# allowlisted. Kept as an empty dict rather than deleted: the stale-entry
+# test (test_known_violations_allowlist_has_no_stale_entries) and every
+# `_is_allowlisted` call still need the symbol to exist. New entries here
+# should be rare and always tagged with the ticket that will resolve them.
+KNOWN_VIOLATIONS = {}
 
 
 def _matches(fixture_id, v, key):
