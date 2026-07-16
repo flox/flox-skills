@@ -52,6 +52,77 @@ with two eval layers:
 proves the skill *reaches for it*. Together they close the loop the policy asks
 for: guidance added, guidance verified.
 
+## Phase 3c checker (`scripts/verify.py`) — grounding the OUTPUT
+
+`detect.py` grounds the skill's INPUT; nothing grounded the OUTPUT — the
+produced `manifest.toml` was checked only by an LLM judge (which has graded
+catalog facts from memory and accused a *correct* pin of being hallucinated,
+AI-451) and by prose the model follows most, not all, of the time (AI-460).
+`flox-plugin/skills/floxify/scripts/verify.py` closes that gap: it takes
+`detect.py`'s JSON facts plus a produced `manifest.toml` and reports concrete
+violations — every detected runtime installed, every leaf-datastore client
+and `[vars]` connection-string endpoint actually served, `[vars]` staying
+literal, hooks never mutating the tracked git tree, and every
+`pkg-path`/`version`/`systems` combination resolving in the live catalog
+(via `flox show`, ADVISORY-skipped when flox/network is unavailable — same
+treatment `_check_activation` already gets). A native-build-input-with-no-
+`outputs` heuristic is ADVISORY-only by design — hard-failing a judgment
+call reproduces the judge's own failure mode in Python. The skill runs it as
+Phase 3c Step 4, gating the report the same way Steps 1-3 already do.
+
+Three consumers, one checker (no duplicated logic):
+
+- **The skill** (Phase 3c Step 4) — violations stop the flow; fix, re-run.
+- **The eval harness** (`run_floxify.py`) — re-scans each fixture and runs
+  the checker against the produced manifest as its own deterministic leg,
+  reported per-task and in the summary (`verify_checked`, `verify_clean`);
+  advisory, same reason activation is advisory. Its confirmed catalog
+  resolution table is handed to the LLM judge so it stops grading catalog
+  facts from memory (AI-451).
+- **The goldens** (`testdata/gold/*.toml`) — linted by the same checker as a
+  cheap unit-test-tier check (no `claude`, no agent); see `test_golden_lint.py`
+  below.
+
+Eval layers, same two-tier shape as `detect.py`'s:
+
+- **`test_verify.py`** — fast, deterministic unit tests. Every invariant
+  carries a positive test (fires on the real defect) and a negative test
+  against a realistic manifest shape (proves it does NOT false-fire) — "a
+  wrong invariant is worse than no invariant." Catalog checks are mocked at
+  the `flox show` boundary (`_run_show_command`) so the whole suite runs
+  with no network.
+
+  ```bash
+  python3 -m unittest test_verify -v
+  ```
+
+- **`test_golden_lint.py`** — runs the checker over every
+  `testdata/gold/*.toml` reference. Two hand reviews (AI-455) found real
+  defects in those goldens that had never been linted before; this check
+  found 16 more (per-system catalog gaps across 6 of 8 goldens) the moment
+  it ran with live flox. Golden content is intentionally NOT fixed here —
+  that is AI-457's consolidated pass — so this lands with an explicit
+  `KNOWN_VIOLATIONS` allowlist, one entry per current defect, keyed loosely
+  by (fixture, rule, pkg-path) rather than full message text so a routine
+  catalog version bump doesn't false-fail it. Degrades gracefully (passes
+  trivially) without flox — its real teeth need the `floxify-evals` CI job's
+  live flox install, not the flox-less free-tests step.
+
+  ```bash
+  python3 -m unittest test_golden_lint -v
+  ```
+
+- **`verify_usage_eval.py`** — behavioral conformance, same shape as
+  `detect_usage_eval.py` but Phase-3-bounded (needs a written manifest for
+  verify.py to have anything to check): runs a real `/floxify` through
+  package resolution and manifest-writing, and asserts the skill *actually
+  invoked* verify.py against it. Heavy and opt-in — spawns a `claude`
+  agent — never in the fast gate.
+
+  ```bash
+  python3 verify_usage_eval.py                 # default fixture (node-postgres)
+  ```
+
 ## What it does
 
 For each fixture in `fixtures/`, the harness:
