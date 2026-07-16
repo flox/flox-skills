@@ -23,6 +23,12 @@ name: skill-evals
 # sources or the skill (evals/floxify/** or flox-plugin/skills/**). They never
 # run on unrelated PRs, and they never gate: Tier 1 reports its own hard-check
 # gate only on schedule/dispatch, and Tier 2 is report-only in all modes.
+#
+# golden-lint is DIFFERENT from those two: it spawns no `claude` (zero
+# Anthropic API spend, only `flox show` calls), so it does NOT need the
+# dispatch-only cost gate — it runs per-PR via the same `changes` filter,
+# giving the golden-manifest lint (AI-456 item 2) real teeth against every
+# PR that touches floxify sources, not just on manual dispatch.
 on:
   pull_request:
   # Weekly cron retired: every paid job below is now dispatch-only, so a
@@ -142,12 +148,14 @@ jobs:
           # verify.py (AI-461): the checker's own invariants, all mocked at
           # the `flox show` boundary (_run_show_command) — no flox, no
           # network, same discipline as the rest of this step. test_golden_lint
-          # also runs here for baseline sanity; without flox its catalog leg
-          # skips cleanly (see check_catalog's ADVISORY-skip) so this only
-          # proves the allowlist machinery imports and runs — its real,
-          # flox-backed run lives in the floxify-evals job below.
+          # also runs here for baseline sanity, with FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0
+          # pinned EXPLICITLY so its no-network guarantee doesn't rely on
+          # flox merely happening to be absent from this runner — this only
+          # proves the allowlist machinery imports and runs; its real,
+          # flox-backed run (with real teeth against catalog drift) is the
+          # golden-lint job below.
           echo "::group::verify.py (manifest checker)"
-          python3 -m unittest test_verify test_verify_usage_eval test_golden_lint -v
+          FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_verify test_verify_usage_eval test_golden_lint -v
           echo "::endgroup::"
           echo "::group::run_floxify.py (harness deterministic-leg wiring)"
           python3 -m unittest test_run_floxify -v
@@ -186,6 +194,46 @@ jobs:
           name: eval-results-${{ github.event.inputs.mode || 'skills' }}
           path: evals/results/
 
+  golden-lint:
+    # Golden-manifest lint (verify.py, no claude — AI-456 item 2). Unlike
+    # floxify-evals/floxify-tier2 below, this spawns no `claude` agent and
+    # costs zero Anthropic API spend (only `flox install` + `flox show`
+    # network calls), so it does NOT need their dispatch-only cost gate —
+    # it runs per-PR via the `changes` filter, exactly as this workflow's
+    # header comment describes, PLUS on manual dispatch and (if the
+    # schedule trigger is restored) weekly. This is where KNOWN_VIOLATIONS
+    # (test_golden_lint.py) gets real teeth against catalog drift; the
+    # free `evals` step above only proves the allowlist machinery imports
+    # (no flox there by design).
+    needs: changes
+    if: >-
+      (github.event_name == 'pull_request' && needs.changes.outputs.floxify == 'true') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Install flox
+        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
+
+      - name: Golden-manifest lint (verify.py against testdata/gold/*.toml)
+        working-directory: evals/floxify
+        env:
+          FLOX_DISABLE_METRICS: "true"
+        run: |
+          # Same checker as the free `evals` step, but WITH flox+network,
+          # so the catalog leg (pkg-path/version/per-system resolution)
+          # actually runs against testdata/gold/*.toml instead of skipping
+          # cleanly. KNOWN_VIOLATIONS is an explicit allowlist (AI-457
+          # burns it down); a failure here means a genuinely NEW, unlisted
+          # catalog defect.
+          python3 -m unittest test_golden_lint -v
+
   floxify-evals:
     # Tier 1 outcome-based /floxify eval — runs the skill against synthetic
     # fixture repos and verifies the manifest it produces (plus `flox
@@ -216,18 +264,6 @@ jobs:
 
       - name: Install flox
         uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
-
-      - name: Golden-manifest lint (verify.py, no claude — AI-456 item 2)
-        working-directory: evals/floxify
-        env:
-          FLOX_DISABLE_METRICS: "true"
-        run: |
-          # Same checker as the free step above, but WITH flox+network, so
-          # the catalog leg (pkg-path/version/per-system resolution) actually
-          # runs against testdata/gold/*.toml instead of skipping cleanly.
-          # KNOWN_VIOLATIONS is an explicit allowlist (AI-457 burns it down);
-          # a failure here means a genuinely NEW, unlisted catalog defect.
-          python3 -m unittest test_golden_lint -v
 
       - name: Run /floxify outcome eval gate
         env:

@@ -75,10 +75,11 @@ Three consumers, one checker (no duplicated logic):
 - **The skill** (Phase 3c Step 4) — violations stop the flow; fix, re-run.
 - **The eval harness** (`run_floxify.py`) — re-scans each fixture and runs
   the checker against the produced manifest as its own deterministic leg,
-  reported per-task and in the summary (`verify_checked`, `verify_clean`);
-  advisory, same reason activation is advisory. Its confirmed catalog
-  resolution table is handed to the LLM judge so it stops grading catalog
-  facts from memory (AI-451).
+  reported per-task and in the summary (`verify_checked`, `verify_clean`,
+  `verify_hard_violation_rate`); advisory, same reason activation is
+  advisory (see "Why verify.py is advisory in the harness" below). Its
+  confirmed catalog resolution table is handed to the LLM judge so it
+  stops grading catalog facts from memory (AI-451).
 - **The goldens** (`testdata/gold/*.toml`) — linted by the same checker as a
   cheap unit-test-tier check (no `claude`, no agent); see `test_golden_lint.py`
   below.
@@ -102,15 +103,31 @@ Eval layers, same two-tier shape as `detect.py`'s:
   found 16 more (per-system catalog gaps across 6 of 8 goldens) the moment
   it ran with live flox. Golden content is intentionally NOT fixed here —
   that is AI-457's consolidated pass — so this lands with an explicit
-  `KNOWN_VIOLATIONS` allowlist, one entry per current defect, keyed loosely
-  by (fixture, rule, pkg-path) rather than full message text so a routine
-  catalog version bump doesn't false-fail it. Degrades gracefully (passes
-  trivially) without flox — its real teeth need the `floxify-evals` CI job's
-  live flox install, not the flox-less free-tests step.
+  `KNOWN_VIOLATIONS` allowlist, one entry per current defect, matched
+  against the violation's structured `pkg_path` field EXACTLY (not a
+  substring of the message — a short needle like `uv` or `deno` would
+  otherwise risk colliding with unrelated text). A dedicated test asserts
+  every allowlist entry still matches a live violation, so AI-457 fixing a
+  golden without removing its entry doesn't leave a stale slot that could
+  silently absorb a future unrelated regression. Degrades gracefully
+  (passes trivially, no network) without flox — set
+  `FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0` to force that mode explicitly rather
+  than relying on flox's ambient absence; its real teeth need the
+  `golden-lint` CI job's live flox install (see workflow file), not the
+  flox-less free-tests step.
 
   ```bash
   python3 -m unittest test_golden_lint -v
+  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_golden_lint -v  # no network
   ```
+
+  **Caveat:** the LLM judge (in `run_floxify.py` and `tier2.py`) grades
+  produced manifests against these same goldens. Until AI-457 lands, a
+  defective golden could in principle nudge the judge to penalize a
+  correct manifest that differs from the defect, or reward one that
+  copies it. The judge score is advisory and noisy run-to-run regardless
+  (see the Gate policy section below), so this doesn't change what's
+  gate-binding — but it's worth knowing the reference isn't yet clean.
 
 - **`verify_usage_eval.py`** — behavioral conformance, same shape as
   `detect_usage_eval.py` but Phase-3-bounded (needs a written manifest for
@@ -122,6 +139,36 @@ Eval layers, same two-tier shape as `detect.py`'s:
   ```bash
   python3 verify_usage_eval.py                 # default fixture (node-postgres)
   ```
+
+### Why verify.py is advisory in the harness
+
+The live skill hard-gates on verify.py's invariants (Phase 3c Step 4
+blocks the report on any HARD violation), but `run_floxify.py`'s
+deterministic leg never fails `--gate` on the same checks — including the
+network-free ones (`runtime-not-installed`, `leaf-datastore-not-served`,
+`vars-not-literal`, `hook-mutates-tree`) that don't need flox/network and
+so, in principle, could gate reliably. Two reasons this stays a
+measurement rather than a gate:
+
+1. **Evals report rates, not states.** The AI-460 lesson: a single run
+   flipping pass/fail on a probabilistic agent output is not the same
+   kind of signal as a deterministic unit test, even when the *check*
+   itself is deterministic — the *manifest being checked* still comes
+   from a non-deterministic agent run. `hard_pass_rate`, `avg_judge_score`,
+   and now `verify_hard_violation_rate` are tracked as trends (watch for a
+   sustained rise), the same treatment every other advisory metric in this
+   harness already gets.
+2. **There is no per-PR skill run to gate.** The paid `floxify-evals` job
+   (which is what would produce these manifests on a PR) is dispatch-only
+   — see the CI section below — so making the harness leg gate-binding
+   would not actually protect any PR; it would only bind the weekly/manual
+   runs, which already report their `--gate` verdict through the existing
+   hard-check column.
+
+Watch `verify_hard_violation_rate` in the run summary and the per-fixture
+`verify` column in the CI step summary for a sustained regression — that
+is the signal this leg exists to surface, even though nothing here fails
+the build on it.
 
 ## What it does
 
@@ -278,6 +325,15 @@ dispatch) rather than never.
 
 Per-PR floxify regression-catching is therefore **manual/scheduled by
 design** — the live-flox dependency makes a fast per-PR gate impractical.
+
+**Exception: `golden-lint`.** The golden-manifest lint (`test_golden_lint.py`,
+see "Phase 3c checker" above) is a SEPARATE job from `floxify-evals` and
+does NOT follow the dispatch-only rule above — it needs `flox` (for
+`flox show`) but never spawns `claude`, so it carries none of the cost or
+trust concerns that keep the outcome evals dispatch-only. It runs on
+every PR that touches floxify sources (via the `changes` path filter),
+same trigger shape as the fast `evals` job, just in its own job so the
+flox install doesn't slow down the flox-less unit tests.
 
 ## Fixtures
 

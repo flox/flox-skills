@@ -115,6 +115,24 @@ def _skill_identity(skill_dir):
 # Pinned model — match run.py for consistency across both harnesses.
 MODEL = "claude-opus-4-8"
 
+# Mirrors verify.py's own HARD/ADVISORY severity protocol. Not a static
+# import of that constant (verify.py is loaded dynamically per-task, per
+# --skill-dir — see _load_detect_and_verify) — these are the stable
+# string values of a shared, versioned protocol between the two, not
+# module-instance state, so re-declaring them here (instead of every
+# caller re-typing the raw "hard"/"advisory" literal) is the right
+# centralization without coupling to a specific loaded instance.
+VERIFY_HARD = "hard"
+VERIFY_ADVISORY = "advisory"
+
+
+def _hard_verify_violations(violations):
+    return [v for v in violations if v["severity"] == VERIFY_HARD]
+
+
+def _advisory_verify_violations(violations):
+    return [v for v in violations if v["severity"] == VERIFY_ADVISORY]
+
 # --- deterministic hard-check patterns (reuse run.py patterns) ----------------
 
 FAKE_INSTALL = re.compile(
@@ -289,22 +307,40 @@ def _catalog_note(verify_result):
             "only structure, hook quality, and idiomatic Flox usage.\n"
         )
     catalog_hard = [
-        v for v in verify_result["violations"]
-        if v["severity"] == "hard" and v["rule"].startswith("catalog-")
+        v for v in _hard_verify_violations(verify_result["violations"])
+        if v["rule"].startswith("catalog-")
     ]
+    unknown = verify_result.get("catalog_unknown") or []
     if catalog_hard:
         listing = "; ".join(v["message"] for v in catalog_hard[:5])
-        return (
+        note = (
             f"\nDETERMINISTIC CATALOG CHECK (verify.py, via `flox show`): "
             f"{len(catalog_hard)} pkg-path/version/system violation(s) "
             f"CONFIRMED against the live catalog: {listing}\n"
         )
-    return (
-        "\nDETERMINISTIC CATALOG CHECK (verify.py, via `flox show`): every "
-        "installed pkg-path/version/system combination was CONFIRMED to "
-        "resolve in the live catalog. Do not second-guess this from memory "
-        "— e.g. do not flag a pin as hallucinated on this basis.\n"
-    )
+    elif unknown:
+        # verify.py excludes these from its confirmed table (check_catalog's
+        # `available is None` path) — the judge note must too, rather than
+        # rounding "no violation" up to "confirmed clean" for entries the
+        # catalog leg genuinely could not evaluate.
+        names = ", ".join(u["install_id"] for u in unknown)
+        note = (
+            f"\nDETERMINISTIC CATALOG CHECK (verify.py, via `flox show`): no "
+            f"violations found, but {len(unknown)} install entr"
+            f"{'y' if len(unknown) == 1 else 'ies'} ({names}) had UNKNOWN "
+            f"per-system availability and were NOT confirmed either way — "
+            f"do not assert catalog facts about those specific entries from "
+            f"memory. All other installed pkg-path/version/system "
+            f"combinations were CONFIRMED to resolve.\n"
+        )
+    else:
+        note = (
+            "\nDETERMINISTIC CATALOG CHECK (verify.py, via `flox show`): every "
+            "installed pkg-path/version/system combination was CONFIRMED to "
+            "resolve in the live catalog. Do not second-guess this from memory "
+            "— e.g. do not flag a pin as hallucinated on this basis.\n"
+        )
+    return note
 
 
 def _judge(task, produced_toml, verify_result=None):
@@ -429,7 +465,8 @@ def _run_verify(skill_dir, fixture_src, manifest_text, check_catalog_live):
     mirrors _check_activation's own skipped/failed distinction).
     """
     if manifest_text is None:
-        return {"violations": [], "catalog_checked": False, "skipped": "no manifest produced"}
+        return {"violations": [], "catalog_checked": False, "catalog_unknown": [],
+                "skipped": "no manifest produced"}
     try:
         detect_mod, verify_mod = _load_detect_and_verify(skill_dir)
         detect_facts = detect_mod.scan(fixture_src)
@@ -437,7 +474,8 @@ def _run_verify(skill_dir, fixture_src, manifest_text, check_catalog_live):
             detect_facts, manifest_text, check_catalog_live=check_catalog_live,
         )
     except Exception as exc:  # noqa: BLE001 - a harness-side failure, not a manifest verdict
-        return {"violations": [], "catalog_checked": False, "error": str(exc)}
+        return {"violations": [], "catalog_checked": False, "catalog_unknown": [],
+                "error": str(exc)}
 
 
 # --- per-task runner ----------------------------------------------------------
@@ -506,8 +544,8 @@ def process_task(task, skill_dir, skip_activation=False,
             skill_dir, fixture_src, manifest_text,
             check_catalog_live=not skip_activation,
         )
-        verify_hard = [v for v in verify_result["violations"] if v["severity"] == "hard"]
-        verify_advisory = [v for v in verify_result["violations"] if v["severity"] == "advisory"]
+        verify_hard = _hard_verify_violations(verify_result["violations"])
+        verify_advisory = _advisory_verify_violations(verify_result["violations"])
 
         # LLM judge (advisory) — hand it verify.py's confirmed catalog
         # resolution table so it stops grading catalog facts from memory.
@@ -633,6 +671,18 @@ def _stats(results):
         r for r in results
         if "verify" in r and r["verify"]["catalog_checked"] and r["verify"]["hard_count"] == 0
     ]
+    # Over ALL fixtures with a verify result, not just catalog_checked ones
+    # — the network-free invariants (runtime installed, leaf-datastore
+    # served, vars literal, hook non-mutation) run regardless of catalog
+    # availability, and this rate is the one place that signal surfaces
+    # even though it never gates (see README's "Why verify.py is advisory
+    # in the harness" for the reasoning).
+    verify_results = [r for r in results if "verify" in r]
+    verify_hard_violation_rate = (
+        round(sum(1 for r in verify_results if r["verify"]["hard_count"] > 0)
+              / len(verify_results), 3)
+        if verify_results else None
+    )
     return {
         "n": len(scored),
         "hard_pass_rate": round(sum(r["hard_pass"] for r in scored) / n, 3),
@@ -643,9 +693,12 @@ def _stats(results):
         # verify.py (AI-461) — advisory, same reason activation is advisory:
         # the catalog leg needs live flox+network. verify_checked counts
         # fixtures where that leg actually ran; verify_clean is the subset
-        # with zero HARD violations.
+        # with zero HARD violations. verify_hard_violation_rate is the
+        # headline number to watch for a sustained regression even though
+        # nothing here gates the build.
         "verify_checked": len(verify_checked),
         "verify_clean": len(verify_clean),
+        "verify_hard_violation_rate": verify_hard_violation_rate,
     }
 
 
@@ -846,26 +899,40 @@ def _write_step_summary(summary, results, binding, bad, errs, gate_enabled,
         f"**skill:** `{summary.get('skill', '?')}`",
         "",
         "### Hard-check results",
-        "| fixture | tier | hard | judge | activate |",
-        "|---|---|:--:|:--:|:--:|",
+        "| fixture | tier | hard | judge | activate | verify |",
+        "|---|---|:--:|:--:|:--:|:--:|",
     ]
     for r in results:
         if "error" in r:
-            lines.append(f"| {r['id']} | {r['tier']} | ERROR | — | — |")
+            lines.append(f"| {r['id']} | {r['tier']} | ERROR | — | — | — |")
             continue
         hp = "PASS" if r["hard_pass"] else "FAIL"
         js = f"{r['judge']['score']}/5"
         act = r.get("activation", {})
         a = "skipped" if act.get("skipped") else ("ok" if act.get("ok") else "FAIL")
-        lines.append(f"| {r['id']} | {r['tier']} | {hp} | {js} | {a} |")
+        ver = r.get("verify")
+        if ver is None:
+            v = "—"
+        elif ver["hard_count"] > 0:
+            v = f"{ver['hard_count']} HARD"
+        elif not ver["catalog_checked"]:
+            v = "skipped"
+        else:
+            v = "clean"
+        lines.append(f"| {r['id']} | {r['tier']} | {hp} | {js} | {a} | {v} |")
 
+    verify_rate = summary.get("verify_hard_violation_rate")
+    verify_rate_str = f"{verify_rate:.0%}" if verify_rate is not None else "n/a"
     lines += [
         "",
         f"**hard-pass rate:** {summary['hard_pass_rate']:.0%} · "
         f"**avg judge:** {summary['avg_judge_score']:.2f}/5 · "
-        f"**judge-correct:** {summary['judge_correct_rate']:.0%}",
+        f"**judge-correct:** {summary['judge_correct_rate']:.0%} · "
+        f"**verify hard-violation rate:** {verify_rate_str}",
         "",
-        "_Activation is advisory — recorded as skipped when flox is unavailable._",
+        "_Activation and verify.py are both advisory — recorded as skipped "
+        "when flox/network is unavailable, never gating the build. See "
+        "README's \"Why verify.py is advisory in the harness\" for why._",
     ]
 
     if bad or errs:

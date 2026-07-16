@@ -156,6 +156,73 @@ class TestCatalogNote(unittest.TestCase):
         self.assertIn("x86_64-darwin", note)
         self.assertNotIn("unrelated non-catalog violation", note)
 
+    def test_unknown_entries_are_excluded_from_the_confirmed_claim(self):
+        # Regression: the note must not claim "every combination was
+        # CONFIRMED" when verify.py itself couldn't establish some
+        # entries' per-system availability (check_catalog's
+        # `available is None` path, surfaced as catalog_unknown).
+        result = {
+            "catalog_checked": True,
+            "violations": [],
+            "catalog_unknown": [
+                {"install_id": "weird", "pkg_path": "weird-pkg", "version": "2.0.0"},
+            ],
+        }
+        note = run_floxify._catalog_note(result)
+        self.assertIn("UNKNOWN", note)
+        self.assertIn("weird", note)
+        self.assertNotIn("every installed pkg-path/version/system combination "
+                         "was CONFIRMED", note)
+
+    def test_no_unknown_entries_still_confirms_cleanly(self):
+        result = {"catalog_checked": True, "violations": [], "catalog_unknown": []}
+        note = run_floxify._catalog_note(result)
+        self.assertIn("every installed pkg-path/version/system combination "
+                      "was CONFIRMED", note)
+
+
+class TestStats(unittest.TestCase):
+    """The harness leg is advisory (never gates --gate), so
+    verify_hard_violation_rate is the one place its signal surfaces
+    prominently — a future skill regression must be visible here even
+    though nothing fails the build on it (see README's "Why verify.py is
+    advisory in the harness")."""
+
+    def _result(self, hard_count, catalog_checked=True, judge_score=5):
+        return {
+            "id": "x", "tier": "should", "ecosystem": "node",
+            "hard_pass": True,
+            "judge": {"score": judge_score, "correct": True, "issues": []},
+            "verify": {"hard_count": hard_count, "advisory_count": 0,
+                      "catalog_checked": catalog_checked},
+        }
+
+    def test_hard_violation_rate_reflects_fraction_with_violations(self):
+        results = [self._result(0), self._result(2), self._result(0), self._result(1)]
+        stats = run_floxify._stats(results)
+        self.assertEqual(stats["verify_hard_violation_rate"], 0.5)
+
+    def test_rate_counts_non_catalog_hard_violations_too(self):
+        # A hard violation from a network-free invariant (vars-not-literal,
+        # hook-mutates-tree, ...) must count even when the catalog leg
+        # itself didn't run -- those checks are independent of flox/network.
+        results = [self._result(1, catalog_checked=False)]
+        stats = run_floxify._stats(results)
+        self.assertEqual(stats["verify_hard_violation_rate"], 1.0)
+
+    def test_rate_is_none_when_no_verify_results(self):
+        results = [{
+            "id": "x", "tier": "should", "ecosystem": "node", "hard_pass": True,
+            "judge": {"score": 5, "correct": True, "issues": []},
+        }]
+        stats = run_floxify._stats(results)
+        self.assertIsNone(stats["verify_hard_violation_rate"])
+
+    def test_all_clean_gives_zero_rate(self):
+        results = [self._result(0), self._result(0)]
+        stats = run_floxify._stats(results)
+        self.assertEqual(stats["verify_hard_violation_rate"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
