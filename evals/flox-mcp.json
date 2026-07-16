@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "flox-mcp": {
-      "command": "flox",
-      "args": ["activate", "-r", "flox/flox-mcp-server", "--", "flox-mcp"]
-    }
-  }
-}

@@ -12,6 +12,30 @@ correct; these bind the gate), **may** (nice if it triggers), and **stretch**
 prompts deliberately never mention "flox", to test that the skill fires when a
 user just wants "a new project" / "add nodejs 18.4" / "a PyTorch GPU setup".
 
+## Policy: new skill features ship with an eval
+
+**Every PR that adds a new feature or a new piece of guidance to the skill MUST
+add an eval task that verifies the guidance is actually followed.** Reviewers
+should not approve a skill-feature PR without one.
+
+Why: the investigation behind AI-435 showed that modern Claude already knows
+Flox, so most guidance shows no measurable lift — *except* for features the
+model can't already know (post-training-cutoff CLI, Flox-specific idioms). A
+new feature is therefore the one place an eval genuinely discriminates, and the
+task doubles as a conformance check: does the model, with the skill, produce the
+idiom the skill teaches?
+
+How:
+- Write a prompt a user would ask that should invoke the new guidance (e.g.
+  "the catalog only has X 2.12.1 but I need 2.12.2 — how, through Flox?").
+- Add a deterministic `must_match` for the Flox-specific idiom the skill teaches
+  (e.g. `\.flox/pkgs` + `overrideAttrs`), plus a judge rubric. Prefer asserting
+  the *correct* construction (positive `must_match`) over detecting the wrong one
+  (`must_not_match`) — good answers often show the anti-pattern as a labeled
+  counter-example, which false-fires a negative check.
+- Screen it (`screen.py --reps 5`) baseline-vs-skills to confirm the skill arm
+  follows the guidance; promote it into `tasks.jsonl` once it holds.
+
 ## What it does
 
 For every task in `tasks.jsonl`, runs `claude` headless with the Flox plugin
@@ -31,18 +55,14 @@ used so nothing biases the model toward Flox. The `invokes_flox` hard-check then
 verifies the skill fired anyway and produced Flox guidance. These guard the
 behavior the retired MCP server used to encourage.
 
-Two arms (this is the AI-93 comparison):
-
-| Mode | Flag | Needs |
-|------|------|-------|
-| `skills` | `--strict-mcp-config` (MCP off) | nothing extra |
-| `skills+mcp` | `--mcp-config flox-mcp.json` | nothing extra — `flox-mcp.json` runs the public MCP server via `flox activate -r flox/flox-mcp-server -- flox-mcp` (no FloxHub login required) |
+The harness runs a single arm today (`skills`, `--strict-mcp-config`, MCP
+off); an MCP-assisted arm was measured and retired — see the AI-93 finding
+under Baselines below.
 
 ## Run
 
 ```bash
 python3 run.py --mode skills            # skills-only baseline
-python3 run.py --mode skills+mcp        # skills + MCP (needs flox-mcp)
 python3 run.py --mode skills --only node-env   # single task
 python3 run.py --mode skills --gate     # exit non-zero if binding gates fail (CI)
 ```
@@ -72,11 +92,12 @@ Recorded on the original 7-skill layout (pre-consolidation):
 | Arm | Hard-check pass | Avg judge score | Correct rate | File |
 |-----|-----------------|-----------------|--------------|------|
 | skills-only | 8/8 (100%) | 4.62 / 5 | 8/8 | `results/skills.json` |
-| skills + MCP | 8/8 (100%) | 4.25 / 5 | 8/8 | `results/skills_mcp.json` |
 
-**AI-93 finding:** skills-only is at least as good as skills+MCP (the delta is
-within LLM-judge run-to-run noise; both arms are 100% correct and 100%
-hard-pass). No measurable context gap from removing the MCP.
+**AI-93 finding:** an MCP-assisted arm (skills + the flox-mcp server) was
+measured alongside skills-only and scored 8/8 (100%) hard-pass, 4.25/5 avg
+judge, 8/8 correct — within LLM-judge run-to-run noise of skills-only. No
+measurable context gap from removing the MCP, so the arm was retired and
+the harness now runs skills-only.
 
 ## Gate policy
 
