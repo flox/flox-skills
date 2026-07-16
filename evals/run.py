@@ -69,6 +69,57 @@ CHECKS = {
 }
 
 
+# --- cost accounting (AI-459) ----------------------------------------------
+# `claude -p --output-format json` returns total_cost_usd + usage on EVERY
+# call. This harness read only `.result` and dropped the rest, so we could not
+# answer "what does a run cost?" from our own data — while spending it on every
+# PR. Measured: one agent call on a real task is $1.27 (18.6k output, ~957k
+# cache-read, 406s); a trivial 4-token reply is still $0.088. At 27 tasks x
+# (agent + judge) that is ~$40/run, which is why CI is defunded until this is
+# visible.
+
+def _parse_meta(envelope):
+    """Extract cost/usage from a claude JSON envelope. Never raises — a
+    cost-accounting detail must not be able to break an eval run."""
+    try:
+        cost = float(envelope.get("total_cost_usd") or 0.0)
+    except (TypeError, ValueError):
+        cost = 0.0
+    usage = envelope.get("usage")
+    try:
+        duration = int(envelope.get("duration_ms") or 0)
+    except (TypeError, ValueError):
+        duration = 0
+    return {
+        "cost_usd": cost,
+        "usage": usage if isinstance(usage, dict) else {},
+        "duration_ms": duration,
+    }
+
+
+ZERO_META = {"cost_usd": 0.0, "usage": {}, "duration_ms": 0}
+
+
+def _cost_summary(results):
+    """Roll per-task cost into a run total, split agent vs judge.
+
+    The judge split matters: it is half of every run's calls, pinned to the
+    same frontier model as the agent, for a grading job AI-451 shows it does
+    badly. That trade is invisible without this number.
+    """
+    costed = [r["cost"] for r in results if "cost" in r]
+    agent = sum(c.get("agent_usd", 0.0) for c in costed)
+    judge_total = sum(c.get("judge_usd", 0.0) for c in costed)
+    total = sum(c.get("total_usd", 0.0) for c in costed)
+    return {
+        "total_usd": round(total, 4),
+        "agent_usd": round(agent, 4),
+        "judge_usd": round(judge_total, 4),
+        "mean_per_task_usd": round(total / len(costed), 4) if costed else 0.0,
+        "n_costed_tasks": len(costed),
+    }
+
+
 def run_claude(prompt, mode, allow_tools, timeout=420, retries=3):
     cmd = ["claude", "-p", prompt, "--model", MODEL, "--output-format", "json"]
     if allow_tools:
@@ -91,13 +142,21 @@ def run_claude(prompt, mode, allow_tools, timeout=420, retries=3):
                 last = f"EXIT {out.returncode}: {out.stderr[:300]}"
             else:
                 try:
-                    return json.loads(out.stdout).get("result", ""), None
+                    envelope = json.loads(out.stdout)
                 except json.JSONDecodeError:
                     last = f"BAD JSON: {out.stdout[:300]}"
+                else:
+                    return (
+                        envelope.get("result", ""),
+                        None,
+                        _parse_meta(envelope),
+                    )
         # transient (rate limit / overload / blip) -> backoff and retry
         if attempt < retries - 1:
             time.sleep(2 + attempt * attempt * 3)
-    return None, last
+    # A failed call may still have burned tokens, but the envelope is gone.
+    # Return a zeroed meta so callers can sum unconditionally.
+    return None, last, dict(ZERO_META)
 
 
 def judge(task, answer):
@@ -109,9 +168,10 @@ def judge(task, answer):
         'Return ONLY a JSON object: {"score": <int 1-5>, "correct": <true|false>, '
         '"issues": [<short strings>]}'
     )
-    result, err = run_claude(prompt, "judge", allow_tools=None)
+    result, err, meta = run_claude(prompt, "judge", allow_tools=None)
     if err:
-        return {"score": 0, "correct": False, "issues": [f"judge error: {err}"]}
+        return {"score": 0, "correct": False,
+                "issues": [f"judge error: {err}"]}, meta
     raw, m = {}, re.search(r"\{.*\}", result, re.S)
     if m:
         try:
@@ -126,7 +186,7 @@ def judge(task, answer):
     except (TypeError, ValueError):
         score = 0
     return {"score": score, "correct": bool(raw.get("correct", False)),
-            "issues": raw.get("issues", [])}
+            "issues": raw.get("issues", [])}, meta
 
 
 def process_task(t, mode, allow):
@@ -135,17 +195,28 @@ def process_task(t, mode, allow):
     tier = t.get("tier", "should")
     base = {"id": t["id"], "area": t["area"], "tier": tier,
             "trigger_test": bool(t.get("trigger_test"))}
-    answer, err = run_claude(t["prompt"] + suffix, mode, allow)
+    answer, err, agent_meta = run_claude(t["prompt"] + suffix, mode, allow)
     if err:
         print(f"    [{tier}] {t['id']}: run error: {err}", flush=True)
-        return {**base, "error": err}
+        return {**base, "error": err, "cost": {
+            "agent_usd": agent_meta["cost_usd"], "judge_usd": 0.0,
+            "total_usd": agent_meta["cost_usd"]}}
     hard = {c: CHECKS[c](answer) for c in t["checks"]}
     hard_pass = all(hard.values())
-    verdict = judge(t, answer)
+    verdict, judge_meta = judge(t, answer)
+    cost = {
+        "agent_usd": round(agent_meta["cost_usd"], 4),
+        "judge_usd": round(judge_meta["cost_usd"], 4),
+        "total_usd": round(agent_meta["cost_usd"] + judge_meta["cost_usd"], 4),
+    }
     print(f"    [{tier}] {t['id']}: hard={'PASS' if hard_pass else 'FAIL'} "
-          f"judge={verdict.get('score')}/5", flush=True)
+          f"judge={verdict.get('score')}/5  ${cost['total_usd']:.2f}", flush=True)
     return {**base, "hard_checks": hard, "hard_pass": hard_pass,
-            "judge": verdict, "answer_excerpt": answer[:1200]}
+            "judge": verdict, "cost": cost,
+            "usage": {"agent": agent_meta["usage"], "judge": judge_meta["usage"]},
+            "duration_ms": {"agent": agent_meta["duration_ms"],
+                            "judge": judge_meta["duration_ms"]},
+            "answer_excerpt": answer[:1200]}
 
 
 def _read_golden(name):
@@ -214,6 +285,7 @@ def main():
             sum(r["hard_checks"].get("invokes_flox", False) for r in triggers) / max(len(triggers), 1), 3),
         "should_trigger_rate": round(
             sum(r["hard_checks"].get("invokes_flox", False) for r in should_triggers) / max(len(should_triggers), 1), 3),
+        "cost": _cost_summary(results),
     }
     out = {"summary": summary, "results": results}
     out_path = HERE / "results" / (args.out or f"{args.mode.replace('+', '_')}.json")
@@ -328,9 +400,20 @@ def write_step_summary(summary, results, binding, bad, errs, gate_enabled, prev_
     else:
         verdict = "ℹ️ measurement run (gate off)"
 
+    cost = summary.get("cost") or {}
+    cost_line = ""
+    if cost.get("total_usd"):
+        cost_line = (
+            f" · **cost: ${cost['total_usd']:.2f}** "
+            f"(agent ${cost.get('agent_usd', 0):.2f} + judge "
+            f"${cost.get('judge_usd', 0):.2f}, "
+            f"${cost.get('mean_per_task_usd', 0):.2f}/task)"
+        )
+
     out = [f"## Skill evals — **`{summary['mode']}`** arm (this run) — {verdict}", "",
            f"**Model** (agent + judge): `{summary.get('model', 'unknown')}` · "
-           f"**{summary['n_tasks']} tasks** ({summary['n_errors']} errors)", ""]
+           f"**{summary['n_tasks']} tasks** ({summary['n_errors']} errors)"
+           f"{cost_line}", ""]
 
     out += ["### Metrics", "",
             "- **Hard-pass** — share of tasks whose answer clears every deterministic "
