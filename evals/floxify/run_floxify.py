@@ -456,9 +456,11 @@ def _load_detect_and_verify(skill_dir):
 
 
 def _run_verify(skill_dir, fixture_src, manifest_text, check_catalog_live):
-    """Ground the produced manifest against the SAME facts the skill saw
-    (re-scanning the original fixture, not the temp copy the agent wrote
-    into) — the deterministic leg alongside activation and the judge.
+    """Ground the produced manifest against detect.py facts re-scanned
+    from fixture_src — the deterministic leg alongside activation and
+    the judge. Whether fixture_src is a pristine fixture (Tier 1) or
+    the post-run checkout (Tier 2, which has no pristine copy) is the
+    call site's choice, documented there.
 
     Returns a result dict on success, or {"error": ...} if detect/verify
     could not run at all (a harness-side problem, not a manifest verdict —
