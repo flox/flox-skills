@@ -25,9 +25,9 @@ name: skill-evals
 # gate only on schedule/dispatch, and Tier 2 is report-only in all modes.
 on:
   pull_request:
-  schedule:
-    # Weekly regression watch for the /floxify skill — Monday 06:00 UTC.
-    - cron: "0 6 * * 1"
+  # Weekly cron retired: every paid job below is now dispatch-only, so a
+  # scheduled run would spin up a workflow in which nothing executes. Restore
+  # it together with the paid jobs.
   workflow_dispatch:
     inputs:
       mode:
@@ -43,6 +43,10 @@ on:
         default: true
       run_floxify:
         description: "Also run the /floxify outcome eval (needs live flox)"
+        type: boolean
+        default: false
+      run_paid_evals:
+        description: "Run the PAID skills eval suite (54 Opus calls, ~$5-15). Off by default."
         type: boolean
         default: false
 
@@ -75,8 +79,12 @@ jobs:
               - 'flox-plugin/skills/**'
 
   evals:
-    # Per-PR skills gate. Skipped on the weekly schedule (that run is for the
-    # floxify job); still runs on pull_request and workflow_dispatch.
+    # REQUIRED status check on main. This job must keep REPORTING on every PR,
+    # or branch protection blocks every merge waiting for a context that never
+    # arrives — so it is not disabled, it is DEFUNDED. The paid suite is behind
+    # an explicit workflow_dispatch opt-in (run_paid_evals); what runs by
+    # default is the free deterministic unit-test suite, which keeps the
+    # required check honest instead of a rubber stamp.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -85,27 +93,46 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect skill/eval changes
+      - name: Decide whether to spend on the paid eval suite
         id: changes
         run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "Non-PR event; running the full eval suite."
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only \
-                 "${{ github.event.pull_request.base.sha }}" \
-                 "${{ github.event.pull_request.head.sha }}" \
-               | grep -qE '^(flox-plugin/|evals/|[.]github/workflows/evals[.]yml)'; then
-            echo "Skill/eval sources changed; running the full eval suite."
+          # PAID EVALS ARE OFF IN CI. The skills suite is 27 tasks x (1 agent +
+          # 1 judge) = 54 Opus calls per run, and the path filter it used to
+          # rely on matches 'evals/' and 'flox-plugin/' — i.e. essentially every
+          # PR in this workstream. It is off for two independent reasons:
+          #
+          #   1. Cost. Measured floor is ~$0.088 for a *4-token* Opus reply
+          #      (~23k tokens of context are created/read regardless), so 54
+          #      calls cost several dollars minimum, per PR, per push.
+          #   2. Trust. The suite is under active repair and is currently wrong
+          #      in both directions: the Tier 2 judge fabricated a catalog
+          #      defect in 4 of 8 runs (always against a CORRECT manifest), and
+          #      3 of 8 golden references carry false claims. Paying Opus rates
+          #      for a signal we know is unreliable buys nothing.
+          #
+          # Re-enable per-run via: Actions > Run workflow > run_paid_evals=true.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && \
+             [ "${{ github.event.inputs.run_paid_evals }}" = "true" ]; then
+            echo "Explicitly dispatched with run_paid_evals=true — running the paid suite."
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No skill/eval changes; reporting evals as passed without running the suite."
+            echo "Paid evals are disabled in CI; running the free unit tests instead."
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        if: steps.changes.outputs.run == 'true'
         with:
           python-version: "3.11"
+
+      - name: Free deterministic unit tests (always)
+        working-directory: evals/floxify
+        run: |
+          set -euo pipefail
+          # Keeps the required check meaningful rather than a rubber stamp: no
+          # flox, no credentials, no network, no API spend — and unlike the
+          # judge, these cannot be confidently wrong.
+          python3 test_detect.py
+          python3 -m unittest test_tier2 -v
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         if: steps.changes.outputs.run == 'true'
@@ -148,7 +175,10 @@ jobs:
     # (via the `changes` filter). --gate binds on should-tier hard-checks;
     # judge score and activation are advisory.
     needs: changes
-    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_floxify == 'true') || (github.event_name == 'pull_request' && needs.changes.outputs.floxify == 'true') }}
+    # Dispatch-only: this spends real Opus money (6 fixtures x agent+judge =
+    # 12 calls) and needs a live flox + catalog. The per-PR and weekly paths
+    # are retired until the suite is trustworthy again.
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_floxify == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -193,7 +223,12 @@ jobs:
     # hook commands (e.g. Ruby's bundler pin) are not validated here; a live
     # Ruby-activation run is a known follow-up (AI-431).
     needs: changes
-    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_floxify == 'true') || (github.event_name == 'pull_request' && needs.changes.outputs.floxify == 'true') }}
+    # Dispatch-only: this spends real Opus money (6 fixtures x agent+judge =
+    # 12 calls) and needs a live flox + catalog. The per-PR and weekly paths
+    # are retired until the suite is trustworthy again.
+    # Dispatch-only for the same reason: clones real repos, runs a full
+    # agentic pass, and realizes whole closures.
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_floxify == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
