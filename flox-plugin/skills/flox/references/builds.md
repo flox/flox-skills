@@ -259,6 +259,21 @@ runtime-packages = [ "clang" ]  # exclude pytest from runtime closure
 
 Smaller closures copy faster and occupy less disk when installed on users' systems.
 
+**Common mistake:** there is no `packages` key in a `[build.<name>]` section. To
+exclude build-only tools from the runtime closure the key is `runtime-packages`
+(a KEEP-list of install ids) — not `packages`, and not the Nix `buildInputs`
+habit. If the toolchain is leaking into your package, reach for `runtime-packages`:
+
+```toml
+[build.cli]
+command = '''
+  make
+  mv build/cli $out/bin/
+'''
+# WRONG: packages = [ "clang" ]   <- no such key in a build section
+runtime-packages = [ "clang" ]    # RIGHT: keep only clang at runtime
+```
+
 ## Version and Description Metadata
 
 Flox surfaces these fields in `flox search`, `flox show`, and during publication.

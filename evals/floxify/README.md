@@ -5,6 +5,53 @@ Outcome-based eval suite for the `/floxify` skill. Unlike `../run.py`
 to a temp dir, runs the `/floxify` skill headlessly, and scores the
 `.flox/env/manifest.toml` it produces.
 
+## Phase 1 analyzer (`scripts/detect.py`) — grounding, and its two evals
+
+The skill's Phase 1 runs a bundled deterministic analyzer,
+`flox-plugin/skills/floxify/scripts/detect.py`, before it reads anything by
+hand. The analyzer scans the repo and emits grounded JSON — runtime version
+pins (each tagged with the file it came from), package-manager versions read
+from lockfiles, docker-compose services (with a `config_coupled` flag),
+service-client dependencies, and monorepo/orchestrator markers. It never
+touches the catalog: mapping a detected runtime to a `pkg-path` stays with the
+model via `flox search` / `flox show`, so every `search_terms` value is a hint
+to verify, not an asserted package. The skill invokes it through Flox so it
+needs no system Python (and prompts the user to upgrade if `flox run`, which
+shipped in 1.13, is unavailable):
+
+```bash
+flox run -p python313 -- python3 "<skill-dir>/scripts/detect.py" "$TARGET_DIR"
+```
+
+Per the repo-wide new-feature eval policy (`../README.md`), this feature ships
+with two eval layers:
+
+- **`test_detect.py`** — fast, deterministic unit tests. Asserts the analyzer
+  extracts the right facts from every `fixtures/` repo (Node from `.nvmrc`,
+  Ruby + bundler from `Gemfile`/`Gemfile.lock`, `requires-python` from
+  `pyproject.toml`, `pg` → postgres, deno from `deno.json` / an
+  `edge-runtime` image, `config_coupled` compose services, …). Pure stdlib,
+  no `claude` calls — safe to run anywhere and cheap enough to gate.
+
+  ```bash
+  python3 test_detect.py        # standalone; or: pytest test_detect.py
+  ```
+
+- **`detect_usage_eval.py`** — behavioral conformance. Runs a real,
+  Phase-1-bounded `/floxify` against a fixture with a tool-call-visible stream
+  and asserts the skill *actually invoked* `detect.py` (bonus signal: through
+  `flox run`). Heavy and opt-in like Tier 2 — it spawns a `claude` agent — so
+  it's manual/scheduled, never in the fast gate.
+
+  ```bash
+  python3 detect_usage_eval.py                 # default fixture (node-postgres)
+  python3 detect_usage_eval.py --fixture ruby
+  ```
+
+`test_detect.py` proves the analyzer is *correct*; `detect_usage_eval.py`
+proves the skill *reaches for it*. Together they close the loop the policy asks
+for: guidance added, guidance verified.
+
 ## What it does
 
 For each fixture in `fixtures/`, the harness:
