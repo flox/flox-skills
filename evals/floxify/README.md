@@ -336,6 +336,35 @@ that a hook command resolves is activation's job, not structural
 conformance's. Reading a green structural row as "the environment works"
 is the specific over-read this note exists to prevent.
 
+### Golden reference manifests (`testdata/gold/<id>.toml`)
+
+The registry's prose `gold` field characterizes the *right answer* in words.
+`testdata/gold/<id>.toml` goes one better: a concrete, hand-curated,
+catalog-verified reference manifest for each registered repo — the manifest a
+careful engineer would write after reading the repo in full. When one exists,
+`_judge_tier2` passes it to the judge alongside the prose characterization, so
+grading compares the produced manifest against a real target rather than a
+description. It is an **idiomatic reference, not an exact-match target** — a
+well-structured produced manifest may differ in layout, comments, or hook style
+and still score 5/5.
+
+These are distinct from `testdata/mastodon-manifest.toml`, which is a
+*representative capture of actual skill output* used by `test_tier2.py` as a
+regex-drift guard (bugs and all). The golden references are the *ideal*.
+
+Each `<id>.toml` has a sibling `<id>-notes.md` recording provenance (every pin
+traced to its source file), the catalog verification log (`flox show` / `flox
+search` runs that confirmed each `pkg-path` and version), and skill-improvement
+observations. The mastodon golden is the direct answer to the bundler over-read
+above: where the live skill run emitted `gem install bundler -v 4.0.13` (a
+nonexistent version), the golden just runs `bundle install` and lets the
+bundler shipped with `ruby_4_0` resolve the lockfile — no hallucinated pin.
+
+Captured so far: `mastodon`, `posthog`, `sentry`, `supabase` — grounded +
+catalog-verified, not activation-tested (these dev envs are too heavy to
+activate on the recording machine; every `pkg-path` and version was confirmed
+via `flox show` / `flox search`).
+
 ### Registry (`tier2.jsonl`)
 
 One JSON object per line:
@@ -355,10 +384,13 @@ One JSON object per line:
 
 | id | sha | expected runtimes | expected services | status |
 |----|-----|-------------------|--------------------|--------|
-| `mastodon` | `52e9ec7814fc` | ruby, nodejs_24 | postgres, redis | **run** — see `results/tier2.json` |
-| `posthog` | `55525a19f353` | python3 (3.13), nodejs_24 | postgres, redis, clickhouse | registered, not yet run |
-| `sentry` | `68d439d41d66` | python3 (3.13), nodejs | postgres, redis, kafka, clickhouse | registered, not yet run |
-| `supabase` | `963182f58e91` | nodejs_22, deno | postgres | registered, not yet run |
+| `mastodon` | `52e9ec7814fc` | ruby, nodejs_24 | postgres, redis | **run** + golden captured |
+| `posthog` | `55525a19f353` | python3 (3.13), nodejs_24 | postgres, redis, clickhouse | golden captured, run pending |
+| `sentry` | `68d439d41d66` | python3 (3.13), nodejs | postgres, redis, kafka, clickhouse | golden captured, run pending |
+| `supabase` | `963182f58e91` | nodejs_22, deno | postgres | golden captured, run pending |
+
+All four now have a golden reference manifest under `testdata/gold/<id>.toml`
+(+ `<id>-notes.md`); see "Golden reference manifests" above.
 
 Only `mastodon` has been run end-to-end so far — it's a single Rails
 app (tractable) and Ruby was the ecosystem flagged as highest-risk

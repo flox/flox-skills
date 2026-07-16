@@ -198,9 +198,30 @@ def _structural_checks(entry, manifest_text):
 # with a conformance-focused rubric and the same JSON-response parsing
 # pattern as Tier 1's _judge.
 
+GOLD_DIR = HERE / "testdata" / "gold"
+
+
+def _golden_manifest(entry_id):
+    """A hand-curated, catalog-verified reference manifest for this repo, if
+    one has been captured under testdata/gold/<id>.toml. It is an *idiomatic*
+    reference (right runtimes/services, correct hook idioms), not an exact-match
+    target — a well-structured produced manifest may legitimately differ."""
+    path = GOLD_DIR / f"{entry_id}.toml"
+    return path.read_text() if path.exists() else None
+
+
 def _judge_tier2(entry, manifest_text):
-    """Grade produced manifest vs the registry's gold characterization."""
+    """Grade produced manifest vs the registry's gold characterization, plus a
+    concrete golden reference manifest when one exists (testdata/gold/<id>.toml)."""
     gold = entry.get("gold", {})
+    gold_manifest = _golden_manifest(entry["id"])
+    reference_block = (
+        "REFERENCE golden manifest — a catalog-verified, idiomatic reference "
+        "(NOT an exact-match target; a well-structured manifest may differ in "
+        "layout, comments, or hook style):\n"
+        f"```toml\n{gold_manifest}\n```\n\n"
+        if gold_manifest else ""
+    )
     prompt = (
         "You are grading a Flox manifest produced by an AI agent that onboards "
         "a large real-world open-source project to Flox. This is NOT an "
@@ -211,6 +232,7 @@ def _judge_tier2(entry, manifest_text):
         f"EXPECTED RUNTIMES: {gold.get('runtimes', 'unknown')}\n"
         f"EXPECTED SERVICES: {gold.get('services', 'unknown')}\n"
         f"NOTES: {gold.get('notes', '')}\n\n"
+        f"{reference_block}"
         f"PRODUCED manifest:\n```toml\n{manifest_text or '(manifest not produced)'}\n```\n\n"
         "Grade 1-5 on:\n"
         "  1. Runtime conformance — pins the expected runtime(s) at a "

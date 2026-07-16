@@ -1,0 +1,91 @@
+schema-version = "1.13.0"
+# Golden reference for supabase @ 963182f58e91
+
+# ---------------------------------------------------------------------------
+# supabase/supabase is a pnpm + turbo JavaScript/TypeScript monorepo
+# (apps/*, packages/*, blocks/*, e2e/*) with a SECOND runtime: the Deno
+# edge functions under supabase/functions. Both runtimes are pinned below.
+#
+# The many Supabase container images in docker/docker-compose.yml
+# (gotrue/auth, postgrest, realtime, storage-api, kong, studio, supavisor,
+# edge-runtime, postgres-meta, imgproxy) are the APPLICATION UNDER TEST, not
+# generic dev-time services, so they are deliberately NOT wired as Flox
+# services. Only a plain local Postgres for app development is provided.
+# ---------------------------------------------------------------------------
+
+[install]
+# Monorepo Node runtime. Provenance: .nvmrc = "22";
+# package.json engines.node ">=22"; @types/node catalog "^22.0.0";
+# packageManager "pnpm@10.24.0" (pnpm 10 targets Node 22 LTS).
+nodejs_22.pkg-path = "nodejs_22"
+
+# Second runtime for the edge functions in supabase/functions.
+# Provenance: supabase/functions/deno.json; index.ts files use Deno.serve /
+# Deno.env.get and import from https://deno.land/std and jsr:@supabase/...;
+# docker/docker-compose.yml runs them via supabase/edge-runtime:v1.74.0
+# (a Deno-based runtime). Omitting Deno is the "monorepo only sees npm" bug.
+deno.pkg-path = "deno"
+
+# Local-dev Postgres for plain application development.
+# Provenance: docker/docker-compose.yml `db` image supabase/postgres:17.6.1.136
+# (Postgres 17 is now the self-hosted default; docker-compose.pg15.yml is a
+# legacy/rollback override). postgresql_17 is the closest Flox stock match.
+# CAVEAT: Supabase ships a heavily CUSTOMIZED Postgres (pgsodium, pg_graphql,
+# pgvector, pg_net, wrappers, supautils, ...). Stock postgresql_17 covers
+# plain local development only, NOT the extension surface the app relies on.
+# Note also supabase/config.toml pins the CLI local db to major_version = 15.
+postgresql_17.pkg-path = "postgresql_17"
+
+[vars]
+# Plain local Postgres connection settings (override at activation time).
+# POSTGRES_USER / POSTGRES_DB grounded in docker/.env.example (default user
+# and db are both "postgres"). Port 5432 is the Postgres default and matches
+# docker/.env.example POSTGRES_PORT; the Supabase CLI stack (config.toml)
+# instead uses 54322 for its own containerized db.
+POSTGRES_HOST = "127.0.0.1"
+POSTGRES_PORT = "5432"
+POSTGRES_USER = "postgres"
+POSTGRES_DB = "postgres"
+
+[hook]
+on-activate = '''
+  # --- pnpm ---------------------------------------------------------------
+  # Provision the EXACT pnpm pinned by package.json ("packageManager":
+  # "pnpm@10.24.0") through corepack, which ships with nodejs_22. This is the
+  # only way to satisfy .npmrc `engine-strict=true` against engines.pnpm
+  # "10.24"; the catalog's pnpm_10 floor is 10.25.0, which strict-engines
+  # would reject. corepack must write its shims to a WRITABLE dir (the Node
+  # prefix is a read-only Nix store path), so target $FLOX_ENV_CACHE.
+  export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+  export COREPACK_HOME="$FLOX_ENV_CACHE/corepack"
+  mkdir -p "$FLOX_ENV_CACHE/pnpm-shims"
+  export PATH="$FLOX_ENV_CACHE/pnpm-shims:$PATH"
+  corepack enable --install-directory "$FLOX_ENV_CACHE/pnpm-shims" pnpm 2>/dev/null || true
+
+  # --- install the pnpm/turbo workspace -----------------------------------
+  # apps/*, packages/*, blocks/*, e2e/* (pnpm-workspace.yaml). Keep the
+  # content-addressable store inside the env cache (never an absolute path
+  # outside the environment).
+  pnpm install --frozen-lockfile --store-dir "$FLOX_ENV_CACHE/pnpm-store"
+'''
+
+[services.postgres]
+# Plain local Postgres. Self-initializes its data dir under $FLOX_ENV_CACHE
+# because service commands do NOT inherit the on-activate hook.
+command = '''
+  mkdir -p "$FLOX_ENV_CACHE/postgres"
+  if [ ! -d "$FLOX_ENV_CACHE/postgres/data" ]; then
+    initdb -U "$POSTGRES_USER" -D "$FLOX_ENV_CACHE/postgres/data" \
+      --no-locale --encoding=UTF8
+  fi
+  exec postgres -D "$FLOX_ENV_CACHE/postgres/data" \
+    -k "$FLOX_ENV_CACHE/postgres" \
+    -h "$POSTGRES_HOST" \
+    -p "$POSTGRES_PORT"
+'''
+# No is-daemon: the command `exec postgres` runs in the foreground, so Flox
+# manages the process directly. is-daemon = true is only for commands that
+# fork and return.
+
+[services.postgres.shutdown]
+command = "pg_ctl -D $FLOX_ENV_CACHE/postgres/data stop -m fast"
