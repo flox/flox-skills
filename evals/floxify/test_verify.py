@@ -414,6 +414,76 @@ on-activate = """
         ]}
         self.assertEqual(_violations(detect, "[install]\n"), [])
 
+    # --- AI-466 I1: Cargo.lock reads the FULL transitive dependency graph
+    # (dev-deps, build-deps, feature-unified workspace deps -- Cargo.lock
+    # doesn't distinguish), unlike every other client source here, which
+    # reads direct/declared deps only. Uncorroborated lock-only evidence
+    # must not HARD-block a correct manifest. Reviewer's exact
+    # reproduction: a sqlite-only Rust manifest whose Cargo.lock
+    # transitively carries pq-sys used to HARD-fail. ---
+
+    def test_uncorroborated_cargo_lock_evidence_downgrades_to_advisory(self):
+        detect = {"service_clients": [
+            {"package": "pq-sys", "search_terms": ["postgresql"], "source": "Cargo.lock"},
+        ]}
+        # sqlite-only manifest: no [vars] postgres endpoint, no compose
+        # service, no [services.postgres] -- nothing corroborates pq-sys
+        # actually being a runtime need (it could be a dev-dependency's
+        # transitive pull, or a feature-unified workspace member the
+        # built binary never links).
+        manifest = '[install]\nsqlite.pkg-path = "sqlite"\n'
+        v = _violations(detect, manifest)
+        self.assertEqual(len(v), 1)
+        self.assertEqual(v[0]["rule"], "leaf-datastore-not-served")
+        self.assertEqual(v[0]["severity"], "advisory")
+
+    def test_uncorroborated_lock_evidence_never_contributes_to_hard_violations(self):
+        detect = {"service_clients": [
+            {"package": "pq-sys", "search_terms": ["postgresql"], "source": "Cargo.lock"},
+        ]}
+        manifest = '[install]\nsqlite.pkg-path = "sqlite"\n'
+        self.assertEqual(_hard(_violations(detect, manifest)), [])
+
+    def test_cargo_lock_evidence_corroborated_by_vars_endpoint_still_hard_fires(self):
+        # Preserves the lemmy incident coverage exactly: reps 3/4 carried a
+        # [vars] postgres URL alongside the Cargo.lock pq-sys signal.
+        detect = {"service_clients": [
+            {"package": "pq-sys", "search_terms": ["postgresql"], "source": "Cargo.lock"},
+        ]}
+        manifest = '[vars]\nDATABASE_URL = "postgres://u:p@localhost:5433/app"\n'
+        v = _violations(detect, manifest)
+        self.assertEqual(_rules(v), {"leaf-datastore-not-served", "vars-endpoint-not-served"})
+        hard = _hard(v)
+        self.assertEqual(len(hard), 2)
+
+    def test_cargo_lock_evidence_corroborated_by_compose_service_still_hard_fires(self):
+        # Corroboration via a repo-level compose service of the same kind
+        # (independent of whether the manifest WIRES it -- that's the
+        # separate _manifest_wires_compose question).
+        detect = {
+            "service_clients": [
+                {"package": "pq-sys", "search_terms": ["postgresql"], "source": "Cargo.lock"},
+            ],
+            "services": [{"name": "db", "kind": "postgres", "config_coupled": True}],
+        }
+        manifest = '[install]\ncargo.pkg-path = "cargo"\n'
+        v = _violations(detect, manifest)
+        self.assertEqual(_rules(v), {"leaf-datastore-not-served"})
+        self.assertEqual(v[0]["severity"], "hard")
+
+    def test_non_cargo_lock_source_still_hard_fires_uncorroborated(self):
+        # The corroboration requirement is scoped to Cargo.lock's specific
+        # transitive-graph noise -- a direct requirements.txt/package.json
+        # client with no corroboration still HARD-fires as before (no
+        # regression to the original AI-449/#42 behavior).
+        detect = {"service_clients": [
+            {"package": "psycopg2", "search_terms": ["postgresql"], "source": "requirements.txt"},
+        ]}
+        manifest = '[install]\n'
+        v = _violations(detect, manifest)
+        self.assertEqual(_rules(v), {"leaf-datastore-not-served"})
+        self.assertEqual(v[0]["severity"], "hard")
+
 
 # ---------------------------------------------------------------------------
 # invariant 3 — [vars] endpoint implies a service
@@ -720,6 +790,38 @@ on-activate = """
 """
 '''
         self.assertEqual(_violations({}, manifest), [])
+
+    # --- AI-466 M1: the long global options (--git-dir, --work-tree,
+    # --namespace) accept BOTH `--opt=value` and `--opt value` forms in
+    # real git -- the `=` form alone let the space form evade detection. ---
+
+    def test_fires_on_git_work_tree_space_form_reset(self):
+        manifest = '[hook]\non-activate = "git --work-tree /tmp reset --hard"\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+
+    def test_fires_on_git_dir_space_form_checkout(self):
+        # Deliberately does not end in "/.git" -- see the equals-form test
+        # above for why that would be a coincidental (not genuine) match.
+        manifest = '[hook]\non-activate = "git --git-dir /repo/custom-gitdir checkout main"\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+
+    def test_fires_on_git_namespace_space_form_commit(self):
+        manifest = '[hook]\non-activate = "git --namespace foo commit -am wip"\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+
+    def test_does_not_fire_on_read_only_git_work_tree_space_form_log(self):
+        manifest = '[hook]\non-activate = "git --work-tree /tmp log --oneline"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_equals_form_still_works_alongside_space_form(self):
+        # Regression guard: adding the space alternative must not break
+        # the already-fixed `=` form.
+        manifest = '[hook]\non-activate = "git --work-tree=/tmp reset --hard"\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"hook-mutates-tree"})
 
     def test_does_not_fire_on_realistic_rust_hook(self):
         # Real golden shape (lemmy): env exports + echoes, no git mutation.

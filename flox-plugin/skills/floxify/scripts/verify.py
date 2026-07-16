@@ -227,6 +227,42 @@ _CONN_STRING_KIND = {
     "redis": "redis", "mongodb": "mongodb",
 }
 
+# detect.py compose `kind` values -> our display kind. Used ONLY as a
+# CORROBORATION signal for lockfile-derived client evidence (AI-466 I1)
+# -- a repo-level "this datastore genuinely exists" fact, independent of
+# whether the manifest actually WIRES it (that separate question is
+# `_manifest_wires_compose`, which this table has no part in since #42's
+# Hole 1 fix removed the old escape-hatch use of this mapping).
+COMPOSE_KIND_MAP = {
+    "postgres": "postgres", "postgis": "postgres",
+    "redis": "redis", "valkey": "redis",
+    "mysql": "mariadb", "mariadb": "mariadb",
+    "mongo": "mongodb",
+}
+
+
+def _vars_endpoint_kind_present(manifest, kind):
+    """True if any [vars] value is a connection-string endpoint of this
+    kind — corroboration for lockfile-derived client evidence (AI-466
+    I1), independent of whether check_vars_endpoints finds it already
+    served."""
+    for value in (manifest.get("vars", {}) or {}).values():
+        if not isinstance(value, str):
+            continue
+        m = _CONN_STRING_RE.search(value)
+        if m and _CONN_STRING_KIND[m.group(1).lower()] == kind:
+            return True
+    return False
+
+
+def _compose_service_kind_present(detect, kind):
+    """True if detect.py found a compose service of this kind in the repo
+    — corroboration for lockfile-derived client evidence (AI-466 I1)."""
+    for svc in (detect or {}).get("services", []):
+        if COMPOSE_KIND_MAP.get((svc.get("kind") or "").lower()) == kind:
+            return True
+    return False
+
 _DOCKER_COMPOSE_UP_RE = re.compile(r"\bdocker(?:-|\s+)compose\s+up\b")
 
 
@@ -251,6 +287,15 @@ def _manifest_wires_compose(manifest):
     invocation (`docker-compose up -d clickhouse kafka`) starts — a hook
     that starts only unrelated services would still read as covering an
     untouched leaf datastore; narrower than that is out of scope here.
+
+    Deliberate asymmetry: the regex accepts both the V1 (`docker-compose
+    up`) and V2 (`docker compose up`) spellings, but the install check
+    below only recognizes the standalone `docker-compose` package —
+    SKILL.md's "Services deferred to docker-compose" pattern prescribes
+    installing that V1 package specifically. A hook using V2 via the
+    `docker` package would still fail the install check and correctly
+    keep firing; this errs toward the stricter, not the more permissive,
+    reading rather than an oversight.
     """
     hook = manifest.get("hook", {}) or {}
     script = hook.get("on-activate")
@@ -285,7 +330,34 @@ def check_leaf_datastore_services(detect, manifest):
     be served by a `[services.*]` block, unless the manifest's own hook
     genuinely starts it via `docker-compose up` (see
     `_manifest_wires_compose` — repo-side compose FILE presence alone
-    does not count, AI-466 Hole 1)."""
+    does not count, AI-466 Hole 1).
+
+    Cargo.lock evidence is a SPECIAL CASE (AI-466 I1): unlike every other
+    client source here (pyproject.toml's `[project.dependencies]`,
+    package.json, Gemfile), which read a manifest the developer wrote
+    directly, Cargo.lock is the one source that reads the FULL resolved
+    dependency graph — dev-dependencies, build-dependencies, and
+    feature-unified workspace deps included, none of which Cargo.lock
+    itself distinguishes from what the built binary actually links.
+    Reproduced live: a legitimately postgres-free, sqlite-only manifest
+    whose Cargo.lock transitively carries `pq-sys` (e.g. a test-only
+    dependency, or a workspace member the app doesn't ship) HARD-failed
+    here before this fix. Uncorroborated lock-only evidence now
+    downgrades to ADVISORY; it still fires HARD when corroborated by an
+    independent same-kind signal (a [vars] endpoint, or a compose service
+    of that kind) — the lemmy incident's rep-3/4 manifests carried a
+    [vars] postgres URL alongside the Cargo.lock signal, so that coverage
+    is unchanged.
+
+    package.json and Gemfile share a narrower version of this risk
+    (package.json merges `devDependencies` into the same client-detection
+    pool as `dependencies`; a Gemfile `group :test do ... end` gem is not
+    distinguished from a top-level one) but neither reads a full
+    TRANSITIVE graph the way Cargo.lock does — extending corroboration to
+    them would be a larger, untested behavior change to already-reviewed
+    invariants (e.g. the node-postgres fixture's bare `pg` HARD-fire) and
+    is deliberately left out of this fix.
+    """
     violations = []
     for client in (detect or {}).get("service_clients", []):
         seen_kinds = set()
@@ -296,6 +368,23 @@ def check_leaf_datastore_services(detect, manifest):
             seen_kinds.add(kind)
             if _manifest_wires_compose(manifest) or _service_covers(manifest, kind):
                 continue
+
+            if client.get("source") == "Cargo.lock" and not (
+                _vars_endpoint_kind_present(manifest, kind)
+                or _compose_service_kind_present(detect, kind)
+            ):
+                violations.append(violation(
+                    "leaf-datastore-not-served",
+                    f"client '{client.get('package')}' (Cargo.lock) implies "
+                    f"{kind}, but no [services.*] serves it — Cargo.lock "
+                    f"reads the full resolved dependency graph (dev/build/"
+                    f"workspace deps included), so this alone isn't proof "
+                    f"of a runtime need; confirm whether {kind} is actually "
+                    f"used before wiring it",
+                    severity=ADVISORY,
+                ))
+                continue
+
             violations.append(violation(
                 "leaf-datastore-not-served",
                 f"client '{client.get('package')}' ({client.get('source')}) "
@@ -406,8 +495,15 @@ def check_vars_literal(manifest):
 # Reproduced live: `git -C "$FLOX_ENV_PROJECT" submodule update --init`
 # exited 0 while the bare form correctly fired HARD. Modeled on `git
 # help`'s "OPTIONS" section for the global flags that take a path/value.
+#
+# The long options (--git-dir, --work-tree, --namespace) accept BOTH
+# `--opt=value` and `--opt value` in real git -- AI-466 M1: the `=` form
+# alone let the space form evade detection (`git --work-tree /tmp reset
+# --hard` was a miss).
 _GIT_GLOBAL_OPT = (
-    r"(?:-C\s+\S+|-c\s+\S+|--git-dir=\S+|--work-tree=\S+|--namespace=\S+|"
+    r"(?:-C\s+\S+|-c\s+\S+|"
+    r"--git-dir(?:=\S+|\s+\S+)|--work-tree(?:=\S+|\s+\S+)|"
+    r"--namespace(?:=\S+|\s+\S+)|"
     r"--exec-path(?:=\S+)?|--bare|--no-pager|--paginate|-p)"
 )
 _GIT_MUTATION_RE = re.compile(
