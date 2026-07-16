@@ -232,6 +232,57 @@ If it's a script reference (e.g. `"scripts/setup.sh"`), note it in the report �
 
 ## Phase 1: Read the project
 
+Ground every version and service in a file — never guess. Run the bundled
+analyzer first (Step 1a): it reads the pin files, lockfiles, and
+docker-compose services deterministically. Then read the high-signal files
+yourself (Step 1b) for nuance it only summarizes.
+
+### Step 1a — Run the grounded analyzer (do this first)
+
+The analyzer ships with this skill at `scripts/detect.py` (next to this
+SKILL.md). Run it through Flox so you don't depend on a system Python — this is
+also the fastest way to run a one-off script:
+
+```bash
+flox run -p python313 -- python3 "<skill-dir>/scripts/detect.py" "$TARGET_DIR"
+```
+
+`<skill-dir>` is this skill's own directory — the folder that holds this
+SKILL.md (the same place you'd read `scripts/` or a reference file from). Use
+its absolute path.
+
+- If `flox run` errors with an unknown-subcommand or usage message, the user's
+  Flox predates 1.13 (`flox run` shipped in 1.13). Tell them once, plainly:
+  "Your Flox is older than 1.13, so I can't use the fast analyzer — upgrade to
+  get `flox run`: https://flox.dev/docs/install-flox/install". Then fall back to
+  `python3 "<skill-dir>/scripts/detect.py" "$TARGET_DIR"` if a `python3` is on
+  PATH, and if neither works, scan manually (Step 1b). The analyzer is an
+  accelerator, not a hard dependency — never block on it.
+
+The analyzer prints one JSON object; every fact carries the file it came from:
+
+- `runtimes` — each version pin with its `source` file. **Use these versions
+  verbatim in Phase 2 — do not round, bump, or substitute a version from
+  memory.** If your recollection disagrees with a `source`-tagged fact, the
+  file wins.
+- `package_managers` — bundler / pnpm / uv / poetry versions read from
+  lockfiles (e.g. `Gemfile.lock` BUNDLED WITH, `packageManager` field).
+- `services` — docker-compose services with `image`, `tag`, a `kind` guess,
+  and a `config_coupled` flag (the service mounts config volumes or `depends_on`
+  others — a hint it may not reduce to a single catalog package).
+- `service_clients` / `native_hints` — client libraries (`pg`, `psycopg2`, …)
+  and apt deps mapped to catalog **`search_terms`**. These are terms to VERIFY
+  in Phase 2 with `flox search` / `flox show` — never paste a `search_term` in
+  as a `pkg-path`.
+- `orchestrators`, `monorepo`, `lockfiles`, `notes` — context for Phase 3.
+
+### Step 1b — Read the high-signal files for nuance
+
+The analyzer covers the deterministic pins and services; you still read the
+files below for what it only hints at (Dockerfile `FROM`/`RUN` specifics, CI
+`apt-get` lines, README setup steps, monorepo layout) and to print the
+recognition lines.
+
 Print each file as you read it — immediately, one line per file, as processed:
 
 ```
