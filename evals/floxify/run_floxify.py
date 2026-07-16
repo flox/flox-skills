@@ -31,7 +31,16 @@ Activation check (advisory — never gates):
 LLM judge (advisory — reported, never blocks the gate):
   Grades the produced manifest vs gold/<id>.toml 1-5 on package choices,
   hook quality (uses $FLOX_ENV_CACHE, correct ecosystem patterns), and
-  idiomatic Flox usage.
+  idiomatic Flox usage. Handed verify.py's confirmed catalog resolution
+  table (below) so it stops grading catalog facts from memory (AI-451).
+
+verify.py check (advisory — never gates, same reason activation doesn't):
+  Re-scans the fixture with detect.py and runs the flox-plugin's
+  scripts/verify.py against the produced manifest — the same deterministic
+  check Phase 3c runs inside the skill itself (AI-461). Its catalog leg
+  needs live flox+network, so it is gated by --skip-activation exactly
+  like the activation check; the non-catalog invariants (vars literalness,
+  hook mutation, leaf-datastore/runtime cross-checks) always run.
 
 Usage:
     python3 run_floxify.py                            # all fixtures, skills mode
@@ -44,6 +53,7 @@ Usage:
 Pure stdlib — no additional packages required.
 """
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -259,7 +269,45 @@ def _run_judge(prompt, timeout=120):
         return None, str(exc)
 
 
-def _judge(task, produced_toml):
+def _catalog_note(verify_result):
+    """Render verify.py's catalog leg into a prompt note for the judge —
+    AI-451: the judge has graded catalog facts from memory and accused a
+    *correct* pin of being hallucinated. Handing it verify.py's confirmed
+    resolution table (or an explicit "not checked" note) takes catalog
+    facts off the judge's plate instead of asking it to remember them.
+    """
+    if not verify_result or "error" in verify_result:
+        return (
+            "\nDETERMINISTIC CATALOG CHECK: not available this run (harness "
+            "error) — do not assert catalog facts from memory; grade only "
+            "structure, hook quality, and idiomatic Flox usage.\n"
+        )
+    if not verify_result.get("catalog_checked"):
+        return (
+            "\nDETERMINISTIC CATALOG CHECK: not run this pass (flox/network "
+            "unavailable) — do not assert catalog facts from memory; grade "
+            "only structure, hook quality, and idiomatic Flox usage.\n"
+        )
+    catalog_hard = [
+        v for v in verify_result["violations"]
+        if v["severity"] == "hard" and v["rule"].startswith("catalog-")
+    ]
+    if catalog_hard:
+        listing = "; ".join(v["message"] for v in catalog_hard[:5])
+        return (
+            f"\nDETERMINISTIC CATALOG CHECK (verify.py, via `flox show`): "
+            f"{len(catalog_hard)} pkg-path/version/system violation(s) "
+            f"CONFIRMED against the live catalog: {listing}\n"
+        )
+    return (
+        "\nDETERMINISTIC CATALOG CHECK (verify.py, via `flox show`): every "
+        "installed pkg-path/version/system combination was CONFIRMED to "
+        "resolve in the live catalog. Do not second-guess this from memory "
+        "— e.g. do not flag a pin as hallucinated on this basis.\n"
+    )
+
+
+def _judge(task, produced_toml, verify_result=None):
     """Grade produced manifest vs gold — returns {score, correct, issues}."""
     gold_path = GOLD_DIR / f"{task['id']}.toml"
     gold = gold_path.read_text() if gold_path.exists() else "(no gold available)"
@@ -270,9 +318,13 @@ def _judge(task, produced_toml):
         f"FIXTURE: {task['id']} (ecosystem: {task.get('ecosystem', 'unknown')})\n"
         f"RUBRIC: {task['rubric']}\n\n"
         f"REFERENCE (gold) manifest:\n```toml\n{gold}\n```\n\n"
-        f"PRODUCED manifest:\n```toml\n{produced_toml or '(manifest not produced)'}\n```\n\n"
+        f"PRODUCED manifest:\n```toml\n{produced_toml or '(manifest not produced)'}\n```\n"
+        f"{_catalog_note(verify_result)}\n"
         "Grade 1-5 on:\n"
-        "  1. Package choices — correct catalog names, version-pinned where fixture signals one\n"
+        "  1. Package choices — correct catalog names, version-pinned where fixture signals one. "
+        "Do NOT assert from memory whether a pkg-path or version exists in the Flox catalog — "
+        "rely on the DETERMINISTIC CATALOG CHECK above; if it is unavailable, do not grade "
+        "catalog existence at all\n"
         "  2. Hook quality — uses $FLOX_ENV_CACHE (not ./venv or absolute paths), correct ecosystem patterns\n"
         "  3. Idiomatic Flox usage — no hallucinated install URLs, sections only when needed\n"
         "  4. Service wiring — [services.*] present when detected (node-postgres)\n\n"
@@ -348,6 +400,46 @@ def _check_activation(target_dir, timeout=DEFAULT_ACTIVATION_TIMEOUT):
         return None, True, str(exc)
 
 
+# --- verify.py integration (AI-461 deterministic leg) --------------------------
+
+def _load_module_from_path(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _load_detect_and_verify(skill_dir):
+    """Load detect.py / verify.py from the skill dir under test — not a
+    hardcoded path — so `--skill-dir` continues to control which skill
+    checkout the whole harness exercises."""
+    scripts_dir = Path(skill_dir) / "skills" / "floxify" / "scripts"
+    detect_mod = _load_module_from_path(scripts_dir / "detect.py", "_floxify_detect")
+    verify_mod = _load_module_from_path(scripts_dir / "verify.py", "_floxify_verify")
+    return detect_mod, verify_mod
+
+
+def _run_verify(skill_dir, fixture_src, manifest_text, check_catalog_live):
+    """Ground the produced manifest against the SAME facts the skill saw
+    (re-scanning the original fixture, not the temp copy the agent wrote
+    into) — the deterministic leg alongside activation and the judge.
+
+    Returns a result dict on success, or {"error": ...} if detect/verify
+    could not run at all (a harness-side problem, not a manifest verdict —
+    mirrors _check_activation's own skipped/failed distinction).
+    """
+    if manifest_text is None:
+        return {"violations": [], "catalog_checked": False, "skipped": "no manifest produced"}
+    try:
+        detect_mod, verify_mod = _load_detect_and_verify(skill_dir)
+        detect_facts = detect_mod.scan(fixture_src)
+        return verify_mod.verify(
+            detect_facts, manifest_text, check_catalog_live=check_catalog_live,
+        )
+    except Exception as exc:  # noqa: BLE001 - a harness-side failure, not a manifest verdict
+        return {"violations": [], "catalog_checked": False, "error": str(exc)}
+
+
 # --- per-task runner ----------------------------------------------------------
 
 def _base(task):
@@ -407,14 +499,27 @@ def process_task(task, skill_dir, skip_activation=False,
                 tmp, timeout=activation_timeout
             )
 
-        # LLM judge (advisory).
-        verdict = _judge(task, manifest_text)
+        # Deterministic manifest check (AI-461 — advisory, same reason
+        # activation is advisory: the catalog leg needs live flox+network,
+        # which neither a test environment nor every CI run has).
+        verify_result = _run_verify(
+            skill_dir, fixture_src, manifest_text,
+            check_catalog_live=not skip_activation,
+        )
+        verify_hard = [v for v in verify_result["violations"] if v["severity"] == "hard"]
+        verify_advisory = [v for v in verify_result["violations"] if v["severity"] == "advisory"]
+
+        # LLM judge (advisory) — hand it verify.py's confirmed catalog
+        # resolution table so it stops grading catalog facts from memory.
+        verdict = _judge(task, manifest_text, verify_result=verify_result)
 
         status = "PASS" if hard_pass else "FAIL"
         act_str = "skipped" if act_skipped else ("ok" if act_ok else "FAIL")
+        verify_str = f"{len(verify_hard)}H/{len(verify_advisory)}A"
         print(
             f"  [{task['tier']}] {task['id']}: "
-            f"hard={status}  judge={verdict['score']}/5  activate={act_str}",
+            f"hard={status}  judge={verdict['score']}/5  activate={act_str}  "
+            f"verify={verify_str}",
             flush=True,
         )
 
@@ -426,6 +531,12 @@ def process_task(task, skill_dir, skip_activation=False,
                 "ok": act_ok,
                 "skipped": act_skipped,
                 "notes": act_notes,
+            },
+            "verify": {
+                "violations": verify_result["violations"],
+                "hard_count": len(verify_hard),
+                "advisory_count": len(verify_advisory),
+                "catalog_checked": verify_result.get("catalog_checked", False),
             },
             "judge": verdict,
             # Keep excerpts short — full manifest/output in the results file
@@ -517,6 +628,11 @@ def _stats(results):
     n = max(len(scored), 1)
     activated = [r for r in results if r.get("activation", {}).get("ok") is True]
     skipped = [r for r in results if r.get("activation", {}).get("skipped") is True]
+    verify_checked = [r for r in results if r.get("verify", {}).get("catalog_checked")]
+    verify_clean = [
+        r for r in results
+        if "verify" in r and r["verify"]["catalog_checked"] and r["verify"]["hard_count"] == 0
+    ]
     return {
         "n": len(scored),
         "hard_pass_rate": round(sum(r["hard_pass"] for r in scored) / n, 3),
@@ -524,6 +640,12 @@ def _stats(results):
         "judge_correct_rate": round(sum(bool(r["judge"]["correct"]) for r in scored) / n, 3),
         "activation_ok": len(activated),
         "activation_skipped": len(skipped),
+        # verify.py (AI-461) — advisory, same reason activation is advisory:
+        # the catalog leg needs live flox+network. verify_checked counts
+        # fixtures where that leg actually ran; verify_clean is the subset
+        # with zero HARD violations.
+        "verify_checked": len(verify_checked),
+        "verify_clean": len(verify_clean),
     }
 
 
