@@ -67,8 +67,11 @@ How:
   the *correct* construction (positive `must_match`) over detecting the wrong one
   (`must_not_match`) — good answers often show the anti-pattern as a labeled
   counter-example, which false-fires a negative check.
-- Screen it (`screen.py --reps 5`) baseline-vs-skills to confirm the skill arm
-  follows the guidance; promote it into `tasks.jsonl` once it holds.
+- Screen it baseline-vs-skills to confirm the skill arm follows the
+  guidance; promote it into `tasks.jsonl` once it holds. Note: the
+  `screen.py` screening harness has not landed on main (AI-438 tracks
+  it, along with the multi-rep policy); until it does, this step
+  requires the branch tooling.
 
 ## What it does
 
