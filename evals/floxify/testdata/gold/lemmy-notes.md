@@ -72,7 +72,7 @@ outputs, but the `[install]` entry never actually declared them --
 golden's own notes document (§5, "the crux for a Rust-at-scale repo")
 actually has what it needs.
 
-**Activation validation.** This manifest had no systems violations to
+**Activation validation (resolution-tested, not functionally tested).** This manifest had no systems violations to
 begin with (all packages here support all four systems, confirmed
 earlier). `flox activate` (x86_64-linux, throwaway directory, no real
 lemmy checkout) resolved and activated cleanly with no `pkg-group`

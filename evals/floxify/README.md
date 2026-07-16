@@ -528,13 +528,17 @@ nonexistent version), the golden just runs `bundle install` and lets the
 bundler shipped with `ruby_4_0` resolve the lockfile — no hallucinated pin.
 
 Captured so far: `mastodon`, `posthog`, `sentry`, `supabase`, `gitea`,
-`plausible`, `lemmy`, `firefly-iii` — grounded + per-package verified; not
-whole-manifest lock-tested (these dev envs are too heavy to activate on the
-recording machine; every `pkg-path` and version was confirmed individually
-via `flox show` / `flox search`, but the manifest as a whole was never
-resolved through `flox activate` or `flox lock`). Each golden passes its
-own registry entry's structural checks and the deterministic golden lint
-(`test_golden_lint.py`, AI-456/AI-457).
+`plausible`, `lemmy`, `firefly-iii` — grounded + per-package verified.
+Every `pkg-path` and version was confirmed individually via `flox show` /
+`flox search`, and (AI-457, 2026-07-16) all eight are also
+resolution-tested: `flox activate -c "echo __ok__"` against each
+manifest in a throwaway directory on x86_64-linux, proving the whole
+group actually locks and the `[hook]` prelude runs. That is NOT the same
+as functionally tested — no real repo was checked out, so no gem/wheel
+native build ever compiled and hook commands that touch project files
+(`bundle install`, `composer install`, ...) fail on missing inputs by
+design. Each golden passes its own registry entry's structural checks and
+the deterministic golden lint (`test_golden_lint.py`, AI-456/AI-457).
 
 ### Registry (`tier2.jsonl`)
 

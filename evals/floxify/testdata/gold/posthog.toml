@@ -68,7 +68,11 @@ on-activate = '''
   uv sync --frozen || uv sync
 
   # --- Node: corepack activates the pinned pnpm@10.29.3 into a writable
-  #     cache dir (the Nix nodejs store path is read-only) ---
+  #     cache dir (the Nix nodejs store path is read-only). pnpm_10 has
+  #     dozens of 10.x versions in the catalog (nearest below the pin is
+  #     10.29.2), just not this exact patch -- corepack gets the
+  #     byte-exact packageManager pin instead of settling for the
+  #     nearest catalog version. ---
   export COREPACK_HOME="$FLOX_ENV_CACHE/corepack"
   mkdir -p "$FLOX_ENV_CACHE/node-bin"
   corepack enable --install-directory "$FLOX_ENV_CACHE/node-bin" pnpm

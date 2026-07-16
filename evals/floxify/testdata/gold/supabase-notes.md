@@ -43,12 +43,13 @@ edge functions: og-images, search-embeddings (+ common/, deno.json)
 | `postgresql_17` | `flox show postgresql_17` | nixpkgs, latest 17.10 | YES |
 | `postgresql_15` | `flox show postgresql_15` | nixpkgs, latest 15.18 | ref only |
 | `postgresql_{15,16,17,18}` | `flox search --all postgresql` | all present | — |
-| `pnpm_10` | `flox show pnpm_10` | nixpkgs, 10.24.0..10.34.5 | YES, pinned 10.24.0 (AI-457 corrected — see below) |
+| `pnpm_10` | `flox show pnpm_10` | nixpkgs, 10.0.0..10.34.5 (10.24.0 present) | YES, pinned 10.24.0 (AI-457 corrected — see below) |
 | `pnpm` | `flox show pnpm` | nixpkgs, latest 11.11.0 | ✗ (wrong major) |
 
 All package names/versions were confirmed against the live catalog with
-`flox search --all` / `flox show`. No `flox activate` was run. No name or
-version was guessed.
+`flox search --all` / `flox show`. No name or version was guessed. (AI-457
+later resolution-tested this manifest with `flox activate` — see
+"Activation validation" below.)
 
 ## AI-457 re-verification (2026-07-16)
 
@@ -71,7 +72,7 @@ confirmed live. `nodejs_22` and `pnpm_10@10.24.0` both build on all four
 systems, so rather than dropping x86_64-darwin from the whole environment,
 `deno.systems` is scoped to the three platforms 2.9.2 actually supports.
 
-**Activation validation.** Unlike mastodon/posthog/sentry/plausible, this
+**Activation validation (resolution-tested, not functionally tested).** Unlike mastodon/posthog/sentry/plausible, this
 manifest resolved and activated cleanly on the first `flox activate`
 (x86_64-linux, throwaway directory, no real supabase checkout) with no
 `pkg-group` split needed — nodejs_22/pnpm_10@10.24.0/deno/postgresql_17
@@ -159,14 +160,15 @@ without spinning up the full container stack.
   `pkg-path`.
 
 ## Validation level
-Static + per-package verified; not whole-manifest lock-tested. Every
-package name and the existence of every pinned version were confirmed
-with `flox search --all` / `flox show` against the live catalog. The
-manifest was NOT activated (`flox activate` explicitly out of scope), so
-runtime behavior of the hook/service is reasoned, not executed. The
-service block follows the canonical Flox PostgreSQL pattern
-(self-initializing data dir under `$FLOX_ENV_CACHE`, `is-daemon`, fast-stop
-shutdown).
+Static + per-package verified. Every package name and the existence of
+every pinned version were confirmed with `flox search --all` / `flox
+show` against the live catalog. Resolution-tested (AI-457, 2026-07-16):
+`flox activate -c "echo __ok__"` succeeds in a throwaway directory on
+x86_64-linux. NOT functionally tested — no real supabase checkout, so
+`pnpm install` never ran against the real lockfile and runtime behavior
+of the hook/service beyond that is reasoned, not executed. The service
+block follows the canonical Flox PostgreSQL pattern (self-initializing
+data dir under `$FLOX_ENV_CACHE`, `is-daemon`, fast-stop shutdown).
 
 ## OBSERVATIONS for improving the floxify skill
 

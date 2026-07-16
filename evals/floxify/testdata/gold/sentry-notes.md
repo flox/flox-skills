@@ -130,16 +130,20 @@ SKILL.md), leaving the seven unaffected packages available on all four
 systems.
 
 Also fixed: `xmlsec`, `libxml2`, `libxslt`, and `openssl` all default to a
-partial output set (`Outputs: dev, out*` for xmlsec — `out` only by
-default; `Outputs: bin*, dev, out` for libxml2 and libxslt — `bin` only by
-default; `Outputs: bin*, dev, ... out` for openssl — `bin`+`man` only by
-default). None shipped headers (`dev`) by default, which the notes above
-already say these packages exist for (xmlsec-python/lxml/cryptography
-building from source against them) — added `.outputs = ["out", "dev"]` to
-each so the from-source build path this manifest documents can actually
+partial output set, confirmed individually via `flox show` (2026-07-16,
+flox 1.13.2): `Outputs: dev, out*` for xmlsec — `out` only by default;
+`Outputs: bin*, dev, out` for libxml2 — `bin` only by default;
+`Outputs: bin*, dev, doc, out, devdoc` for libxslt — `bin` only by
+default (two more outputs than libxml2, but the same `bin`-only default);
+`Outputs: bin*, dev, doc, man*, out, debug` for openssl — `bin`+`man`
+only by default. None shipped headers (`dev`) by default, which the notes
+above already say these packages exist for (xmlsec-python/lxml/
+cryptography building from source against them) — added
+`.outputs = ["out", "dev"]` to each so the from-source build path this
+manifest documents can actually
 link.
 
-**Activation validation.** Per-package `systems` alone was not enough to
+**Activation validation (resolution-tested, not functionally tested).** Per-package `systems` alone was not enough to
 activate: `flox activate` (x86_64-linux, throwaway directory, no real
 sentry checkout) failed with `constraints for group 'toplevel' are too
 tight` even after the systems fix -- leaving python313/nodejs_24/uv/
