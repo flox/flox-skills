@@ -4,7 +4,6 @@ schema-version = "1.13.0"
 claude-code.pkg-path = "flox/claude-code"
 claude-code.pkg-group = "claude-code"
 flox-ai.pkg-path = "flox/flox-ai"
-flox-ai.pkg-group = "flox-ai"
 
 # Packages the flox plugin (skills: flox, floxify) for all agents.
 # Stages the plugin under share/claude-code/plugins/flox, then
@@ -14,6 +13,8 @@ flox-ai.pkg-group = "flox-ai"
 [build.skills-flox]
 version = "1.0.0"
 description = "Flox skills (flox, floxify) packaged for Claude Code, Codex, Pi, and OpenCode"
+# content-only package: keep toplevel installs (flox-ai) out of the closure
+runtime-packages = []
 command = '''
   mkdir -p "$out/share/claude-code/plugins/flox"
   cp -R flox-plugin/. "$out/share/claude-code/plugins/flox/"
