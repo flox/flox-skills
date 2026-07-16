@@ -18,6 +18,10 @@ Activation is off by default (`--activate` to opt in) and is always
 advisory. This tier never gates the build — it is report-only, run
 manually or on a schedule, and intended to surface real-world regressions
 (e.g. a weak ecosystem like Ruby) that the small Tier 1 fixtures can't.
+Its activation budget defaults to 1800s (`--activation-timeout`): these
+environments realize a full closure on first activation, and the Tier 1
+budget of 120s silently recorded posthog as "skipped" rather than measuring
+it. A timeout is now a FAILURE, not a skip.
 
 Reuses `_run_claude_agent`, `_is_valid_toml`, `_check_activation`,
 `_run_judge`, `_stats`, `_skill_identity`, and `DEFAULT_SKILL_DIR` from
@@ -44,6 +48,7 @@ from pathlib import Path
 from run_floxify import (
     ABS_PATH_IN_MANIFEST,
     DEFAULT_SKILL_DIR,
+    DEFAULT_ACTIVATION_TIMEOUT,
     MODEL,
     _check_activation,
     _is_valid_toml,
@@ -54,6 +59,12 @@ from run_floxify import (
 )
 
 HERE = Path(__file__).resolve().parent
+
+# Tier 2 repos are heavy by definition — a first activation realizes an
+# entire closure (posthog: 33 packages incl. rust/go/emscripten). The Tier 1
+# budget of 120s is not a sane default here; it silently produced 'skipped'
+# on the largest repo in the corpus (AI-454).
+TIER2_ACTIVATION_TIMEOUT = 1800
 
 
 # --- git clone-at-SHA (fallback chain) -----------------------------------
@@ -288,7 +299,8 @@ def _base(entry):
 
 # --- per-entry runner --------------------------------------------------------
 
-def process_entry(entry, skill_dir, activate=False, clone_timeout=900, agent_timeout=1800):
+def process_entry(entry, skill_dir, activate=False, clone_timeout=900,
+                  agent_timeout=1800, activation_timeout=TIER2_ACTIVATION_TIMEOUT):
     """Clone the repo at its pinned SHA, run /floxify against it, and score
     the produced manifest with structural conformance + LLM judge."""
     tmpdir = tempfile.mkdtemp(prefix=f"floxify-tier2-{entry['id']}-")
@@ -333,7 +345,9 @@ def process_entry(entry, skill_dir, activate=False, clone_timeout=900, agent_tim
         hard_pass = all(hard.values())
 
         if activate:
-            act_ok, act_skipped, act_notes = _check_activation(tmp)
+            act_ok, act_skipped, act_notes = _check_activation(
+                tmp, timeout=activation_timeout
+            )
         else:
             act_ok, act_skipped, act_notes = (
                 None,
@@ -366,7 +380,7 @@ def process_entry(entry, skill_dir, activate=False, clone_timeout=900, agent_tim
 
 
 def process_task(entry, skill_dir, reps=1, activate=False, clone_timeout=900,
-                  agent_timeout=1800):
+                  agent_timeout=1800, activation_timeout=TIER2_ACTIVATION_TIMEOUT):
     """Run `reps` repetitions of an entry. A single rep returns the plain
     per-entry result (dashboard-compatible with a Tier-1-shaped result);
     multiple reps return an aggregate with each run kept under "runs"."""
@@ -374,6 +388,7 @@ def process_task(entry, skill_dir, reps=1, activate=False, clone_timeout=900,
         process_entry(
             entry, skill_dir, activate=activate,
             clone_timeout=clone_timeout, agent_timeout=agent_timeout,
+            activation_timeout=activation_timeout,
         )
         for _ in range(reps)
     ]
@@ -463,6 +478,14 @@ def main():
         "--agent-timeout", type=int, default=1800,
         help="Seconds allowed for the /floxify skill run (default 1800)",
     )
+    ap.add_argument(
+        "--activation-timeout", type=int, default=TIER2_ACTIVATION_TIMEOUT,
+        help=(
+            f"Seconds allowed for `flox activate` (default "
+            f"{TIER2_ACTIVATION_TIMEOUT}; Tier 2 first activations realize a "
+            f"full closure). Exceeding it is recorded as a FAILURE, not a skip."
+        ),
+    )
     args = ap.parse_args()
 
     skill_dir = Path(args.skill_dir).resolve()
@@ -496,6 +519,7 @@ def main():
                     e, skill_dir, reps=args.reps, activate=args.activate,
                     clone_timeout=args.clone_timeout,
                     agent_timeout=args.agent_timeout,
+                    activation_timeout=args.activation_timeout,
                 ),
                 entries,
             )
