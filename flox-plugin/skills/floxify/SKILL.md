@@ -381,7 +381,7 @@ Resolving packages...
   Supabase edge functions) means a SECOND runtime — search `"deno"` and pin it
   alongside `nodejs`. A monorepo that pins only Node silently drops the edge-functions runtime
 - **Flutter**: search `"flutter"` only — Dart SDK is bundled; do NOT search "dart" separately
-- **Mise / asdf** (`.mise.toml` / `.tool-versions`): each `key = "version"` is an independent search; `python = "3.12.3"` → search `"python 3.12"`
+- **Mise / asdf** (`.mise.toml` / `.tool-versions`): each `key = "version"` is an independent search; `python = "3.12.3"` → search `"python 3.12"`. These patch pins routinely sit AHEAD of the catalog — resolve the major/minor, and if the exact version isn't available, fall back to the language manifest's floor (`mix.exs "~> 1.18"`, `go.mod`, `requires-python`) and note the gap; never force a nonexistent exact pin
 - **Conda** (`environment.yml`): search top-level `dependencies:` binaries only; skip `- pip:` entries (handle via uv)
 - **Volta** (`"volta": {"node": "22.4.0"}`): search `"nodejs 22"`
 - **packageManager field** (`pnpm@9.x`, `yarn@4.x`): search the package manager name
@@ -455,6 +455,13 @@ search terms; still confirm each with `flox show`. Mastodon's `vips` / `ffmpeg` 
 never appears as a gem at all. Watch the specific-variant gotchas: `idn-ruby`
 needs GNU libidn v1 (`libidn`), not `libidn2`; `charlock_holmes` links system
 ICU (`icu`).
+
+**In a multi-stage Dockerfile, attribute each `RUN apt-get install` to its
+`FROM … AS <stage>`.** Packages installed in a *builder* stage are build deps;
+packages in the *runner* stage are runtime-only and do NOT imply a build input.
+Lemmy's runner-stage `libssl-dev` does not mean openssl is a build dep — its
+`Cargo.lock` has no `openssl-sys`. Don't promote a runner-stage lib to `[install]`
+on the strength of an `apt-get` line alone.
 
 ### Build tool signals
 
@@ -701,7 +708,15 @@ zsh  = 'export CARGO_HOME="$FLOX_ENV_CACHE/cargo"; export PATH="$CARGO_HOME/bin:
 fish = 'set -x CARGO_HOME "$FLOX_ENV_CACHE/cargo"; fish_add_path "$CARGO_HOME/bin"'
 ```
 - `rust-toolchain.toml` is a rustup directive — Flox installs via catalog, not rustup
+  (`cargo` and `rustc`, searched separately)
 - Maturin (Python extension): also add `maturin` to `[install]` + Python runtime
+- **Native deps come from `Cargo.lock`, not crate names.** A `*-sys` crate signals a
+  system lib: `pq-sys` → `postgresql` + `pkg-config` (diesel `postgres` feature),
+  `openssl-sys` → `openssl`, `zstd-sys` → `zstd`, `libsqlite3-sys` → `sqlite`. Grep the
+  lockfile for `-sys` crates and resolve each. **Absence is evidence too** — no
+  `openssl-sys` means NO openssl, even if a Dockerfile installs `libssl-dev` (usually a
+  runtime-only runner-stage dep). `prost` alone needs no protoc — only `prost-build` /
+  `tonic-build` compile `.proto`. `gcc` covers the linker and any cc-built crate.
 
 **Elixir**
 ```toml
@@ -736,6 +751,27 @@ bash = 'export DOTNET_ROOT="$FLOX_ENV_CACHE/dotnet"; export PATH="$HOME/.dotnet/
 zsh  = 'export DOTNET_ROOT="$FLOX_ENV_CACHE/dotnet"; export PATH="$HOME/.dotnet/tools:$PATH"'
 ```
 - Don't auto-run `dotnet restore` on activate — it's slow; let the developer run it
+
+**PHP** — a fixed-bundle interpreter, unlike Python/Node.
+```toml
+[hook]
+on-activate = """
+  composer install --no-interaction
+"""
+```
+- Pick the VERSIONED `phpNN` (from `composer.json` `require.php` / `config.platform.php`);
+  the bare `php` pkg-path lags a minor. Pair Composer as `phpNNPackages.composer`
+  (interpreter-scoped — there is no top-level `composer` package).
+- Extensions come from the `phpNN` build's FIXED default set — you do NOT install `ext-*`
+  as packages. Diff `composer.json` `require`'s `ext-*` against that set: core exts
+  (`json`) need nothing; default-set exts (bcmath, curl, intl, mbstring, openssl, pdo,
+  simplexml, tokenizer, xmlwriter, …) are already covered; an ext OUTSIDE the default set
+  (e.g. `xml`/expat) is NOT `[install]`-closable — it needs a `phpNN.withExtensions`
+  `[build]`. Flag it honestly (`composer install --ignore-platform-req=ext-xml`) rather
+  than pretend.
+- `phpNNExtensions.*` packages are a TRAP: they resolve in `flox show` but a standalone
+  install does not load into the prebuilt interpreter. nixpkgs bakes ext→system-lib deps
+  (gd→libpng, intl→icu) into the derivation — do NOT over-provision system libs for PHP.
 
 ---
 
