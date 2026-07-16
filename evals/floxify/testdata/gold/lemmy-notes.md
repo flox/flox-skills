@@ -61,6 +61,24 @@ in the separate LemmyNet/lemmy-ui repo.
 attrs, not one "rust" package). Both, plus `clippy`/`rustfmt`, expose an
 exact `1.95.0` that matches the repo's pinned channel.
 
+### AI-457 re-verification (outputs, 2026-07-16)
+
+The verification log above already noted `postgresql_18` has `lib`/`dev`
+outputs, but the `[install]` entry never actually declared them --
+`flox show postgresql_18`'s `Outputs:` line stars only `man` and `out`
+(installed by default); `lib` (libpq.so) and `dev` (headers) are not.
+`pq-sys`'s build script needs both to link against libpq. Added
+`postgresql.outputs = ["out", "lib", "dev"]` so the native build this
+golden's own notes document (§5, "the crux for a Rust-at-scale repo")
+actually has what it needs.
+
+**Activation validation.** This manifest had no systems violations to
+begin with (all packages here support all four systems, confirmed
+earlier). `flox activate` (x86_64-linux, throwaway directory, no real
+lemmy checkout) resolved and activated cleanly with no `pkg-group`
+changes needed. Hook output confirmed: `lemmy env ready (Rust 1.95 +
+postgresql_18).` printed as expected.
+
 ---
 
 ## 3. Chosen versions + mismatches vs catalog

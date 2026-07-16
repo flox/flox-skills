@@ -23,6 +23,7 @@ rustfmt.version = "1.95.0"           # match rustc
 
 # --- PostgreSQL: hard dep, doubles as the diesel/pq-sys build dep ---
 postgresql.pkg-path = "postgresql_18"  # docker/docker-compose.yml postgres image pgautoupgrade:18-alpine · provides server + libpq/pg_config for the pq-sys native build (diesel `postgres` feature, Cargo.toml diesel 2.3.7)
+postgresql.outputs = ["out", "lib", "dev"]  # default is out+man only; pq-sys needs pg_config (out) + libpq.so (lib) + headers (dev)
 
 # --- Native build toolchain ---
 pkg-config.pkg-path = "pkg-config"   # pq-sys uses pkg-config to locate libpq (Cargo.lock pkg-config build dep)
