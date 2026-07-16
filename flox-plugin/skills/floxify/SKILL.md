@@ -507,9 +507,11 @@ common orchestrators (`orchestrators` field) and any `compose*.yml` it finds.
 For Tilt/Skaffold/DevSpace/k3d projects: do NOT install docker-compose via Flox.
 Flox's role is the developer toolchain (runtimes, CLI tools) — the orchestrator owns services.
 
-### Services not in Flox catalog — wire via docker-compose
+### Services deferred to docker-compose — wire the hook
 
-ClickHouse, Kafka, Zookeeper, Cassandra aren't in the catalog. Wire them so
+Applies to services you are NOT wiring as `[services.*]`: the genuinely
+absent-from-catalog ones (Zookeeper, Cassandra) and the present-but-coupled
+ones deferred by the rules above (e.g. ClickHouse, Kafka). Wire them so
 `flox activate` still starts everything:
 
 1. Install `docker-compose` via Flox (it IS in the catalog)

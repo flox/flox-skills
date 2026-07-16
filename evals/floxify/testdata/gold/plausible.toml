@@ -1,0 +1,75 @@
+schema-version = "1.13.0"
+# Golden reference for plausible @ d5af396464c2
+
+# ---------------------------------------------------------------------------
+# plausible/analytics — Elixir/Phoenix + Postgres + ClickHouse + Node assets.
+#
+# Runtimes and services are grounded in the repo's own files (see
+# plausible-notes.md for the full provenance table). Every package name and
+# version below was verified with `flox show` / `flox search --all`.
+#
+# ClickHouse is a hard dependency but is NOT wired as a Flox service here —
+# it is deferred to Docker via the repo's `make clickhouse` target. Rationale
+# in plausible-notes.md ("ClickHouse: Flox service vs Docker").
+# ---------------------------------------------------------------------------
+
+[install]
+# Elixir. `.tool-versions` -> `elixir 1.20.2-otp-28`; mix.exs floor is
+# `elixir: "~> 1.18"`. Catalog max is elixir@1.18.4, which satisfies the
+# mix.exs constraint and BUNDLES Erlang/OTP 28.5.0.3 (verified: the elixir
+# derivation's buildInput is erlang-28.5.0.3) — so no separate `erlang`.
+elixir.pkg-path = "elixir"
+
+# Node.js. `.tool-versions` -> `nodejs 23.2.0`; Dockerfile pins
+# `nodejs-current=23.11.1`. Catalog `nodejs_23` resolves to 23.11.0 (same
+# major line). Drives the Phoenix assets/ pipeline and the tracker/ bundle.
+nodejs.pkg-path = "nodejs_23"
+
+# PostgreSQL — native Flox service (below). Makefile `make postgres` uses
+# `postgres:latest` (dev) / `postgres:18` (prod); config/.env.dev connects at
+# `postgres://postgres:postgres@127.0.0.1:5432/plausible_dev`. Catalog
+# `postgresql` resolves to 18.4 (matches prod's postgres:18).
+postgresql.pkg-path = "postgresql"
+
+# GNU Make — the repo's dev workflow is Makefile-driven (`make postgres`,
+# `make clickhouse`, `make install`, `make server`). Needed for the Docker
+# ClickHouse target and the documented setup flow (CONTRIBUTING.md).
+gnumake.pkg-path = "gnumake"
+
+[hook]
+on-activate = '''
+  # --- Elixir / Mix toolchain: keep Hex + Rebar state under the env cache ---
+  export MIX_HOME="$FLOX_ENV_CACHE/mix"
+  export HEX_HOME="$FLOX_ENV_CACHE/hex"
+  mkdir -p "$MIX_HOME" "$HEX_HOME"
+  mix local.hex --force --if-missing
+  mix local.rebar --force --if-missing
+  mix deps.get
+
+  # --- Node assets: Phoenix asset pipeline + first-party tracker bundle ---
+  # Both assets/package.json and tracker/package.json exist and are installed
+  # by the repo's `make install` and Dockerfile. (`npm ci` is the repo's
+  # stricter, lockfile-exact alternative.)
+  npm install --prefix assets
+  npm install --prefix tracker
+
+  # --- Postgres data dir (first run only) -------------------------------
+  # State under $FLOX_ENV_CACHE; superuser role "postgres" to match
+  # DATABASE_URL; trust auth is dev-only.
+  export PGDATA="$FLOX_ENV_CACHE/postgres"
+  if [ ! -d "$PGDATA" ]; then
+    initdb -U postgres --auth=trust --encoding=UTF8 --locale=C "$PGDATA" >/dev/null
+  fi
+
+  echo "plausible dev env ready."
+  echo "Next: start Docker ClickHouse (\`make clickhouse\`), then \`make install\`"
+  echo "to create + migrate the Postgres and ClickHouse databases, then"
+  echo "\`make server\` (http://localhost:8000)."
+'''
+
+[services.postgres]
+# Native Postgres replacing the repo's Docker `make postgres`. Listens on
+# 127.0.0.1:5432 (config/.env.dev DATABASE_URL uses a TCP host) with a unix
+# socket in /tmp. `mix ecto.create` (via `make install`) creates the
+# `plausible_dev` database; the "postgres" role is created by initdb above.
+command = 'postgres -D "$FLOX_ENV_CACHE/postgres" -k /tmp -c listen_addresses=127.0.0.1 -p 5432'

@@ -1,0 +1,90 @@
+schema-version = "1.13.0"
+# Golden reference for lemmy @ 9311de3b662b
+#
+# LemmyNet/lemmy is a Rust workspace (24 crates, edition 2024) that builds
+# a single `lemmy_server` binary. Its ONE hard runtime/build dependency is
+# PostgreSQL: the `diesel` crate is pulled in with the `postgres` feature,
+# which links native libpq via `pq-sys` (Cargo.lock pq-sys 0.7.5). Every
+# other native touch-point (rustls->ring, actix compress-zstd->zstd-sys)
+# only needs a C compiler. TLS is rustls end-to-end -- there is NO
+# openssl-sys / native-tls in Cargo.lock, and `prost` appears WITHOUT
+# prost-build, so no openssl and no protoc are required. See lemmy-notes.md.
+
+[install]
+# --- Rust toolchain (pinned to rust-toolchain.toml channel "1.95") ---
+cargo.pkg-path = "cargo"             # rust-toolchain.toml channel = "1.95"; docker/Dockerfile ARG RUST_VERSION=1.95
+cargo.version = "1.95.0"             # exact match to the pinned channel
+rustc.pkg-path = "rustc"             # compiler for the workspace (edition 2024, MSRV Cargo.toml rust-version 1.92)
+rustc.version = "1.95.0"             # match cargo
+clippy.pkg-path = "clippy"           # .woodpecker.yml: `cargo clippy --workspace ... -D warnings`; heavy [workspace.lints.clippy] in Cargo.toml
+clippy.version = "1.95.0"            # match rustc
+rustfmt.pkg-path = "rustfmt"         # .rustfmt.toml (edition 2024); .woodpecker.yml fmt step
+rustfmt.version = "1.95.0"           # match rustc
+
+# --- PostgreSQL: hard dep, doubles as the diesel/pq-sys build dep ---
+postgresql.pkg-path = "postgresql_18"  # docker/docker-compose.yml postgres image pgautoupgrade:18-alpine · provides server + libpq/pg_config for the pq-sys native build (diesel `postgres` feature, Cargo.toml diesel 2.3.7)
+
+# --- Native build toolchain ---
+pkg-config.pkg-path = "pkg-config"   # pq-sys uses pkg-config to locate libpq (Cargo.lock pkg-config build dep)
+gcc.pkg-path = "gcc"                 # C linker for every Rust binary + cc-built crates: ring (rustls "ring"), zstd-sys (actix compress-zstd), brotli/flate2 (Cargo.lock)
+
+[vars]
+# Literal strings only (no shell interpolation here). Postgres listens on
+# BOTH a /tmp socket and 127.0.0.1:5432 (see [services.postgres]), so this
+# URL is byte-for-byte the repo default (config/defaults.hjson) -- trust
+# auth ignores the password. Lemmy reads LEMMY_DATABASE_URL and it
+# overrides the config connection (crates/utils/src/settings/mod.rs:50).
+LEMMY_DATABASE_URL = "postgres://lemmy:password@localhost:5432/lemmy"
+# psql / createdb convenience (unix socket dir matches [services.postgres] -k).
+PGHOST = "/tmp/lemmy-postgres"
+PGPORT = "5432"
+PGUSER = "lemmy"
+PGDATABASE = "lemmy"
+
+[hook]
+on-activate = '''
+  # --- Keep Cargo's registry + build output inside the env cache, never
+  #     the repo tree (idiomatic Rust; NO absolute paths). ---
+  export CARGO_HOME="$FLOX_ENV_CACHE/cargo"
+  export CARGO_TARGET_DIR="$FLOX_ENV_CACHE/target"
+  export PATH="$CARGO_HOME/bin:$PATH"
+
+  # --- pq-sys (diesel `postgres` feature) links native libpq. pkg-config
+  #     finds libpq.pc, but point PQ_LIB_DIR at the env libdir as a
+  #     belt-and-suspenders so the native build always links. ---
+  export PQ_LIB_DIR="$FLOX_ENV/lib"
+
+  echo "lemmy env ready (Rust 1.95 + postgresql_18)."
+  echo "  Start the DB:  flox services start postgres"
+  echo "  Build/run:     cargo run -p lemmy_server   (reads config/config.hjson)"
+  echo "  Tests:         scripts/test.sh"
+  # OPTIONAL external service: image uploads need pict-rs (docker-compose
+  # uses asonix/pictrs:0.5, default url http://localhost:8080). It is a
+  # standalone binary, NOT wired here -- lemmy runs fine without it; only
+  # image hosting is disabled. Run `pict-rs` separately if you need it.
+'''
+
+[services.postgres]
+# Self-initializing local Postgres. State under $FLOX_ENV_CACHE (service
+# commands do NOT inherit the on-activate hook, so init lives here).
+# Listens on a /tmp unix socket AND 127.0.0.1:5432 (keeps LEMMY_DATABASE_URL
+# = the repo default). Trust auth is dev-only. Bootstraps the `lemmy` DB;
+# diesel_migrations then builds the schema on first server start.
+command = '''
+  export PGDATA="$FLOX_ENV_CACHE/postgres/data"
+  export PGSOCKET="/tmp/lemmy-postgres"
+  mkdir -p "$PGSOCKET"
+  if [ ! -s "$PGDATA/PG_VERSION" ]; then
+    initdb --username=lemmy --auth=trust --no-locale --encoding=UTF8 -D "$PGDATA"
+  fi
+  # Create the `lemmy` database once the server accepts connections.
+  ( until pg_isready -q -h "$PGSOCKET" -p 5432; do sleep 0.5; done
+    createdb -h "$PGSOCKET" -p 5432 -U lemmy lemmy 2>/dev/null || true ) &
+  exec postgres -D "$PGDATA" -k "$PGSOCKET" -h 127.0.0.1 -p 5432
+'''
+
+[services.postgres.shutdown]
+command = "pg_ctl -D $FLOX_ENV_CACHE/postgres/data stop -m fast"
+
+[options]
+systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]

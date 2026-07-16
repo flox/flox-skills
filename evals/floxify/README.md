@@ -336,6 +336,36 @@ that a hook command resolves is activation's job, not structural
 conformance's. Reading a green structural row as "the environment works"
 is the specific over-read this note exists to prevent.
 
+### Golden reference manifests (`testdata/gold/<id>.toml`)
+
+The registry's prose `gold` field characterizes the *right answer* in words.
+`testdata/gold/<id>.toml` goes one better: a concrete, hand-curated,
+catalog-verified reference manifest for each registered repo — the manifest a
+careful engineer would write after reading the repo in full. When one exists,
+`_judge_tier2` passes it to the judge alongside the prose characterization, so
+grading compares the produced manifest against a real target rather than a
+description. It is an **idiomatic reference, not an exact-match target** — a
+well-structured produced manifest may differ in layout, comments, or hook style
+and still score 5/5.
+
+These are distinct from `testdata/mastodon-manifest.toml`, which is a
+*representative capture of actual skill output* used by `test_tier2.py` as a
+regex-drift guard (bugs and all). The golden references are the *ideal*.
+
+Each `<id>.toml` has a sibling `<id>-notes.md` recording provenance (every pin
+traced to its source file), the catalog verification log (`flox show` / `flox
+search` runs that confirmed each `pkg-path` and version), and skill-improvement
+observations. The mastodon golden is the direct answer to the bundler over-read
+above: where the live skill run emitted `gem install bundler -v 4.0.13` (a
+nonexistent version), the golden just runs `bundle install` and lets the
+bundler shipped with `ruby_4_0` resolve the lockfile — no hallucinated pin.
+
+Captured so far: `mastodon`, `posthog`, `sentry`, `supabase`, `gitea`,
+`plausible`, `lemmy`, `firefly-iii` — grounded + catalog-verified, not
+activation-tested (these dev envs are too heavy to activate on the recording
+machine; every `pkg-path` and version was confirmed via `flox show` /
+`flox search`). Each golden passes its own registry entry's structural checks.
+
 ### Registry (`tier2.jsonl`)
 
 One JSON object per line:
@@ -353,23 +383,38 @@ One JSON object per line:
 
 ### Current repos
 
-| id | sha | expected runtimes | expected services | status |
-|----|-----|-------------------|--------------------|--------|
-| `mastodon` | `52e9ec7814fc` | ruby, nodejs_24 | postgres, redis | **run** — see `results/tier2.json` |
-| `posthog` | `55525a19f353` | python3 (3.13), nodejs_24 | postgres, redis, clickhouse | registered, not yet run |
-| `sentry` | `68d439d41d66` | python3 (3.13), nodejs | postgres, redis, kafka, clickhouse | registered, not yet run |
-| `supabase` | `963182f58e91` | nodejs_22, deno | postgres | registered, not yet run |
+| id | sha | ecosystem | expected runtimes | expected services | status |
+|----|-----|-----------|-------------------|--------------------|--------|
+| `mastodon` | `52e9ec7814fc` | ruby | ruby, nodejs_24 | postgres, redis | **run** + golden |
+| `posthog` | `55525a19f353` | python | python3 (3.13), nodejs_24 | postgres, redis | golden, run pending |
+| `sentry` | `68d439d41d66` | python | python3 (3.13), nodejs | postgres, redis | golden, run pending |
+| `supabase` | `963182f58e91` | javascript | nodejs_22, deno | postgres | golden, run pending |
+| `gitea` | `11363e2f0cd6` | go | go, nodejs | — (embedded sqlite) | golden, run pending |
+| `plausible` | `d5af396464c2` | elixir | elixir, nodejs | postgres | golden, run pending |
+| `lemmy` | `9311de3b662b` | rust | cargo, rustc | postgres | golden, run pending |
+| `firefly-iii` | `a0d70228bc14` | php | php85, nodejs | mariadb, redis | golden, run pending |
+
+All eight have a golden reference manifest under `testdata/gold/<id>.toml`
+(+ `<id>-notes.md`); see "Golden reference manifests" above. The four original
+repos (mastodon, posthog, sentry, supabase) cover Ruby / Python / JS+Deno; the
+four added later (gitea, plausible, lemmy, firefly-iii) deliberately reach into
+ecosystems the first set never touched — **Go, Elixir, Rust, and PHP** — each of
+which surfaced its own idiom (Go cache env + pure-Go-vs-CGO SQLite; Elixir
+bundling OTP with no separate erlang; Rust native deps read from Cargo.lock
+`*-sys` crates; PHP's fixed-bundle interpreter where `ext-*` come from the
+`phpNN` build, not `[install]`).
 
 Only `mastodon` has been run end-to-end so far — it's a single Rails
 app (tractable) and Ruby was the ecosystem flagged as highest-risk
-going in. The other three (PostHog, Sentry, Supabase) are large
-monorepos and register for future runs rather than gating this PR's
+going in. The rest register for future runs rather than gating a
 baseline; run them individually with `--only <id>` when validating
-those ecosystems. `gold` characterizations for all four were derived
-by cloning each repo at its pinned SHA and reading its actual version
-files (`.ruby-version`, `.nvmrc`, `pyproject.toml`) and service
-manifests (`docker-compose.yml`, `devservices/config.yml`) — not
-assumed from the ecosystem name.
+those ecosystems. Every `gold` characterization was derived by cloning
+each repo at its pinned SHA and reading its actual version files
+(`.ruby-version`, `.nvmrc`, `pyproject.toml`, `go.mod`, `.tool-versions`,
+`rust-toolchain.toml`, `composer.json`) and service manifests
+(`docker-compose.yml`, `devservices/config.yml`, Makefile `docker run`
+recipes) — not assumed from the ecosystem name — with every catalog
+`pkg-path` and version confirmed via `flox show` / `flox search`.
 
 ### Mastodon result (initial baseline)
 
