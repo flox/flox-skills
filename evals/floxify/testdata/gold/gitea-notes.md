@@ -6,10 +6,13 @@
   `refs/heads/main`, committed 2026-07-15 22:10 +0200,
   "chore(renovate): bundle major updates, use chore commit type (#38470)")
 - **Ecosystem**: go (Go backend + Vite/pnpm TypeScript frontend)
-- **Validation level**: static + per-package verified; not whole-manifest
-  lock-tested. Every pkg-path below confirmed with `flox show` /
-  `flox search --all` on flox 1.13.2. The manifest was NOT `flox
-  activate`d (per task constraint); TOML validated with `tomllib`.
+- **Validation level**: static + per-package verified. Every pkg-path
+  below confirmed with `flox show` / `flox search --all` on flox 1.13.2.
+  The manifest was NOT `flox activate`d at capture time (per that task's
+  constraint); TOML validated with `tomllib`. Resolution-tested by AI-457
+  (2026-07-16) — see "Activation validation" below. NOT functionally
+  tested — no real gitea checkout, so `pnpm install` never ran against
+  the real lockfile.
 
 > Note on `git ls-remote ... main`: the remote exposes **two** refs matching
 > `main` — `refs/for/main` (`4afec63b1306`, a Gerrit-style review ref) and
@@ -81,7 +84,7 @@ rather than scoping per-package overrides — the env can't build or run
 gitea's default path on Intel macOS regardless of which one is asked
 for.
 
-**Activation validation.** Unlike mastodon/posthog/sentry/plausible, this
+**Activation validation (resolution-tested, not functionally tested).** Unlike mastodon/posthog/sentry/plausible, this
 manifest resolved and activated cleanly on the first `flox activate`
 (x86_64-linux, throwaway directory, no real gitea checkout) with no
 `pkg-group` split needed — go_1_26/nodejs_26/pnpm/sqlite/git/git-lfs/gcc/

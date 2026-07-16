@@ -87,7 +87,7 @@ macOS regardless of which of the three is asked for. `ruby_4_0`,
 reason to keep the whole environment claiming a platform it can't actually
 run on for three of its own hard deps.
 
-### AI-457 activation validation
+### AI-457 activation validation (resolution-tested, not functionally tested)
 
 This golden was actually `flox activate`d (x86_64-linux, in a throwaway
 directory seeded only with `.flox/env/manifest.toml` -- no real mastodon
@@ -101,9 +101,29 @@ containing `ruby_4_0@4.0.5` and `nodejs_24@24.18.0` together with
 the pre-AI-457 manifest: it failed with a *different*, more specific error
 (`No version compatible with '24.18.0' found for 'nodejs_24' on
 'x86_64-darwin'`), proving the toplevel conflict was masked behind the
-systems bug and not a new regression from this fix. Isolating `ruby_4_0`
-and `nodejs_24` each into their own `pkg-group` resolved it -- the
-manifest now activates cleanly with `flox activate -c "echo __ok__"`.
+systems bug and not a new regression from this fix.
+
+**Group shape: coherence over blanket isolation.** The first working fix
+isolated `ruby_4_0` and `nodejs_24` each into their own separate
+`pkg-group`. That resolves, but it also splits `ruby_4_0` from the C
+libraries its own gems compile against (`postgresql_14` for `pg`, `vips`
+for ruby-vips, `icu` for charlock_holmes, `libidn` for idn-ruby) --
+exactly the kind of split a pkg-group's "upgrade together to maintain
+compatibility" contract (flox.md §5) exists to prevent. Tried one
+restructure instead: `ruby_4_0` sharing a single group with
+`postgresql_14`/`vips`/`icu`/`libidn` (keeping `nodejs_24` in its own
+separate group, since Node has no native-gem coupling to those
+libraries). Verified live: this resolves cleanly on the first attempt --
+`flox activate -c "echo __ok__"` succeeds, and `bundle install` runs far
+enough to print `Bundler version 4.0.10` before failing on the expected
+missing Gemfile. Adopted this shape (`pkg-group = "runtime-and-native"`
+on ruby/postgresql/vips/icu/libidn) over the isolated-per-package split --
+same resolution guarantee, but the runtime and the native libraries its
+own gems link against now upgrade together, matching the ABI-coherence
+purpose pkg-groups exist for. Whether this coherence pattern (versus
+per-package isolation) should be the skill's general prescription for
+"exact pin conflicts with toplevel" is a broader question tracked
+separately (AI-464) -- not resolved here beyond this one golden.
 
 ---
 

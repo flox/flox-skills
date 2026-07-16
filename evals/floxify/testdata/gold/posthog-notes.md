@@ -40,8 +40,9 @@ verified 3.13.13.)
 | `flox show docker-compose` | ✓ `docker-compose@5.3.1` (catalog-reported version, used verbatim) |
 | `flox search --all corepack` | ✓ `corepack`, `corepack_20` exist (nodejs_24 also bundles corepack) |
 
-`flox activate` deliberately NOT run (heavy closure / disk). Verified via
-search/show only.
+`flox activate` deliberately NOT run at capture time (heavy closure /
+disk). Verified via search/show only. AI-457 later resolution-tested this
+manifest — see "AI-457 activation validation" below.
 
 ### AI-457 re-verification (2026-07-16)
 
@@ -76,7 +77,7 @@ Also added `postgresql.outputs = ["out", "lib", "dev"]` (default is
 wheels, but exposes `pg_config`/`libpq.so`/headers for anyone who does
 need them, consistent with the mastodon golden's pattern.
 
-**Activation validation.** `[options].systems` alone was not enough to
+**Activation validation (resolution-tested, not functionally tested).** `[options].systems` alone was not enough to
 activate: `flox activate` (x86_64-linux, throwaway directory, no real
 posthog checkout) failed with `constraints for group 'toplevel' are too
 tight` even after the systems fix -- `python313@python3-3.13.13`,
@@ -97,7 +98,7 @@ real checkout).
 | redis | 7.2.7 | Latest 7.2.x; compose uses `redis:7.2-alpine` |
 | uv | (unpinned) | Latest catalog uv fine; version not pinned by repo |
 | docker-compose | (unpinned) | Only used as launcher for ClickHouse |
-| pnpm | NOT installed from catalog | packageManager pins `pnpm@10.29.3`; catalog only has pnpm@11.x → **version mismatch**. Honor the pin via corepack instead of installing catalog pnpm. |
+| pnpm | NOT installed from catalog | packageManager pins `pnpm@10.29.3` exactly; `pnpm_10` has 42 versions in the 10.x line (confirmed live, AI-457, 2026-07-16), but not that exact patch -- nearest is `pnpm_10@10.29.2`. Honor the byte-exact pin via corepack instead of settling for the nearest catalog version. |
 
 ## Services: Flox vs docker-compose
 
@@ -146,15 +147,14 @@ needed, out of scope for a minimal functional Flox env.
 
 ## ✗ Items (not done / caveats)
 
-- ✗ pnpm NOT installed from catalog — pinned `pnpm@10.29.3` unavailable (catalog
-  is pnpm@11.x). Resolved via corepack honoring the packageManager pin.
+- ✗ pnpm NOT installed from catalog — pinned `pnpm@10.29.3` unavailable exactly
+  (nearest catalog version is `pnpm_10@10.29.2`, confirmed live). Resolved via
+  corepack honoring the byte-exact packageManager pin.
 - ✗ ClickHouse NOT a Flox package/service despite catalog availability — config +
   Kafka/ZooKeeper coupling make docker-compose the only functional path.
 - ✗ Kafka, ZooKeeper, object storage, Temporal, ingestion services NOT wired —
   full ingestion pipeline out of scope; app + migrations + queries run on
   postgres + redis + clickhouse.
-- ✗ `flox activate` not executed — manifest validated by grounding + catalog
-  verification, not by a live activation (disk/closure constraints).
 - ✗ Native compiler/system-lib packages NOT added to [install] — every
   native-signalling dep (psycopg[binary], psycopg2-binary, cryptography, lxml,
   pillow, numpy, pyarrow, grpcio, brotli) ships manylinux binary wheels, so
@@ -164,8 +164,11 @@ needed, out of scope for a minimal functional Flox env.
 ## Validation level
 
 Grounded (every value traced to a repo file) + per-package verified (every
-pkg-path and version confirmed via `flox show`/`flox search --all`); not
-whole-manifest lock-tested. NOT activation-tested.
+pkg-path and version confirmed via `flox show`/`flox search --all`) +
+resolution-tested (AI-457, 2026-07-16: `flox activate -c "echo __ok__"`
+succeeds in a throwaway directory on x86_64-linux). NOT functionally
+tested — no real posthog checkout, so `uv sync`/`pnpm install` never ran
+against real lockfiles and no native build was exercised.
 
 ## OBSERVATIONS for improving the floxify skill
 

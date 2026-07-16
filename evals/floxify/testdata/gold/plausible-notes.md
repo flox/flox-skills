@@ -4,9 +4,13 @@
 - **Pinned SHA:** `d5af396464c2` (branch `master`, HEAD commit
   "CRM: Trial prospects worker (#6498)")
 - **Ecosystem:** Elixir/Phoenix + Postgres + ClickHouse + Node assets
-- **Validation level:** static only — files read + every package verified
-  with `flox show` / `flox search --all` / `nix eval`. No `flox activate`
-  was run (per instructions).
+- **Validation level:** static + per-package verified — files read + every
+  package verified with `flox show` / `flox search --all` / `nix eval` at
+  capture time (no `flox activate`, per that task's instructions).
+  Resolution-tested by AI-457 (2026-07-16) — see "AI-457 re-verification"
+  and "Activation validation" below. NOT functionally tested — no real
+  plausible checkout, so `mix deps.get`/`npm install` never ran against
+  real lockfiles.
 
 ## Provenance table (file → value)
 
@@ -77,7 +81,7 @@ environment (over-constraining two packages that don't need it), the
 manifest scopes `postgresql.systems` to the three platforms 18.4 actually
 supports.
 
-**Activation validation.** `flox activate` (x86_64-linux, throwaway
+**Activation validation (resolution-tested, not functionally tested).** `flox activate` (x86_64-linux, throwaway
 directory, no real plausible checkout) failed with `constraints for group
 'toplevel' are too tight` even with the elixir fix and postgresql systems
 scoping in place -- bisected to `elixir_1_19@1.19.5` specifically (bare
@@ -108,8 +112,9 @@ Reasoning, grounded in the repo:
   `CLICKHOUSE_SKIP_USER_SETUP=1`, and mounts a `config.d` override dir. A
   native Flox `clickhouse` service would have to reproduce the fd ulimit
   (an OS-level concern a Flox service can't set), a writable config/data
-  layout, and skip-user-setup — and could not be validated here (no
-  `flox activate`). Shipping that unverified would risk a broken "golden".
+  layout, and skip-user-setup — a hypothetical service this golden never
+  attempts to build, so it stays unvalidated either way. Shipping that
+  unverified would risk a broken "golden".
 - **The config mount is not a hard blocker by itself** — `.clickhouse_config`
   is *not committed* (it's an empty local-override bind mount), so ClickHouse
   needs no repo-provided config files. The blocker is the combination of the

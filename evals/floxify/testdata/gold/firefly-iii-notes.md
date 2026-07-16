@@ -115,7 +115,7 @@ This is the tricky part of the PHP/composer ecosystem.
    does not exist, and the tier2.jsonl rubric that penalized manifests for
    NOT claiming this gap has also been corrected (see AI-457 ticket).
 
-## AI-457 activation validation
+## AI-457 activation validation (resolution-tested, not functionally tested)
 
 `flox activate` (x86_64-linux, throwaway directory, no real firefly-iii
 checkout) resolved and activated cleanly, no `pkg-group` split needed —
@@ -146,9 +146,12 @@ on 6379 (optional, but idiomatic for a Laravel cache/queue backend).
 - **v3 workspace**: `release.yml` builds `--workspace=v3`, but `package.json`
   only declares v1/v2 workspaces — bleeding-edge inconsistency in this tip;
   the manifest builds the two workspaces that actually exist.
-- Services + hook commands could not be executed (`flox activate` is
-  out of scope for this task); they follow standard Flox idioms but are
-  not activation-verified.
+- Services + hook commands were not executed against a real checkout
+  (`flox activate` was out of scope for this task's original capture);
+  they follow standard Flox idioms. AI-457 later resolution-tested the
+  manifest as a whole (see "AI-457 activation validation" below), but
+  that is NOT the same as running the mariadb/redis services or the
+  composer/npm install steps against real project files.
 
 ## Skill-improvement observations
 

@@ -9,16 +9,22 @@ schema-version = "1.13.0"
 
 [install]
 # --- Language runtimes (pin BOTH) ---
-# Each exact-pinned runtime gets its own pkg-group: AI-457 found live
-# (`flox activate`) that leaving ruby_4_0@4.0.5 and nodejs_24@24.18.0 in
-# the shared toplevel group alongside postgresql_14/redis/vips/icu/libidn
-# fails resolution ("constraints for group 'toplevel' are too tight") even
-# though every package resolves fine individually via `flox show` -- the
-# catalog has no single page containing all of them together. Isolating
-# each exact pin into its own group lets it resolve against its own page.
+# AI-457 found live (`flox activate`) that leaving ruby_4_0@4.0.5 and
+# nodejs_24@24.18.0 in the shared toplevel group alongside
+# postgresql_14/redis/vips/icu/libidn fails resolution ("constraints for
+# group 'toplevel' are too tight") even though every package resolves
+# fine individually via `flox show` -- the catalog has no single page
+# containing all of them together.
+#
+# Fix: ruby_4_0 shares a pkg-group with the native C libraries its gems
+# link against (postgresql_14, vips, icu, libidn) -- keeping a compiled
+# extension's runtime coherent with the libraries it builds against,
+# rather than isolating it alone, resolved cleanly on the first attempt
+# (verified live). nodejs_24 gets its own separate group -- Node has no
+# native-gem coupling to those libraries. See mastodon-notes.md.
 ruby.pkg-path = "ruby_4_0"            # .ruby-version 4.0.6 · Gemfile.lock RUBY 4.0.6 · Dockerfile RUBY_VERSION=4.0.6 (Gemfile allows >=3.3,<4.1)
 ruby.version = "4.0.5"               # catalog max is 4.0.5; repo pins 4.0.6 (1 patch ahead, not yet in catalog)
-ruby.pkg-group = "ruby-4-0"
+ruby.pkg-group = "runtime-and-native"
 nodejs.pkg-path = "nodejs_24"        # .nvmrc 24.18 · Dockerfile NODE_MAJOR_VERSION=24 · package.json engines.node ">=22"
 nodejs.version = "24.18.0"           # exact match to .nvmrc 24.18
 nodejs.pkg-group = "nodejs-24"
@@ -30,19 +36,23 @@ yarn.pkg-path = "yarn-berry"         # package.json packageManager "yarn@4.17.1"
 # --- Services (both hard-depended at runtime) ---
 postgresql.pkg-path = "postgresql_14"  # docker-compose db image postgres:14-alpine · also builds the pg gem (Gemfile pg ~>1.5, needs pg_config/libpq)
 postgresql.outputs = ["out", "lib", "dev"]  # default is out+man only; pg gem needs pg_config (out) + libpq.so (lib) + headers (dev)
+postgresql.pkg-group = "runtime-and-native"  # shares ruby_4_0's group -- see [install] header note
 redis.pkg-path = "redis"             # docker-compose redis image redis:7-alpine
 redis.version = "7.2.7"              # match redis:7 (catalog latest is 8.x; 7.2.7 is newest 7.x)
 
 # --- Native media libraries (runtime + gem C-extensions) ---
 vips.pkg-path = "vips"               # Gemfile ruby-vips ~>2.2 (gem 2.3.0) · Dockerfile builds libvips 8.18.4 (catalog 8.18.3)
 vips.outputs = ["out", "bin", "dev"]  # default is bin+man only; libvips.so lives in `out` (not starred) + headers in `dev` for the ruby-vips FFI build
+vips.pkg-group = "runtime-and-native"  # shares ruby_4_0's group -- see [install] header note
 ffmpeg.pkg-path = "ffmpeg"           # Dockerfile builds ffmpeg 8.1.2 (exact) · media transcoding for kt-paperclip video
 
 # --- Native C-extension gem dependencies ---
 icu.pkg-path = "icu"                 # Gemfile charlock_holmes ~>0.7.7 links system ICU · Dockerfile libicu-dev/libicu76
 icu.outputs = ["out", "dev"]          # default is out only; charlock_holmes needs ICU headers (dev) to compile
+icu.pkg-group = "runtime-and-native"  # shares ruby_4_0's group -- see [install] header note
 libidn.pkg-path = "libidn"           # Gemfile idn-ruby · Aptfile libidn12 · Dockerfile libidn-dev (GNU libidn v1 — NOT libidn2)
 libidn.outputs = ["out", "dev"]       # default is bin only; idn-ruby needs libidn.so (out) + headers (dev) to compile
+libidn.pkg-group = "runtime-and-native"  # shares ruby_4_0's group -- see [install] header note
 
 # --- Toolchain to compile native gems (pg, ruby-vips, charlock_holmes, ...) ---
 pkg-config.pkg-path = "pkg-config"   # native gem extconf discovery
