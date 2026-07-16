@@ -1,0 +1,89 @@
+schema-version = "1.13.0"
+# Golden reference for mastodon @ 52e9ec7814fc
+
+# Mastodon is a dual-runtime app: a Rails 8.1 monolith (Ruby) plus a
+# separate Node streaming/API service under streaming/. Both runtimes
+# read the same DB_* / REDIS_URL env vars (config/database.yml and
+# streaming/database.js + streaming/redis.js), so one [vars] block wires
+# both. Postgres and Redis are HARD runtime dependencies.
+
+[install]
+# --- Language runtimes (pin BOTH) ---
+ruby.pkg-path = "ruby_4_0"            # .ruby-version 4.0.6 · Gemfile.lock RUBY 4.0.6 · Dockerfile RUBY_VERSION=4.0.6 (Gemfile allows >=3.3,<4.1)
+ruby.version = "4.0.5"               # catalog max is 4.0.5; repo pins 4.0.6 (1 patch ahead, not yet in catalog)
+nodejs.pkg-path = "nodejs_24"        # .nvmrc 24.18 · Dockerfile NODE_MAJOR_VERSION=24 · package.json engines.node ">=22"
+nodejs.version = "24.18.0"           # exact match to .nvmrc 24.18
+
+# --- Package managers ---
+yarn.pkg-path = "yarn-berry"         # package.json packageManager "yarn@4.17.1" (Yarn v4 line; catalog 4.14.1)
+# bundler ships with ruby_4_0 (Gemfile.lock BUNDLED WITH 4.0.13)
+
+# --- Services (both hard-depended at runtime) ---
+postgresql.pkg-path = "postgresql_14"  # docker-compose db image postgres:14-alpine · also builds the pg gem (Gemfile pg ~>1.5, needs pg_config/libpq)
+redis.pkg-path = "redis"             # docker-compose redis image redis:7-alpine
+redis.version = "7.2.7"              # match redis:7 (catalog latest is 8.x; 7.2.7 is newest 7.x)
+
+# --- Native media libraries (runtime + gem C-extensions) ---
+vips.pkg-path = "vips"               # Gemfile ruby-vips ~>2.2 (gem 2.3.0) · Dockerfile builds libvips 8.18.4 (catalog 8.18.3)
+ffmpeg.pkg-path = "ffmpeg"           # Dockerfile builds ffmpeg 8.1.2 (exact) · media transcoding for kt-paperclip video
+
+# --- Native C-extension gem dependencies ---
+icu.pkg-path = "icu"                 # Gemfile charlock_holmes ~>0.7.7 links system ICU · Dockerfile libicu-dev/libicu76
+libidn.pkg-path = "libidn"           # Gemfile idn-ruby · Aptfile libidn12 · Dockerfile libidn-dev (GNU libidn v1 — NOT libidn2)
+
+# --- Toolchain to compile native gems (pg, ruby-vips, charlock_holmes, ...) ---
+pkg-config.pkg-path = "pkg-config"   # native gem extconf discovery
+gcc.pkg-path = "gcc"                 # C compiler for gem extensions
+gnumake.pkg-path = "gnumake"         # make for gem extensions
+
+[vars]
+# Literal strings only — no shell interpolation here.
+RAILS_ENV = "development"
+LOCAL_DOMAIN = "localhost:3000"
+# Rails (config/database.yml) and streaming/ both read these:
+DB_USER = "mastodon"
+DB_NAME = "mastodon_development"
+DB_PORT = "5432"
+DB_HOST = "/tmp"                      # unix-socket dir; postgres listens on the socket here (dev-only, trust auth)
+REDIS_URL = "redis://localhost:6379"
+
+[hook]
+on-activate = '''
+  # --- Keep Ruby gems inside the env cache, never in the repo tree ---
+  export GEM_HOME="$FLOX_ENV_CACHE/bundle"
+  export BUNDLE_PATH="$FLOX_ENV_CACHE/bundle"
+  export PATH="$GEM_HOME/bin:$PATH"
+
+  # --- Postgres cluster under the cache; socket dir is /tmp (matches DB_HOST) ---
+  export PGDATA="$FLOX_ENV_CACHE/postgres"
+  if [ ! -d "$PGDATA" ]; then
+    initdb --username="$DB_USER" --auth=trust --encoding=UTF8 "$PGDATA" >/dev/null
+  fi
+
+  # --- Redis state under the cache ---
+  mkdir -p "$FLOX_ENV_CACHE/redis"
+
+  # --- Ruby deps (Gemfile) — idempotent ---
+  bundle install
+
+  # --- Node deps: yarn workspaces cover root app + streaming/ ---
+  yarn install
+
+  echo "Ready. Start services: 'flox services start'."
+  echo "First run: create the DB with 'bin/rails db:setup'."
+'''
+
+[services.postgres]
+# Socket-only (TCP disabled); state under the cache; dev-only trust auth.
+command = '''
+postgres -D "$FLOX_ENV_CACHE/postgres" -k /tmp -p "$DB_PORT" -c listen_addresses=""
+'''
+
+[services.redis]
+# Unix socket in /tmp plus localhost:6379 (REDIS_URL); data under the cache.
+command = '''
+redis-server --unixsocket /tmp/mastodon-redis.sock --port 6379 --dir "$FLOX_ENV_CACHE/redis"
+'''
+
+[options]
+systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
