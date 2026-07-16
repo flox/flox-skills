@@ -4,6 +4,9 @@ schema-version = "1.13.0"
 claude-code.pkg-path = "flox/claude-code"
 claude-code.pkg-group = "claude-code"
 flox-ai.pkg-path = "flox/flox-ai"
+# nixpkgs package in toplevel: flox publish pins the base catalog page
+# from the toplevel group, and flox-ai alone (custom catalog) can't
+coreutils.pkg-path = "coreutils"
 
 # Packages the flox plugin (skills: flox, floxify) for all agents.
 # Stages the plugin under share/claude-code/plugins/flox, then

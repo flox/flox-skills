@@ -7,6 +7,9 @@
         "pkg-path": "flox/claude-code",
         "pkg-group": "claude-code"
       },
+      "coreutils": {
+        "pkg-path": "coreutils"
+      },
       "flox-ai": {
         "pkg-path": "flox/flox-ai"
       }
@@ -147,6 +150,159 @@
       "priority": 5
     },
     {
+      "attr_path": "coreutils",
+      "broken": false,
+      "derivation": "/nix/store/xhh9r2djb00zz515x68m359kv3z35lp6-coreutils-9.11.drv",
+      "description": "GNU Core Utilities",
+      "install_id": "coreutils",
+      "license": "GPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=567a49d1913ce81ac6e9582e3553dd90a955875f",
+      "name": "coreutils-9.11",
+      "pname": "coreutils",
+      "rev": "567a49d1913ce81ac6e9582e3553dd90a955875f",
+      "rev_count": 1017464,
+      "rev_date": "2026-06-16T02:33:49Z",
+      "scrape_date": "2026-06-17T03:13:14.029360Z",
+      "stabilities": [
+        "stable",
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "9.11",
+      "outputs_to_install": [
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "info": "/nix/store/83kk1z6r4n7il426hl9qhgvjn3gw3i3k-coreutils-9.11-info",
+        "out": "/nix/store/y0ha8v4gh5vnwwmp2r0msfbdlvgwv2np-coreutils-9.11"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "coreutils",
+      "broken": false,
+      "derivation": "/nix/store/hcyz1x1w9dxfsmq5kv2abdw2qvnv766h-coreutils-9.11.drv",
+      "description": "GNU Core Utilities",
+      "install_id": "coreutils",
+      "license": "GPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=567a49d1913ce81ac6e9582e3553dd90a955875f",
+      "name": "coreutils-9.11",
+      "pname": "coreutils",
+      "rev": "567a49d1913ce81ac6e9582e3553dd90a955875f",
+      "rev_count": 1017464,
+      "rev_date": "2026-06-16T02:33:49Z",
+      "scrape_date": "2026-06-17T03:44:08.473821Z",
+      "stabilities": [
+        "stable",
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "9.11",
+      "outputs_to_install": [
+        "out",
+        "out",
+        "out",
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/p2vk0ll7l8dp5n203ffrvjpj491h6x90-coreutils-9.11-debug",
+        "info": "/nix/store/c96my4whwlw38gqj39370k93bbbrwn3h-coreutils-9.11-info",
+        "out": "/nix/store/9bhf1ff1kwhmyynws5jkjp8k7pkh6kix-coreutils-9.11"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "coreutils",
+      "broken": false,
+      "derivation": "/nix/store/9hnqb5qhawavdjqys5bvfy84wyw3n8hd-coreutils-9.11.drv",
+      "description": "GNU Core Utilities",
+      "install_id": "coreutils",
+      "license": "GPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=567a49d1913ce81ac6e9582e3553dd90a955875f",
+      "name": "coreutils-9.11",
+      "pname": "coreutils",
+      "rev": "567a49d1913ce81ac6e9582e3553dd90a955875f",
+      "rev_count": 1017464,
+      "rev_date": "2026-06-16T02:33:49Z",
+      "scrape_date": "2026-06-17T04:13:06.288898Z",
+      "stabilities": [
+        "stable",
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "9.11",
+      "outputs_to_install": [
+        "out",
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "info": "/nix/store/6dkbcg1yv4z4h2md9yi5cgr8f6scsgsb-coreutils-9.11-info",
+        "out": "/nix/store/5m3k4f22kg542p2lr4ikk2xj6grlmvrg-coreutils-9.11"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "coreutils",
+      "broken": false,
+      "derivation": "/nix/store/08fg4a5d85pnlagm8qrk1pga0zkyjsxm-coreutils-9.11.drv",
+      "description": "GNU Core Utilities",
+      "install_id": "coreutils",
+      "license": "GPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=567a49d1913ce81ac6e9582e3553dd90a955875f",
+      "name": "coreutils-9.11",
+      "pname": "coreutils",
+      "rev": "567a49d1913ce81ac6e9582e3553dd90a955875f",
+      "rev_count": 1017464,
+      "rev_date": "2026-06-16T02:33:49Z",
+      "scrape_date": "2026-06-17T04:47:04.532402Z",
+      "stabilities": [
+        "stable",
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "9.11",
+      "outputs_to_install": [
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/gfcdh00xkdhrd6qqz1gxdlq7ba5xkyaq-coreutils-9.11-debug",
+        "info": "/nix/store/77sgl4gzlhg90154z7qk1fqs2qpvsqs8-coreutils-9.11-info",
+        "out": "/nix/store/9ypz3flqsrl5xl495mm8h645gadjsxi1-coreutils-9.11"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
       "attr_path": "flox-ai",
       "broken": false,
       "derivation": "/nix/store/zp4w0cwp0sxbdch8fij6ifa2rpww45gi-flox-ai-0.8.0.drv",
@@ -159,7 +315,7 @@
       "rev": "69304793cb90e07c2adefd7a05f0f678aed9bf55",
       "rev_count": 14161,
       "rev_date": "2026-07-13T15:44:29Z",
-      "scrape_date": "2026-07-16T15:37:13.280498Z",
+      "scrape_date": "2026-07-16T15:38:52.429812Z",
       "stabilities": [
         "stable",
         "staging",
@@ -190,7 +346,7 @@
       "rev": "69304793cb90e07c2adefd7a05f0f678aed9bf55",
       "rev_count": 14161,
       "rev_date": "2026-07-13T15:44:29Z",
-      "scrape_date": "2026-07-16T15:37:13.280506Z",
+      "scrape_date": "2026-07-16T15:38:52.429814Z",
       "stabilities": [
         "stable",
         "staging",
@@ -221,7 +377,7 @@
       "rev": "69304793cb90e07c2adefd7a05f0f678aed9bf55",
       "rev_count": 14161,
       "rev_date": "2026-07-13T15:44:29Z",
-      "scrape_date": "2026-07-16T15:37:13.280507Z",
+      "scrape_date": "2026-07-16T15:38:52.429815Z",
       "stabilities": [
         "stable",
         "staging",
@@ -252,7 +408,7 @@
       "rev": "69304793cb90e07c2adefd7a05f0f678aed9bf55",
       "rev_count": 14161,
       "rev_date": "2026-07-13T15:44:29Z",
-      "scrape_date": "2026-07-16T15:37:13.280508Z",
+      "scrape_date": "2026-07-16T15:38:52.429816Z",
       "stabilities": [
         "stable",
         "staging",
