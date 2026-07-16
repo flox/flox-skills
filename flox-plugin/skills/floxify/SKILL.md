@@ -370,9 +370,16 @@ Resolving packages...
 
 - **Node.js**: search `"nodejs <major>"` — prefer `nodejs_22` over `nodejs`
 - **Python**: search `"python <major.minor>"` — prefer `python312` over `python`
+- **Go**: search `"go <major.minor>"` — prefer the versioned `go_1_23` over bare `go`
 - **PostgreSQL**: search `"postgresql <major>"` not `"postgres"` — catalog name differs
 - **Rust**: search `"cargo"` and `"rustc"` separately; also `"clippy"` and `"rustfmt"` for dev tooling
 - **Elixir**: search `"elixir"` only — Erlang/OTP is bundled; do NOT search "erlang" separately
+- **PHP**: search `"php <major.minor>"`; the catalog exposes PHP as a versioned
+  package (verify the exact name with `flox show`). Extensions come from a `php`
+  variant, not separate `ext-*` packages — resolve what you can and list the rest in ✗
+- **Deno**: a `deno.json`/`deno.jsonc` or a `*-edge-runtime` compose image (e.g.
+  Supabase edge functions) means a SECOND runtime — search `"deno"` and pin it
+  alongside `nodejs`. A monorepo that pins only Node silently drops the edge-functions runtime
 - **Flutter**: search `"flutter"` only — Dart SDK is bundled; do NOT search "dart" separately
 - **Mise / asdf** (`.mise.toml` / `.tool-versions`): each `key = "version"` is an independent search; `python = "3.12.3"` → search `"python 3.12"`
 - **Conda** (`environment.yml`): search top-level `dependencies:` binaries only; skip `- pip:` entries (handle via uv)
@@ -386,6 +393,15 @@ Resolving packages...
 2. For unversioned tools, pick the plain name (`redis`, `cmake`, `jq`)
 3. If ambiguous, read the description in results to confirm intent
 4. If no match after 1–2 attempts: add to ✗ section, don't install
+
+**Resolve the VERSIONED name for a pinned runtime — the bare name can mislead.**
+When a runtime is pinned (`.ruby-version`, `.nvmrc`, `go.mod`, `requires-python`),
+`flox show <versioned>` (`flox show ruby_4_0`, `nodejs_24`, `go_1_23`, `python313`)
+is authoritative. The bare `flox show ruby` may report a *lower* ceiling that
+belongs to a different catalog entry — trusting it silently downgrades the
+runtime. Mastodon pins Ruby 4.0.6: `flox show ruby` tops out at 3.4.x, but
+`ruby_4_0` exists at 4.0.5. Search the versioned `pkg-path` first; fall back to
+the bare name only for genuinely unversioned tools.
 
 **Version mismatches:** If the catalog is one patch version behind the project's pin
 (e.g. project pins `node 24.14.0`, catalog has `24.13.0`): install the closest available,
@@ -410,8 +426,35 @@ Only install these when docker-compose does NOT already manage them.
 
 Other services in catalog (no specific dependency signal): `rabbitmq` (RabbitMQ).
 
-**Not in Flox catalog** — use docker-compose: ClickHouse, Kafka/Redpanda, Zookeeper, Cassandra.
-For Temporal: try `flox search temporal-cli` first (may exist as `temporalio-cli`).
+**Catalog presence does NOT mean "wire it as a Flox service."** A datastore can
+exist in the catalog and still be the wrong thing to run as a bare
+`[services.*]`. Wire directly only the *leaf* datastores the app depends on
+directly (usually `postgres`, `redis`). Defer a service to docker-compose or the
+project's own orchestrator when any of these hold:
+
+- the analyzer flags its compose service `config_coupled` — it mounts server
+  config files or `depends_on` other services (a bare package can't reproduce that),
+- it's reached only *transitively*, through another service's dependency graph, or
+- it's a customized image (e.g. `supabase/postgres` ships extensions that stock
+  `postgresql` lacks — note the caveat and wire stock postgres for plain dev only).
+
+ClickHouse and Kafka ARE in the catalog now, but PostHog's ClickHouse mounts
+server config and depends on kafka/zookeeper, and Sentry's ClickHouse/Kafka
+arrive transitively through snuba's `devservices` graph — both belong to their
+project's orchestrator, not a Flox `[services.*]`. Start them via docker-compose
+(install `docker-compose`, bring them up in the hook when Docker is available)
+or hand off to the orchestrator, and say so in ⚠ — never hallucinate a catalog
+package for them, and never silently drop them. Truly-absent-from-catalog:
+Zookeeper, Cassandra. For Temporal: try `flox search temporal-cli` first.
+
+**Native C-extension system libraries often live in the `Dockerfile`, `Aptfile`,
+or `Brewfile` — not the language manifest.** The analyzer scans `Dockerfile`
+`RUN apt-get install` and `Aptfile` lines for these and maps them to catalog
+search terms; still confirm each with `flox show`. Mastodon's `vips` / `ffmpeg` /
+`icu` / `libidn` are in its Aptfile + Dockerfile, not the Gemfile — and `ffmpeg`
+never appears as a gem at all. Watch the specific-variant gotchas: `idn-ruby`
+needs GNU libidn v1 (`libidn`), not `libidn2`; `charlock_holmes` links system
+ICU (`icu`).
 
 ### Build tool signals
 
@@ -437,6 +480,14 @@ If the project uses a custom tool to manage services and there is **no `docker-c
 at the root, do NOT try to wire services via docker-compose. List them in ⚠ with the
 tool name and the command to start them. Don't claim these are a gap.
 
+**When there's no root `docker-compose.yml`, the service topology usually lives
+elsewhere — probe before concluding a project has no services:**
+`devservices/config.yml` (Sentry), `compose.yaml` / `compose.yml`, `Procfile` /
+`Procfile.dev`, `.devcontainer/`, `devenv/`, `Tiltfile`, and dev targets in the
+`Makefile`. Sentry's entire postgres/redis/clickhouse/kafka topology is
+invisible if you only look for `docker-compose.yml`. The analyzer surfaces the
+common orchestrators (`orchestrators` field) and any `compose*.yml` it finds.
+
 | Signal | Orchestrator | What to say in ⚠ |
 |--------|-------------|-------------------|
 | `devservices/` directory | Sentry devservices | `managed by devservices — run: devservices up` |
@@ -449,9 +500,11 @@ tool name and the command to start them. Don't claim these are a gap.
 For Tilt/Skaffold/DevSpace/k3d projects: do NOT install docker-compose via Flox.
 Flox's role is the developer toolchain (runtimes, CLI tools) — the orchestrator owns services.
 
-### Services not in Flox catalog — wire via docker-compose
+### Services deferred to docker-compose — wire the hook
 
-ClickHouse, Kafka, Zookeeper, Cassandra aren't in the catalog. Wire them so
+Applies to services you are NOT wiring as `[services.*]`: the genuinely
+absent-from-catalog ones (Zookeeper, Cassandra) and the present-but-coupled
+ones deferred by the rules above (e.g. ClickHouse, Kafka). Wire them so
 `flox activate` still starts everything:
 
 1. Install `docker-compose` via Flox (it IS in the catalog)
@@ -599,6 +652,24 @@ on-activate = """
 ```
 - pnpm → `pnpm-lock.yaml` staleness check, `pnpm install --frozen-lockfile --silent`
 - yarn → `yarn.lock` staleness check, `yarn install --silent`
+
+**Pinned package manager (`packageManager` field / `engines.pnpm`).** When the
+repo pins an exact pnpm/yarn (`"packageManager": "pnpm@10.24.0"`), do NOT install
+a catalog `pnpm` — the catalog's `pnpm_<major>` floor can exceed the pin, and an
+`.npmrc` `engine-strict=true` will then reject it. Provision the exact version
+with **corepack** (ships with the `nodejs` package) into a *writable* cache dir
+(the Nix node prefix is a read-only store path):
+
+```toml
+[hook]
+on-activate = """
+  export COREPACK_HOME="$FLOX_ENV_CACHE/corepack"
+  mkdir -p "$FLOX_ENV_CACHE/node-bin"
+  corepack enable --install-directory "$FLOX_ENV_CACHE/node-bin" pnpm
+  export PATH="$FLOX_ENV_CACHE/node-bin:$PATH"
+  pnpm install --frozen-lockfile
+"""
+```
 
 **Go**
 ```toml
