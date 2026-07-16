@@ -6,10 +6,10 @@
   `refs/heads/main`, committed 2026-07-15 22:10 +0200,
   "chore(renovate): bundle major updates, use chore commit type (#38470)")
 - **Ecosystem**: go (Go backend + Vite/pnpm TypeScript frontend)
-- **Validation level**: static + catalog-verified. Every pkg-path below
-  confirmed with `flox show` / `flox search --all` on flox 1.13.2. The
-  manifest was NOT `flox activate`d (per task constraint); TOML validated
-  with `tomllib`.
+- **Validation level**: static + per-package verified; not whole-manifest
+  lock-tested. Every pkg-path below confirmed with `flox show` /
+  `flox search --all` on flox 1.13.2. The manifest was NOT `flox
+  activate`d (per task constraint); TOML validated with `tomllib`.
 
 > Note on `git ls-remote ... main`: the remote exposes **two** refs matching
 > `main` — `refs/for/main` (`4afec63b1306`, a Gerrit-style review ref) and
@@ -64,6 +64,29 @@
 | `pkg-config` | **0.29.2** | **yes** |
 | `sqlite` | **3.53.1** | **yes** |
 | `postgresql` (search) | bare + `postgresql_10`..`_19`, `_jit` variants | no (optional, not wired) |
+
+### AI-457 re-verification (per-system availability, 2026-07-16)
+
+| pkg-path | Result | Decision |
+|----------|--------|----------|
+| `flox show nodejs_26` | `26.5.0` (aarch64-darwin, aarch64-linux, x86_64-linux only) | missing x86_64-darwin |
+| `flox show pnpm` | `11.10.0` present (aarch64-darwin, aarch64-linux, x86_64-linux only) | missing x86_64-darwin |
+| `flox show sqlite` | `3.53.1` (aarch64-darwin, aarch64-linux, x86_64-linux only) | missing x86_64-darwin |
+| `flox show go_1_26`, `git`, `git-lfs`, `gcc`, `gnumake`, `pkg-config` | all four systems, no restriction | unaffected |
+
+All three of nodejs_26 (frontend runtime), pnpm (frontend package
+manager), and sqlite (zero-config default DB) are hard dependencies for
+the documented dev flow, so `[options].systems` drops `x86_64-darwin`
+rather than scoping per-package overrides — the env can't build or run
+gitea's default path on Intel macOS regardless of which one is asked
+for.
+
+**Activation validation.** Unlike mastodon/posthog/sentry/plausible, this
+manifest resolved and activated cleanly on the first `flox activate`
+(x86_64-linux, throwaway directory, no real gitea checkout) with no
+`pkg-group` split needed — go_1_26/nodejs_26/pnpm/sqlite/git/git-lfs/gcc/
+gnumake/pkg-config apparently share a common catalog page. Hook output
+confirmed: `gitea env ready. Build: 'make build' ...` printed as expected.
 
 ## Versioned-vs-bare pkg-path finding
 

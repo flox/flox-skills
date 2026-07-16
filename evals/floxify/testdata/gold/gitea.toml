@@ -94,3 +94,11 @@ on-activate = '''
 # Re-export the Go bin dir for interactive shells (installed tools, air, etc.).
 bash = 'export GOPATH="$FLOX_ENV_CACHE/go"; export PATH="$GOPATH/bin:$PATH"'
 zsh = 'export GOPATH="$FLOX_ENV_CACHE/go"; export PATH="$GOPATH/bin:$PATH"'
+
+[options]
+# x86_64-darwin excluded: at this pin, nodejs_26@26.5.0, pnpm@11.10.0, and
+# sqlite@3.53.1 (all latest, confirmed live via `flox show`) lack an
+# x86_64-darwin build. nodejs_26 and pnpm are hard deps for `make build`'s
+# frontend step and sqlite is the zero-config default DB, so the env can't
+# activate on Intel macOS regardless. See gitea-notes.md.
+systems = ["x86_64-linux", "aarch64-linux", "aarch64-darwin"]

@@ -17,12 +17,32 @@ schema-version = "1.13.0"
 
 [install]
 # --- Language runtimes ---
+# python313, nodejs_24, uv, and pnpm_10 all lack an x86_64-darwin build at
+# this pin/latest (confirmed live via `flox show`, AI-457). Rather than
+# dropping x86_64-darwin from the whole environment's [options].systems
+# (which would also strand postgresql/redis/xmlsec/libxml2/libxslt/openssl/
+# pkg-config/watchman -- all of which DO build there), each constrained
+# package gets its own `systems` override -- the platform-conditional
+# pattern the floxify skill itself documents (SKILL.md "Platform-
+# conditional packages"). They also share a dedicated pkg-group: `flox
+# activate` confirmed live that `systems` alone is not enough -- leaving
+# them in the shared toplevel group still failed resolution ("constraints
+# for group 'toplevel' are too tight") because no single catalog page has
+# all of toplevel's packages together. See sentry-notes.md.
 python313.pkg-path = "python313"          # .python-version -> 3.13.1
+python313.systems = ["x86_64-linux", "aarch64-linux", "aarch64-darwin"]
+python313.pkg-group = "no-x86-darwin"
 nodejs_24.pkg-path = "nodejs_24"          # .node-version -> 24.14.0 (catalog nearest 24.14.1)
+nodejs_24.systems = ["x86_64-linux", "aarch64-linux", "aarch64-darwin"]
+nodejs_24.pkg-group = "no-x86-darwin"
 
 # --- Package managers (mirror Sentry's dev bootstrap) ---
 uv.pkg-path = "uv"                        # pyproject [tool.uv] + uv.lock; `uv sync`
+uv.systems = ["x86_64-linux", "aarch64-linux", "aarch64-darwin"]
+uv.pkg-group = "no-x86-darwin"
 pnpm_10.pkg-path = "pnpm_10"              # package.json packageManager = pnpm@10.30.2
+pnpm_10.systems = ["x86_64-linux", "aarch64-linux", "aarch64-darwin"]
+pnpm_10.pkg-group = "no-x86-darwin"
 
 # --- Direct datastores (wired as Flox services below) ---
 postgresql.pkg-path = "postgresql"        # devservices dep `postgres` (sentry-shared-postgres)
@@ -34,11 +54,19 @@ redis.version = "7.2"                     # repo does not pin; 7.2 = stable Sent
 # xmlsec>=1.3.17 + python3-saml need the xmlsec C lib, libxml2, libxslt,
 # openssl; lxml>=6.1.0 needs libxml2/libxslt; cryptography needs openssl.
 # pkg-config lets the build find them. (Sentry's own flow avoids these by
-# pulling prebuilt wheels from a private index -- see notes.)
+# pulling prebuilt wheels from a private index -- see notes.) Each of these
+# defaults to a partial output set (see notes) -- `dev` (headers) is added
+# so a from-source build can actually link against them.
 xmlsec.pkg-path = "xmlsec"
+xmlsec.outputs = ["out", "dev"]
 libxml2.pkg-path = "libxml2"
+libxml2.outputs = ["out", "dev"]
 libxslt.pkg-path = "libxslt"
+libxslt.outputs = ["out", "dev"]
 openssl.pkg-path = "openssl"
+openssl.outputs = ["out", "dev"]
+openssl.systems = ["x86_64-linux", "aarch64-linux", "aarch64-darwin"]
+openssl.pkg-group = "no-x86-darwin"
 pkg-config.pkg-path = "pkg-config"
 
 # --- Dev tooling ---

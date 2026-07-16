@@ -43,6 +43,50 @@ verified 3.13.13.)
 `flox activate` deliberately NOT run (heavy closure / disk). Verified via
 search/show only.
 
+### AI-457 re-verification (2026-07-16)
+
+The manifest previously pinned `python3.version = "3.13.13"`, but `flox
+show python313`'s "Other versions" list carries a catalog-specific prefix
+(`python313@python3-3.13.13`, not `python313@3.13.13`) — the bare-semver
+pin does not resolve at all (`catalog-version-missing`). Fixed to the exact
+string `flox show` prints: `python3.version = "python3-3.13.13"`.
+
+Live re-check of per-system availability (flox 1.13.2, 2026-07-16):
+
+| pkg-path | Result | Note |
+|----------|--------|------|
+| `flox show python313` | `python3-3.13.13` has **no** systems parenthetical | present on all four systems |
+| `flox show uv` | latest `0.11.26` (aarch64-darwin, aarch64-linux, x86_64-linux only) | missing x86_64-darwin |
+| `flox show docker-compose` | latest `5.3.1` (aarch64-darwin, aarch64-linux, x86_64-linux only) | missing x86_64-darwin |
+| `flox show nodejs_24` | `24.13.0` (pinned) — no parenthetical | present on all four systems |
+| `flox show postgresql_15` | `15.12` (pinned) — no parenthetical | present on all four systems |
+| `flox show redis` | `7.2.7` (pinned) — no parenthetical | present on all four systems |
+
+Correction to an earlier claim: the fixed python313 pin (`python3-3.13.13`)
+is available on all four systems, not "x86_64-linux only" — that was an
+unverified assumption from the ticket that this pass corrected against
+live `flox show` output before writing it here. The actual blockers for
+x86_64-darwin are `uv` (installs every Python dependency) and
+`docker-compose` (brings up ClickHouse, a hard dependency per the file
+header), both unpinned and both missing an x86_64-darwin build at latest.
+`[options].systems` now drops `x86_64-darwin` for that reason.
+
+Also added `postgresql.outputs = ["out", "lib", "dev"]` (default is
+`out`+`man` only) — not strictly required since psycopg ships binary
+wheels, but exposes `pg_config`/`libpq.so`/headers for anyone who does
+need them, consistent with the mastodon golden's pattern.
+
+**Activation validation.** `[options].systems` alone was not enough to
+activate: `flox activate` (x86_64-linux, throwaway directory, no real
+posthog checkout) failed with `constraints for group 'toplevel' are too
+tight` even after the systems fix -- `python313@python3-3.13.13`,
+`nodejs_24@24.13.0`, `postgresql_15@15.12`, and `redis@7.2.7` have no
+single shared catalog page as a group. Giving each of the four exact pins
+its own `pkg-group` resolved it; the manifest now activates cleanly (hook
+errors are only from the missing `pyproject.toml`/`package.json`/
+`docker-compose.dev.yml` in the scratch test directory, expected without a
+real checkout).
+
 ## Chosen versions + mismatches
 
 | Package | Pinned | Rationale / mismatch |
@@ -119,8 +163,9 @@ needed, out of scope for a minimal functional Flox env.
 
 ## Validation level
 
-Grounded (every value traced to a repo file) + catalog-verified (every pkg-path
-and version confirmed via `flox show`/`flox search --all`). NOT activation-tested.
+Grounded (every value traced to a repo file) + per-package verified (every
+pkg-path and version confirmed via `flox show`/`flox search --all`); not
+whole-manifest lock-tested. NOT activation-tested.
 
 ## OBSERVATIONS for improving the floxify skill
 

@@ -7,13 +7,25 @@ schema-version = "1.13.0"
 # and a Kafka/ZooKeeper backing that a bare package cannot reproduce.
 
 [install]
-# Python 3.13.13 — pyproject.toml `requires-python = "==3.13.13"`
+# Each exact-pinned package below gets its own pkg-group: AI-457 found
+# live (`flox activate`) that leaving them together in the shared toplevel
+# group fails resolution ("constraints for group 'toplevel' are too
+# tight") even though each resolves fine individually via `flox show` --
+# no single catalog page contains all four exact pins together. Isolating
+# each into its own group lets it resolve against its own page.
+
+# Python 3.13.13 — pyproject.toml `requires-python = "==3.13.13"`. The
+# catalog's version string carries a "python3-" prefix (confirmed via
+# `flox show python313`) -- pin the exact string it prints, not the bare
+# semver a human would write, or the pin does not resolve at all.
 python3.pkg-path = "python313"
-python3.version = "3.13.13"
+python3.version = "python3-3.13.13"
+python3.pkg-group = "python313"
 
 # Node 24 — .nvmrc `v24.13.0`; package.json engines.node ">=24 <25"
 nodejs.pkg-path = "nodejs_24"
 nodejs.version = "24.13.0"
+nodejs.pkg-group = "nodejs-24"
 
 # uv — uv.lock present; pyproject.toml has [tool.uv] (the Python package manager)
 uv.pkg-path = "uv"
@@ -22,11 +34,14 @@ uv.pkg-path = "uv"
 # Provides initdb/postgres/createdb/pg_isready for [services.postgres].
 postgresql.pkg-path = "postgresql_15"
 postgresql.version = "15.12"
+postgresql.outputs = ["out", "lib", "dev"]  # default is out+man only; exposes libpq/pg_config even though psycopg[binary] ships its own (see notes: "supplies libpq/pg_config as a bonus")
+postgresql.pkg-group = "postgresql-15"
 
 # Redis 7.2 server — docker-compose.base.yml `redis7` = redis:7.2-alpine
 # Provides redis-server for [services.redis].
 redis.pkg-path = "redis"
 redis.version = "7.2.7"
+redis.pkg-group = "redis-72"
 
 # docker-compose — brings up ClickHouse (and its kafka/zookeeper deps) from
 # PostHog's pre-configured image. ClickHouse mounts config.xml/users-dev.xml/
@@ -106,3 +121,13 @@ command = '''
     --maxmemory-policy allkeys-lru \
     --dir "$FLOX_ENV_CACHE/redis"
 '''
+
+[options]
+# x86_64-darwin excluded: at latest (unpinned), uv and docker-compose
+# (confirmed live via `flox show`) both lack an x86_64-darwin build. uv
+# installs every Python dependency and docker-compose brings up ClickHouse
+# (a hard dependency per the header comment above), so the env can't
+# activate on Intel macOS regardless. python313@python3-3.13.13 itself DOES
+# have an x86_64-darwin build -- it is uv/docker-compose that block this
+# platform, not the interpreter. See posthog-notes.md.
+systems = ["x86_64-linux", "aarch64-linux", "aarch64-darwin"]
