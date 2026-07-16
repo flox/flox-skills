@@ -549,7 +549,9 @@ def process_entry(entry, skill_dir, activate=False, services=False,
         # The catalog sub-leg is tied to --activate, same opt-in gate the
         # rest of Tier 2's live-flox behavior already uses; it degrades to
         # a clean skip when flox is unavailable regardless (check_catalog's
-        # own shutil.which guard).
+        # own shutil.which guard). The re-scan also walks .flox/ and any
+        # activation artifacts; detect's verdict-bearing parsers read only
+        # committed input files, so those extras are inert.
         verify_result = _run_verify(
             skill_dir, tmp, manifest_text, check_catalog_live=activate,
         )
