@@ -401,14 +401,53 @@ Resolving packages...
 3. If ambiguous, read the description in results to confirm intent
 4. If no match after 1–2 attempts: add to ✗ section, don't install
 
-**Resolve the VERSIONED name for a pinned runtime — the bare name can mislead.**
-When a runtime is pinned (`.ruby-version`, `.nvmrc`, `go.mod`, `requires-python`),
-`flox show <versioned>` (`flox show ruby_4_0`, `nodejs_24`, `go_1_23`, `python313`)
-is authoritative. The bare `flox show ruby` may report a *lower* ceiling that
-belongs to a different catalog entry — trusting it silently downgrades the
-runtime. Mastodon pins Ruby 4.0.6: `flox show ruby` tops out at 3.4.x, but
-`ruby_4_0` exists at 4.0.5. Search the versioned `pkg-path` first; fall back to
-the bare name only for genuinely unversioned tools.
+### Reading `flox show` correctly
+
+Every wrong catalog claim found in review (both AI-451's false-hallucination
+accusation and AI-455's per-system misses) traced back to the same root
+cause: reading only the `Latest:` headline and stopping there. `flox show
+<pkg-path>` prints far more than that one line — read all of it before
+asserting anything about a package:
+
+1. **Read the FULL version list, not just `Latest:`.** The `Other versions:`
+   block is the actual catalog, often 20+ entries deep. A version the project
+   pins (`elixir_1_19@1.19.5`, say) can be correct and present even when it
+   isn't the newest entry — accusing it of being hallucinated because it
+   doesn't match `Latest:` is exactly AI-451's mistake. Scroll the whole list
+   before concluding a version doesn't exist.
+2. **Check the systems annotation for the SPECIFIC version you're pinning,
+   not the top-of-file `Systems:` line.** That top line describes `Latest:`
+   only. Each `Other versions:` entry carries its own systems: no
+   parenthetical means all four platforms; `(sys1, sys2 only)` restricts it
+   to exactly those. A version can lose (or never have had) a build for a
+   platform the top-line summary doesn't reflect — e.g. `nodejs_24`'s newest
+   build lacks `x86_64-darwin` even when older 24.x builds have it. If
+   `options.systems` (or the package's own `systems` override) declares a
+   platform, verify the PINNED version's own parenthetical covers it —
+   `verify.py`'s catalog check (Phase 3c Step 4) automates exactly this, but
+   read it yourself here too rather than relying on it to catch a bad pin
+   after the fact.
+3. **Query the versioned `pkg-path` directly — never infer a ceiling from the
+   bare name.** `flox show <versioned>` (`flox show ruby_4_0`, `nodejs_24`,
+   `go_1_23`, `python313`) is authoritative for a pinned runtime. The bare
+   `flox show ruby` may report a *lower* ceiling that belongs to a different
+   catalog entry — trusting it silently downgrades the runtime. Mastodon
+   pins Ruby 4.0.6: `flox show ruby` tops out at 3.4.x, but `ruby_4_0` exists
+   at 4.0.5. Search the versioned `pkg-path` first; fall back to the bare
+   name only for genuinely unversioned tools.
+4. **When the question is package CONTENTS (does this build include a given
+   extension/module?), don't infer it from the name — execute it.**
+   `flox show` describes outputs and versions; it does not enumerate what's
+   compiled into a package. `flox run -p php85 -- php -m` lists PHP's actual
+   loaded modules; the equivalent for any interpreter/toolchain is to run it
+   and ask, not to guess from the catalog description.
+
+The version-string format matters too: some catalog entries carry a package-
+specific prefix that doesn't match the bare version a human would write
+(`python313`'s versions read `python3-3.13.13`, not `3.13.13`) — pin the
+exact string `flox show` prints, not a normalized guess. `verify.py`'s
+catalog check treats a mismatched prefix as a real, non-resolving pin,
+because it is one.
 
 **Version mismatches:** If the catalog is one patch version behind the project's pin
 (e.g. project pins `node 24.14.0`, catalog has `24.13.0`): install the closest available,
@@ -498,6 +537,25 @@ packages in the *runner* stage are runtime-only and do NOT imply a build input.
 Lemmy's runner-stage `libssl-dev` does not mean openssl is a build dep — its
 `Cargo.lock` has no `openssl-sys`. Don't promote a runner-stage lib to `[install]`
 on the strength of an `apt-get` line alone.
+
+**A native library's `outputs` are not always installed by default — check
+before assuming headers or a shared lib are present.** `flox show <pkg-path>`
+prints an `Outputs:` line (`dev, doc, jit, lib, man*, out*, ...` — `*` marks
+what installs by default). When a package feeds a native build — a
+C-extension gem (`ruby-vips`, `charlock_holmes`), a Rust `*-sys` crate
+(`pq-sys`), a Python native wheel built from source (non-binary `psycopg2`,
+`lxml`) — the compiler needs headers that live in the `dev` output, and that
+output is frequently NOT starred as default. Worse, a package's default
+outputs can omit the piece the build actually links against: `vips`'
+`Outputs:` line is `bin*, dev, man*, out` — `out` (which holds `libvips.so`)
+is NOT starred, so a plain `vips.pkg-path = "vips"` install is missing the
+shared library a native build needs. When you find this, add
+`<id>.outputs = ["out", "dev"]` (or `"all"`) to the `[install]` entry rather
+than assuming the default set is enough. `verify.py`'s outputs heuristic
+(Phase 3c Step 4) flags exactly this shape as an ADVISORY note when the
+analyzer's `native_hints` name a package with no `outputs` declared — read
+the note, but the underlying check (`flox show <pkg-path>`'s `Outputs:`
+line) is the same one you'd run by hand.
 
 ### Build tool signals
 
