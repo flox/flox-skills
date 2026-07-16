@@ -1,0 +1,96 @@
+schema-version = "1.13.0"
+# Golden reference for gitea @ 11363e2f0cd6
+#
+# go-gitea/gitea is a self-hosted Git service: a Go backend plus a
+# Vite/pnpm TypeScript frontend, driven entirely through the Makefile
+# (`make build` = backend + frontend; `make deps` installs both). The
+# repo ships its own Nix devShell (flake.nix) that authoritatively pins
+# the toolchain -- this manifest mirrors it, with one deliberate
+# correction noted below.
+#
+# Toolchain provenance (file -> value):
+#   go.mod        -> go 1.26.5   (directive; catalog ceiling is go_1_26 = 1.26.4)
+#   flake.nix     -> pkgs.go_1_26, pkgs.nodejs_26, pkgs.pnpm_10, sqlite, git,
+#                    git-lfs, gnumake, pkg-config
+#   package.json  -> engines.node >= 22.18.0; packageManager = pnpm@11.10.0;
+#                    engines.pnpm >= 11.0.0
+#   Makefile      -> CGO_ENABLED ?= 0 (pure-Go default; CGO only when TAGS
+#                    include sqlite_mattn or pam); node_modules target runs
+#                    `pnpm install --frozen-lockfile`
+#
+# DATABASE: gitea's zero-config default is embedded SQLite (Makefile CI
+# default GITEA_TEST_DATABASE=sqlite; custom/conf/app.example.ini shows
+# DB_TYPE=sqlite3 as the serverless option). There is NO docker-compose.yml
+# in the repo. PostgreSQL, MySQL and MSSQL are optional, opt-in alternatives
+# -- deliberately NOT wired here so the env stays zero-config. To use
+# Postgres instead: add `postgresql.pkg-path = "postgresql"` (or a pinned
+# major, e.g. postgresql_16) to [install], add a [services.postgres] block
+# with PGDATA under $FLOX_ENV_CACHE, and set DB_TYPE=postgres in app.ini.
+# See gitea-notes.md for the full rationale.
+#
+# CORRECTION vs flake.nix (flake is stale relative to package.json):
+#   pnpm: flake pins pnpm_10 (10.x), which VIOLATES engines.pnpm >= 11.0.0
+#   and the packageManager pin pnpm@11.10.0. package.json's packageManager
+#   is authoritative (pnpm reads and enforces it), so this manifest pins
+#   pnpm 11.10.0 exactly. (go and node match the flake.)
+
+[install]
+# --- Language runtimes (versioned pkg-paths) ---
+go.pkg-path = "go_1_26"             # go.mod `go 1.26.5`; flake pkgs.go_1_26 -> catalog 1.26.4
+nodejs.pkg-path = "nodejs_26"       # flake pkgs.nodejs_26 -> 26.5.0 (engines.node >= 22.18.0)
+
+# --- Frontend package manager ---
+# packageManager = "pnpm@11.10.0" in package.json is authoritative. Pinned
+# exactly via the bare `pnpm` pkg-path (the pnpm_11 pkg-path only carries
+# 11.11.0). Alternative: install `corepack` and run `corepack enable pnpm`
+# to auto-provision the pinned pnpm@11.10.0 from the packageManager field.
+pnpm.pkg-path = "pnpm"
+pnpm.version = "11.10.0"
+
+# --- Version control (git is a gitea RUNTIME dependency; LFS support) ---
+git.pkg-path = "git"                # flake pkgs.git -> 2.54.0
+git-lfs.pkg-path = "git-lfs"        # flake pkgs.git-lfs -> 3.7.1
+
+# --- Build driver (all dev tasks run via `make`) ---
+gnumake.pkg-path = "gnumake"        # flake pkgs.gnumake -> 4.4.1
+
+# --- C toolchain for the OPTIONAL CGO SQLite build ---
+# Default `make build` is pure-Go (CGO_ENABLED=0), so gcc is not required
+# for the zero-config path. gcc + pkg-config are needed only when building
+# with the mattn/go-sqlite3 CGO driver (TAGS include sqlite_mattn, usually
+# `TAGS='sqlite sqlite_unlock_notify'`) or the `pam` tag. Included so both
+# build modes work; mirrors the flake's stdenv cc + pkg-config.
+gcc.pkg-path = "gcc"                # -> 15.2.0
+pkg-config.pkg-path = "pkg-config"  # flake pkgs.pkg-config -> 0.29.2
+
+# --- SQLite CLI (inspect the default dev database) ---
+sqlite.pkg-path = "sqlite"          # flake pkgs.sqlite -> 3.53.1; DB_TYPE=sqlite3 default
+
+[hook]
+on-activate = '''
+  # --- Go: module + build caches under the env cache (idiomatic, per-project) ---
+  export GOPATH="$FLOX_ENV_CACHE/go"
+  export GOCACHE="$FLOX_ENV_CACHE/go/cache"
+  export GOMODCACHE="$FLOX_ENV_CACHE/go/pkg/mod"
+  mkdir -p "$GOPATH" "$GOCACHE" "$GOMODCACHE"
+  export PATH="$GOPATH/bin:$PATH"
+
+  # NOTE: go.mod requires `go 1.26.5`; the catalog's go_1_26 is 1.26.4. With
+  # the default GOTOOLCHAIN=auto, `go build` fetches go1.26.5 on first use
+  # (needs network). Set GOTOOLCHAIN=local to force the flox-provided 1.26.4
+  # if you accept the one-patch gap.
+
+  # --- Frontend: install pinned deps, mirroring `make node_modules` ---
+  if [ -f pnpm-lock.yaml ]; then
+    pnpm install --frozen-lockfile || \
+      echo "pnpm install failed -- check node/pnpm availability"
+  fi
+
+  echo "gitea env ready. Build: 'make build' (Go backend + Vite frontend)."
+  echo "Run dev server: './gitea web' (zero-config SQLite under ./data)."
+'''
+
+[profile]
+# Re-export the Go bin dir for interactive shells (installed tools, air, etc.).
+bash = 'export GOPATH="$FLOX_ENV_CACHE/go"; export PATH="$GOPATH/bin:$PATH"'
+zsh = 'export GOPATH="$FLOX_ENV_CACHE/go"; export PATH="$GOPATH/bin:$PATH"'
