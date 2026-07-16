@@ -19,12 +19,25 @@ schema-version = "1.13.0"
 # packageManager "pnpm@10.24.0" (pnpm 10 targets Node 22 LTS).
 nodejs_22.pkg-path = "nodejs_22"
 
+# Pinned package manager. package.json packageManager = "pnpm@10.24.0" and
+# .npmrc engine-strict=true with engines.pnpm "10.24". The catalog's
+# pnpm_10 pkg-path carries 10.24.0 exactly (confirmed live via `flox show
+# pnpm_10` -- AI-457 corrected an earlier claim that the floor was 10.25.0
+# and would reject this pin under engine-strict; that premise was false).
+# Installed directly rather than via corepack.
+pnpm_10.pkg-path = "pnpm_10"
+pnpm_10.version = "10.24.0"
+
 # Second runtime for the edge functions in supabase/functions.
 # Provenance: supabase/functions/deno.json; index.ts files use Deno.serve /
 # Deno.env.get and import from https://deno.land/std and jsr:@supabase/...;
 # docker/docker-compose.yml runs them via supabase/edge-runtime:v1.74.0
 # (a Deno-based runtime). Omitting Deno is the "monorepo only sees npm" bug.
 deno.pkg-path = "deno"
+# deno@2.9.2 (latest, unpinned) has no x86_64-darwin build (confirmed live);
+# nodejs_22 and pnpm_10 both build there, so this package alone is scoped
+# rather than dropping x86_64-darwin for the whole environment.
+deno.systems = ["x86_64-linux", "aarch64-linux", "aarch64-darwin"]
 
 # Local-dev Postgres for plain application development.
 # Provenance: docker/docker-compose.yml `db` image supabase/postgres:17.6.1.136
@@ -49,21 +62,10 @@ POSTGRES_DB = "postgres"
 
 [hook]
 on-activate = '''
-  # --- pnpm ---------------------------------------------------------------
-  # Provision the EXACT pnpm pinned by package.json ("packageManager":
-  # "pnpm@10.24.0") through corepack, which ships with nodejs_22. This is the
-  # only way to satisfy .npmrc `engine-strict=true` against engines.pnpm
-  # "10.24"; the catalog's pnpm_10 floor is 10.25.0, which strict-engines
-  # would reject. corepack must write its shims to a WRITABLE dir (the Node
-  # prefix is a read-only Nix store path), so target $FLOX_ENV_CACHE.
-  export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-  export COREPACK_HOME="$FLOX_ENV_CACHE/corepack"
-  mkdir -p "$FLOX_ENV_CACHE/pnpm-shims"
-  export PATH="$FLOX_ENV_CACHE/pnpm-shims:$PATH"
-  corepack enable --install-directory "$FLOX_ENV_CACHE/pnpm-shims" pnpm 2>/dev/null || true
-
   # --- install the pnpm/turbo workspace -----------------------------------
-  # apps/*, packages/*, blocks/*, e2e/* (pnpm-workspace.yaml). Keep the
+  # apps/*, packages/*, blocks/*, e2e/* (pnpm-workspace.yaml). pnpm_10 at
+  # 10.24.0 is installed directly (see [install] -- catalog carries the
+  # exact packageManager pin, no corepack indirection needed). Keep the
   # content-addressable store inside the env cache (never an absolute path
   # outside the environment).
   pnpm install --frozen-lockfile --store-dir "$FLOX_ENV_CACHE/pnpm-store"

@@ -39,16 +39,46 @@ edge functions: og-images, search-embeddings (+ common/, deno.json)
 | Candidate | Command | Result | Chosen |
 |-----------|---------|--------|--------|
 | `nodejs_22` | `flox show nodejs_22` | nixpkgs, latest 22.23.1 | YES |
-| `deno` | `flox show deno` | nixpkgs, latest 2.9.2 | YES |
+| `deno` | `flox show deno` | nixpkgs, latest 2.9.2 | YES (systems-scoped, see AI-457 below) |
 | `postgresql_17` | `flox show postgresql_17` | nixpkgs, latest 17.10 | YES |
 | `postgresql_15` | `flox show postgresql_15` | nixpkgs, latest 15.18 | ref only |
 | `postgresql_{15,16,17,18}` | `flox search --all postgresql` | all present | — |
-| `pnpm_10` | `flox show pnpm_10` | nixpkgs, 10.25.0..10.34.5 | NOT installed (see below) |
+| `pnpm_10` | `flox show pnpm_10` | nixpkgs, 10.24.0..10.34.5 | YES, pinned 10.24.0 (AI-457 corrected — see below) |
 | `pnpm` | `flox show pnpm` | nixpkgs, latest 11.11.0 | ✗ (wrong major) |
 
 All package names/versions were confirmed against the live catalog with
 `flox search --all` / `flox show`. No `flox activate` was run. No name or
 version was guessed.
+
+## AI-457 re-verification (2026-07-16)
+
+**The pnpm corepack rationale was false.** The original notes said "the
+catalog's pnpm_10 floor is 10.25.0" and would reject the exact
+`packageManager: pnpm@10.24.0` pin under `.npmrc engine-strict=true`, so
+the manifest provisioned pnpm through corepack instead. Live re-check of
+the FULL `flox show pnpm_10` version list (not just the first page) shows
+`pnpm_10@10.24.0` present — it was there the whole time, just further down
+the list than whatever was read the first pass. Confirmed no
+per-version systems restriction on 10.24.0 either (no parenthetical),
+so it resolves on all four platforms. Manifest now installs
+`pnpm_10.pkg-path = "pnpm_10"` / `.version = "10.24.0"` directly; the
+corepack indirection and its `$FLOX_ENV_CACHE/pnpm-shims` writable-dir
+workaround are removed from `[hook]`.
+
+**deno systems mismatch.** `flox show deno`'s latest (2.9.2, unpinned in
+the manifest) carries a systems parenthetical excluding x86_64-darwin —
+confirmed live. `nodejs_22` and `pnpm_10@10.24.0` both build on all four
+systems, so rather than dropping x86_64-darwin from the whole environment,
+`deno.systems` is scoped to the three platforms 2.9.2 actually supports.
+
+**Activation validation.** Unlike mastodon/posthog/sentry/plausible, this
+manifest resolved and activated cleanly on the first `flox activate`
+(x86_64-linux, throwaway directory, no real supabase checkout) with no
+`pkg-group` split needed — nodejs_22/pnpm_10@10.24.0/deno/postgresql_17
+apparently share a common catalog page even with deno's narrower
+`systems`. Hook failed on the expected `ERR_PNPM_NO_PKG_MANIFEST` (no real
+`package.json` in the scratch directory), confirming pnpm_10 itself
+resolved and ran.
 
 ## Chosen runtimes + caveats
 
@@ -75,17 +105,15 @@ the `docker-compose.pg15.yml` override and the Supabase CLI
 match the current docker default; swap to `postgresql_15` if pinning to the
 CLI/legacy path.
 
-### pnpm: why it is NOT in [install]
+### pnpm: installed directly from the catalog (AI-457 correction)
 The repo pins `packageManager: pnpm@10.24.0` AND sets `.npmrc
 engine-strict=true` with `engines.pnpm "10.24"` (i.e. the 10.24.x range).
-The catalog `pnpm_10` package starts at 10.25.0 — outside that range — so a
-catalog-pinned pnpm would be rejected by strict-engines on install. The
-faithful, functional path is to let **corepack** (bundled with `nodejs_22`)
-provision the exact pinned `pnpm@10.24.0` from the packageManager field.
-The on-activate hook enables corepack into a writable `$FLOX_ENV_CACHE`
-shim dir (the Node prefix is a read-only Nix store path, so `corepack
-enable` cannot write there by default) and then runs
-`pnpm install --frozen-lockfile` with the store under `$FLOX_ENV_CACHE`.
+An earlier pass claimed the catalog `pnpm_10` package starts at 10.25.0 —
+outside that range — and routed installation through corepack instead.
+That claim was false: `flox show pnpm_10`'s full version list carries
+`pnpm_10@10.24.0` exactly, on all four platforms. The manifest now
+installs it directly (`pnpm_10.pkg-path = "pnpm_10"`, `.version =
+"10.24.0"`); the corepack indirection is removed.
 
 ## Why deno is included
 The monorepo has two runtimes, not one. `supabase/functions/{og-images,
@@ -115,10 +143,10 @@ plain local Postgres — genuine dev infrastructure a developer might want
 without spinning up the full container stack.
 
 ## ✗ items (considered, rejected, or not applied)
-- ✗ `pnpm_10` in `[install]` — catalog floor 10.25.0 violates the repo's
-  `engines.pnpm "10.24"` under `engine-strict=true`; corepack used instead.
 - ✗ `pnpm` (unversioned) — resolves to pnpm 11, wrong major for a pnpm-10
-  lockfile.
+  lockfile. `pnpm_10@10.24.0` is installed directly instead (AI-457 —
+  corrects an earlier, false "catalog floor 10.25.0" claim that had routed
+  this through corepack).
 - ✗ Wiring gotrue/postgrest/realtime/storage/kong/studio/supavisor as Flox
   services — these are the app, not dev infra (see above); no stock catalog
   equivalents.
@@ -131,11 +159,12 @@ without spinning up the full container stack.
   `pkg-path`.
 
 ## Validation level
-Static + catalog-verified. Every package name and the existence of every
-pinned version were confirmed with `flox search --all` / `flox show` against
-the live catalog. The manifest was NOT activated (`flox activate` explicitly
-out of scope), so runtime behavior of the hook/service is reasoned, not
-executed. The service block follows the canonical Flox PostgreSQL pattern
+Static + per-package verified; not whole-manifest lock-tested. Every
+package name and the existence of every pinned version were confirmed
+with `flox search --all` / `flox show` against the live catalog. The
+manifest was NOT activated (`flox activate` explicitly out of scope), so
+runtime behavior of the hook/service is reasoned, not executed. The
+service block follows the canonical Flox PostgreSQL pattern
 (self-initializing data dir under `$FLOX_ENV_CACHE`, `is-daemon`, fast-stop
 shutdown).
 
@@ -146,13 +175,18 @@ shutdown).
    the pnpm major implied by `packageManager`); floxify should cross-read
    all of them, not stop at the first. Critically, the package manager
    itself is version-locked two ways — `packageManager: pnpm@X.Y.Z` AND
-   `engines.pnpm` under `.npmrc engine-strict=true`. When the catalog's
-   `pnpm_<major>` floor is above the pinned patch, a catalog pin fails
-   strict-engines; the skill should detect `packageManager` + engine-strict
-   and prefer **corepack from the pinned Node** over a catalog pnpm pin.
-   Corollary Nix gotcha the skill must encode: `corepack enable` writes
-   shims into the Node prefix (read-only Nix store) and fails unless
-   `--install-directory "$FLOX_ENV_CACHE/..."` (added to PATH) is used.
+   `engines.pnpm` under `.npmrc engine-strict=true`. **When the exact
+   pinned patch genuinely is not in the catalog** (confirmed by scrolling
+   the FULL `flox show pnpm_<major>` version list, not just its reported
+   "Latest" or the first page of results -- AI-457 found this repo's
+   original pass stopped short and missed `pnpm_10@10.24.0` further down
+   the list), prefer **corepack from the pinned Node** over settling for a
+   nearby catalog version. When the exact patch IS present, install it
+   directly -- corepack is a fallback for a real catalog gap, not a
+   default. Corollary Nix gotcha the skill must encode: `corepack enable`
+   writes shims into the Node prefix (read-only Nix store) and fails
+   unless `--install-directory "$FLOX_ENV_CACHE/..."` (added to PATH) is
+   used.
 
 2. **Deno-alongside-Node detection.** A JS monorepo can hide a second
    runtime. Signals floxify should scan for beyond `package.json`:

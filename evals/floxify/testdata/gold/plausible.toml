@@ -14,11 +14,24 @@ schema-version = "1.13.0"
 # ---------------------------------------------------------------------------
 
 [install]
+# elixir_1_19 and postgresql each get their own pkg-group: AI-457 found
+# live (`flox activate`) that leaving elixir_1_19@1.19.5 in the shared
+# toplevel group alongside nodejs_23/postgresql/gnumake fails resolution
+# ("constraints for group 'toplevel' are too tight") even though it
+# resolves fine individually via `flox show` -- no single catalog page
+# contains elixir_1_19 together with the rest. Isolating it (and,
+# separately, postgresql -- see its own systems note below) into their own
+# groups lets each resolve against its own page.
+
 # Elixir. `.tool-versions` -> `elixir 1.20.2-otp-28`; mix.exs floor is
-# `elixir: "~> 1.18"`. Catalog max is elixir@1.18.4, which satisfies the
-# mix.exs constraint and BUNDLES Erlang/OTP 28.5.0.3 (verified: the elixir
-# derivation's buildInput is erlang-28.5.0.3) — so no separate `erlang`.
-elixir.pkg-path = "elixir"
+# `elixir: "~> 1.18"`. `elixir_1_19` (1.19.5, confirmed live) satisfies the
+# mix.exs constraint, is closer to the repo's 1.20.2 pin than the bare
+# `elixir` package's 1.18.4 ceiling, and BUNDLES Erlang/OTP 28 (confirmed
+# live: `flox run -p elixir_1_19 -- elixir --version` prints "Elixir 1.19.5
+# (compiled with Erlang/OTP 28)") — so no separate `erlang`.
+elixir.pkg-path = "elixir_1_19"
+elixir.version = "1.19.5"
+elixir.pkg-group = "elixir-1-19"
 
 # Node.js. `.tool-versions` -> `nodejs 23.2.0`; Dockerfile pins
 # `nodejs-current=23.11.1`. Catalog `nodejs_23` resolves to 23.11.0 (same
@@ -28,8 +41,13 @@ nodejs.pkg-path = "nodejs_23"
 # PostgreSQL — native Flox service (below). Makefile `make postgres` uses
 # `postgres:latest` (dev) / `postgres:18` (prod); config/.env.dev connects at
 # `postgres://postgres:postgres@127.0.0.1:5432/plausible_dev`. Catalog
-# `postgresql` resolves to 18.4 (matches prod's postgres:18).
+# `postgresql` resolves to 18.4 (matches prod's postgres:18), but that
+# build has no x86_64-darwin (confirmed live via `flox show`) -- elixir_1_19
+# and nodejs_23 both build fine there, so this package alone is scoped
+# rather than dropping x86_64-darwin from the whole environment.
 postgresql.pkg-path = "postgresql"
+postgresql.systems = ["x86_64-linux", "aarch64-linux", "aarch64-darwin"]
+postgresql.pkg-group = "postgresql-scoped"
 
 # GNU Make — the repo's dev workflow is Makefile-driven (`make postgres`,
 # `make clickhouse`, `make install`, `make server`). Needed for the Docker
