@@ -241,23 +241,30 @@ yourself (Step 1b) for nuance it only summarizes.
 
 The analyzer ships with this skill at `scripts/detect.py` (next to this
 SKILL.md). Run it through Flox so you don't depend on a system Python — this is
-also the fastest way to run a one-off script:
+also the fastest way to run a one-off script. Save its output alongside
+printing it — Phase 3c's `verify.py` re-reads these same facts to check the
+manifest you eventually write against them:
 
 ```bash
-flox run -p python313 -- python3 "<skill-dir>/scripts/detect.py" "$TARGET_DIR"
+DETECT_JSON="/tmp/floxify-detect.json"   # one floxify run at a time; fine to reuse
+flox run -p python313 -- python3 "<skill-dir>/scripts/detect.py" "$TARGET_DIR" | tee "$DETECT_JSON"
 ```
 
 `<skill-dir>` is this skill's own directory — the folder that holds this
 SKILL.md (the same place you'd read `scripts/` or a reference file from). Use
-its absolute path.
+its absolute path. `$DETECT_JSON` is a fixed path — remember it verbatim for
+Phase 3c, since each Bash call starts a fresh shell and cannot inherit a
+variable from this step.
 
 - If `flox run` errors with an unknown-subcommand or usage message, the user's
   Flox predates 1.13 (`flox run` shipped in 1.13). Tell them once, plainly:
   "Your Flox is older than 1.13, so I can't use the fast analyzer — upgrade to
   get `flox run`: https://flox.dev/docs/install-flox/install". Then fall back to
-  `python3 "<skill-dir>/scripts/detect.py" "$TARGET_DIR"` if a `python3` is on
-  PATH, and if neither works, scan manually (Step 1b). The analyzer is an
-  accelerator, not a hard dependency — never block on it.
+  `python3 "<skill-dir>/scripts/detect.py" "$TARGET_DIR" | tee "$DETECT_JSON"` if
+  a `python3` is on PATH, and if neither works, scan manually (Step 1b) and skip
+  the `$DETECT_JSON` file entirely — Phase 3c's verify.py runs with reduced
+  coverage (no detect facts to cross-check) but never blocks on a missing file.
+  The analyzer is an accelerator, not a hard dependency — never block on it.
 
 The analyzer prints one JSON object; every fact carries the file it came from:
 
@@ -890,7 +897,7 @@ Always note in the report: `(no persistence — data resets on service stop; edi
 
 ### 3c. Validate and verify
 
-**Hard gate — the report never appears until all three steps pass.**
+**Hard gate — the report never appears until all four steps pass.**
 
 Print before starting: `Verifying environment... (first run may take 30–60 seconds)`
 
@@ -936,6 +943,42 @@ cd "$TARGET_DIR" && flox activate -c "
 ```
 
 A `✗` import means a missing system lib — add it to `[install]` and re-run from Step 1.
+
+**Step 4 — Deterministic manifest check (verify.py)**
+
+Steps 1-3 prove the manifest *activates*. They do not prove it matches what
+Phase 1 actually found — a missing service, a `[vars]` value that silently
+never expands, a hook that re-mutates the repo's git tree on every activation
+can all pass activation cleanly. `verify.py` grounds the OUTPUT the same way
+`detect.py` grounded the INPUT: it takes the facts captured in `$DETECT_JSON`
+(Step 1a) and the manifest you just wrote, and reports concrete violations
+instead of leaving that to the Phase 4 report's own judgment.
+
+```bash
+flox run -p python313 -- python3 "<skill-dir>/scripts/verify.py" \
+  "$DETECT_JSON" "$TARGET_DIR/.flox/env/manifest.toml"
+```
+
+- Exit 0, "No violations" → proceed to Phase 4.
+- Any violation printed → **stop**. Each one names the manifest section and
+  the fact it disagrees with, e.g. `client 'pg' (package.json) implies
+  postgres, but no [services.*] serves it`. Fix `manifest.toml` for every
+  violation, then re-run from Step 1 (a fix can reopen an earlier check) and
+  this step again. Do not show the report until verify.py reports zero
+  violations.
+- Advisory notes (heuristics — e.g. a native build input with no `outputs`
+  declared) print separately and never block; read them, but they are a
+  second look, not a bug report.
+- Same fallback as Step 1a: if `flox run` errors (Flox predates 1.13), fall
+  back to `python3 "<skill-dir>/scripts/verify.py" ...` with a system Python.
+  If `$DETECT_JSON` doesn't exist (Step 1a's fallback to manual scanning
+  skipped writing it), still run verify.py with an empty facts file
+  (`echo '{}' > /tmp/floxify-detect.json`) — the catalog/vars/hook checks
+  that don't need detect facts still run.
+- `verify.py` checks *consistency with what detect.py found*, not
+  *correctness* — it says so in its own output. A clean run is not a
+  certification the manifest is bug-free; it means nothing detect.py grounded
+  contradicts it.
 
 ---
 
