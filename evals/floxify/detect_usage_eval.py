@@ -22,6 +22,7 @@ Exit 0 if the analyzer was invoked (and, as a bonus signal, run through
 """
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -37,6 +38,30 @@ PHASE1_PROMPT = (
     "resolve packages, or write a manifest — stop after the Phase 1 detection "
     "summary."
 )
+
+
+# --- invocation matching ---------------------------------------------------
+# This eval's whole claim is "the skill RAN the analyzer". Deciding that by
+# substring (`"detect.py" in cmd`) counted any command that merely *mentions*
+# the file — `cat detect.py`, `ls scripts/detect.py`, a grep — so the eval
+# could pass without the analyzer ever executing (AI-455).
+#
+# Match execution forms only: an interpreter (optionally via `flox run`)
+# followed by detect.py *within the same command segment*, so a mention in a
+# later segment can't borrow the interpreter from an earlier one.
+
+_SEGMENT_SPLIT = re.compile(r"[;&|]+")
+_EXEC_FORM = re.compile(r"\bpython3?\b[^\n]*?\bdetect\.py\b")
+
+
+def _is_analyzer_invocation(cmd):
+    """True only if `cmd` actually executes the analyzer."""
+    return any(_EXEC_FORM.search(seg) for seg in _SEGMENT_SPLIT.split(cmd or ""))
+
+
+def _is_via_flox_run(cmd):
+    """True if the analyzer was run the documented way — through `flox run`."""
+    return bool(re.search(r"\bflox\s+run\b", cmd or ""))
 
 
 def _bash_commands(stream_path):
@@ -85,11 +110,18 @@ def run(skill_dir, fixture, model, timeout):
                   file=sys.stderr)
 
         commands = list(_bash_commands(stream))
-        invoked = [c for c in commands if "detect.py" in c]
-        via_flox_run = [c for c in invoked if "flox run" in c]
+        invoked = [c for c in commands if _is_analyzer_invocation(c)]
+        via_flox_run = [c for c in invoked if _is_via_flox_run(c)]
+        mentioned_only = [
+            c for c in commands
+            if "detect.py" in c and not _is_analyzer_invocation(c)
+        ]
 
         print(f"\nBash calls: {len(commands)} · analyzer invocations: "
               f"{len(invoked)} · via `flox run`: {len(via_flox_run)}")
+        if mentioned_only and not invoked:
+            print("  NOTE: the analyzer was mentioned but never executed "
+                  f"(e.g. {mentioned_only[0][:80]!r}) — that is not a pass.")
         if invoked:
             print("PASS — /floxify invoked the analyzer:")
             print(f"  {invoked[0][:200]}")
