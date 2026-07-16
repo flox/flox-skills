@@ -12,11 +12,45 @@ correct; these bind the gate), **may** (nice if it triggers), and **stretch**
 prompts deliberately never mention "flox", to test that the skill fires when a
 user just wants "a new project" / "add nodejs 18.4" / "a PyTorch GPU setup".
 
-## Policy: new skill features ship with an eval
+## Policy: every skill change ships with an eval — written RED first
 
-**Every PR that adds a new feature or a new piece of guidance to the skill MUST
-add an eval task that verifies the guidance is actually followed.** Reviewers
-should not approve a skill-feature PR without one.
+**Every PR that adds, changes, or *fixes* guidance in a skill MUST add an eval
+that verifies the guidance is actually followed.** Reviewers should not approve
+a skill PR without one. Two rules:
+
+1. **RED first.** Write the eval before the fix, run it, and watch it **fail for
+   the reason you claim**. A test written after the change only proves the change
+   is self-consistent. This is not ceremony — see the worked example below.
+2. **Prefer the cheap tier.** A Tier 1 fixture or prompt eval is the inner loop
+   (seconds); the Tier 2 OSS runs are *confirmation* (a clone + a full agentic
+   pass + realization). Reserve the expensive tier for proving the fix holds on
+   real repos and for non-regression.
+
+**Fixes to existing guidance are in scope**, not just new features. AI-449 is
+why: the guidance that reasoned best is the guidance that broke real repos.
+
+### Worked example: why RED first is not ceremony (AI-449)
+
+The `script-started-postgres` fixture exists because of this policy, and the
+first version of it **passed** — disproving the hypothesis it was written to
+confirm.
+
+| fixture version | launcher | result |
+|---|---|---|
+| v1 | bare `docker run postgres:16-alpine` | **passed** — skill wired the service correctly |
+| v2 | cluster under `./target`, socket in the repo tree, percent-encoded `DATABASE_URL`, `db/schema.sql` load | **failed** — skill deferred |
+
+Only one variable changed. The bug was never "a launcher script exists" (the
+sentence we were about to rewrite) — it was **launcher *intricacy***: the skill
+read the script, judged it couldn't faithfully replicate the fiddly parts, and
+handed the datastore back. Had v1 failed as expected, the fix would have targeted
+the wrong sentence and the real trigger would have survived it on three repos,
+invisibly.
+
+**A cheap eval that refuses to fail is a finding, not an obstacle.** If a fixture
+won't reproduce the bug, say so in the PR and use the expensive tier as the test
+rather than contriving a fixture that fails for a manufactured reason — a green
+suite over a broken skill is the failure mode this whole policy exists to prevent.
 
 Why: the investigation behind AI-435 showed that modern Claude already knows
 Flox, so most guidance shows no measurable lift — *except* for features the
