@@ -79,8 +79,8 @@ python3 run_floxify.py --gate
 # Skip activation (no flox install / network):
 python3 run_floxify.py --skip-activation
 
-# Custom skill dir (if claude-plugins is not a sibling of flox-skills):
-python3 run_floxify.py --skill-dir /path/to/claude-plugins
+# Custom skill dir (skill ships in-repo at flox-plugin/; override if needed):
+python3 run_floxify.py --skill-dir /path/to/flox-plugin
 
 # Custom output path:
 python3 run_floxify.py --out results/my-run.json
@@ -117,20 +117,11 @@ suite with `--out results/floxify-baseline.json` and commit the result.
 
 1. **`claude` CLI** in `PATH`, logged in (`claude auth login` or
    `ANTHROPIC_API_KEY` set)
-2. **claude-plugins repo** on the `add-floxify-skill` branch (or main,
-   after the PR merges):
-
-   ```bash
-   git clone https://github.com/flox/claude-plugins \
-     ../claude-plugins   # sibling to flox-skills
-   cd ../claude-plugins
-   git checkout add-floxify-skill   # or: git checkout main after merge
-   ```
-
-   The default `--skill-dir` is `../../../claude-plugins` relative to
-   this file, resolving to the sibling directory. Override with
-   `--skill-dir` if your layout differs.
-
+2. **The floxify skill** — ships in this repo at
+   `flox-plugin/skills/floxify/`, no separate checkout needed. The
+   default `--skill-dir` resolves to `flox-plugin/` two levels up from
+   this file. Override with `--skill-dir` to point at an alternate
+   flox-plugin directory.
 3. **`flox` CLI** (optional) — needed for activation checks. Without it,
    activation is recorded as skipped.
 
@@ -160,11 +151,11 @@ Instead, the `floxify-evals` job in `.github/workflows/evals.yml` runs:
 - **weekly** (scheduled, Monday 06:00 UTC) as a regression watch, and
 - **on manual dispatch** (`workflow_dispatch` with `run_floxify=true`).
 
-The job checks out the skill from `flox/claude-plugins` (branch
-`add-floxify-skill`; retarget to `main` after that PR merges), installs
-flox, and runs `run_floxify.py --gate`. Its `--gate` still binds on
-should-tier hard-checks — it just runs on a schedule rather than per-PR,
-so a genuine regression surfaces within a week (or immediately on manual
+The job checks out this repo (the skill under test ships in-repo at
+`flox-plugin/skills/floxify/`), installs flox, and runs
+`run_floxify.py --gate`. Its `--gate` still binds on should-tier
+hard-checks — it just runs on a schedule rather than per-PR, so a
+genuine regression surfaces within a week (or immediately on manual
 dispatch) rather than never.
 
 Per-PR floxify regression-catching is therefore **manual/scheduled by
@@ -209,11 +200,12 @@ are **references for the LLM judge**, not byte-exact match targets.
 
 ## Baseline
 
-`results/floxify-baseline.json` — recorded against the `add-floxify-skill`
-PR branch. The `summary.skill` field records a portable identity
-(`<repo>@<branch>`, e.g. `claude-plugins@add-floxify-skill`) rather than
-an absolute host path, so the committed baseline stays reproducible across
-machines. `summary.model` records the pinned judge/agent model.
+`results/floxify-baseline.json` — recorded against the in-repo
+`flox-plugin/skills/floxify/` skill. The `summary.skill` field records
+a portable identity (`<dir-name>@<branch>`, e.g.
+`flox-plugin@main`) rather than an absolute host path, so the committed
+baseline stays reproducible across machines. `summary.model` records
+the pinned judge/agent model.
 
 When activation was not available in the recording environment, it is
 recorded as `"skipped": true` with a note. Hard-checks and judge scores
@@ -234,3 +226,166 @@ If catalog access or `flox` is unavailable:
   but hard-checks will reflect whether it actually ran catalog searches
 - Activation is automatically skipped and recorded as such
 - Use `--skip-activation` to suppress the activation attempt entirely
+
+## Tier 2: real OSS conversion repos (`tier2.py`)
+
+Tier 1 fixtures above are small synthetic dirs vendored into this repo.
+Tier 2 (`tier2.py` + `tier2.jsonl`) runs `/floxify` against **real
+open-source repos**, which are too large to vendor and too heavy to
+fully `flox activate`. It's a sibling harness that imports shared
+machinery from `run_floxify.py` (`_run_claude_agent`, `_is_valid_toml`,
+`_check_activation`, `_run_judge`, `_stats`, `_skill_identity`,
+`DEFAULT_SKILL_DIR`) rather than duplicating it.
+
+### What's different from Tier 1
+
+1. **Fixtures are cloned at a pinned SHA**, not copied from disk.
+   `_clone_at_sha` tries three strategies in increasing order of cost: a
+   direct fetch of the pinned commit (cheapest, but most hosts reject
+   fetching an arbitrary SHA for public repos), a partial clone
+   (`--filter=blob:none`, full commit graph with blobs deferred until
+   checkout), and a full clone as a last resort. A clone failure is
+   recorded as a per-entry error, not a crash.
+2. **The primary check is structural conformance**, not full
+   activation. Each `tier2.jsonl` entry declares `expected_runtimes`
+   (regex patterns matched against `pkg-path` values, e.g.
+   `ruby(_[0-9_]+)?`, `nodejs_24`) and `expected_services` (substring
+   matched against `[services.*]` section headers, e.g. `postgres`,
+   `redis`). `manifest_created`, `valid_toml`, and `no_abs_paths` are
+   checked the same way as Tier 1.
+3. **Activation is opt-in and off by default** (`--activate`). These
+   dev environments (Rails monoliths, pnpm/turbo monorepos) are too
+   heavy to reliably activate in CI; when off, activation is recorded
+   as `skipped` with a note, same as Tier 1's advisory treatment.
+4. **The LLM judge compares against a textual gold characterization**
+   (registry `gold.runtimes` / `gold.services` / `gold.notes`), not a
+   gold TOML file — there's no hand-tuned reference manifest for a repo
+   the size of Sentry or Supabase. The rubric is conformance/
+   idiomaticity-focused, not exact-match.
+5. **Report-only — this tier never gates the build**, in any mode.
+   There's no `--gate` flag.
+
+### What a structural pass does and does not tell you
+
+A structural pass is a real but narrow signal. It tells you the produced
+manifest **pins the right runtimes and wires the right services** — the
+`pkg-path` values match the expected runtime patterns and a `[services.*]`
+block exists for each expected service. That's it.
+
+It does **not** tell you the manifest actually builds or activates, or
+that the commands inside the `[hook]` / `[services.*]` blocks are valid.
+A manifest can pin `ruby_4_0`, wire `[services.postgres]`, pass all
+structural checks and score 5/5 from the judge, and still contain a hook
+command that fails the moment you run it — because with activation off,
+nothing runs it. **Use `--activate` to check that.**
+
+The mastodon run is the worked example: its hook pins
+`gem install bundler -v 4.0.13`, but bundler is a 2.x project — there is
+no bundler 4.0.13, so that command would fail on activation. The 7/7
+structural + 5/5 judge result never caught it, and that is exactly where
+Ruby's real onboarding pain lives — in the hook commands, not the package
+pins. This is deliberately **not** a structural hard-check: validating
+that a hook command resolves is activation's job, not structural
+conformance's. Reading a green structural row as "the environment works"
+is the specific over-read this note exists to prevent.
+
+### Registry (`tier2.jsonl`)
+
+One JSON object per line:
+
+| Field | Meaning |
+|-------|---------|
+| `id` | Short identifier, e.g. `mastodon` |
+| `repo_url` | Repo to clone |
+| `sha` | Pinned commit (short SHA is fine — passed straight to `git checkout`) |
+| `ecosystem` | Primary language, informational |
+| `expected_runtimes` | `[{"name": ..., "pattern": ...}]` — `pattern` is matched as `` pkg-path = "<pattern>" `` |
+| `expected_services` | `["postgres", "redis", ...]` — substring-matched against `[services.*]` headers |
+| `gold` | `{"runtimes": ..., "services": ..., "notes": ...}` — textual characterization for the judge |
+| `rubric` | Judge guidance specific to this repo |
+
+### Current repos
+
+| id | sha | expected runtimes | expected services | status |
+|----|-----|-------------------|--------------------|--------|
+| `mastodon` | `52e9ec7814fc` | ruby, nodejs_24 | postgres, redis | **run** — see `results/tier2.json` |
+| `posthog` | `55525a19f353` | python3 (3.13), nodejs_24 | postgres, redis, clickhouse | registered, not yet run |
+| `sentry` | `68d439d41d66` | python3 (3.13), nodejs | postgres, redis, kafka, clickhouse | registered, not yet run |
+| `supabase` | `963182f58e91` | nodejs_22, deno | postgres | registered, not yet run |
+
+Only `mastodon` has been run end-to-end so far — it's a single Rails
+app (tractable) and Ruby was the ecosystem flagged as highest-risk
+going in. The other three (PostHog, Sentry, Supabase) are large
+monorepos and register for future runs rather than gating this PR's
+baseline; run them individually with `--only <id>` when validating
+those ecosystems. `gold` characterizations for all four were derived
+by cloning each repo at its pinned SHA and reading its actual version
+files (`.ruby-version`, `.nvmrc`, `pyproject.toml`) and service
+manifests (`docker-compose.yml`, `devservices/config.yml`) — not
+assumed from the ecosystem name.
+
+### Mastodon result (initial baseline)
+
+All 7 structural hard-checks passed and the judge scored 5/5: the
+skill correctly pinned `ruby_4_0` (from `.ruby-version` 4.0.6) and
+`nodejs_24` (from `.nvmrc` 24.18), and wired both `[services.postgres]`
+and `[services.redis]`.
+
+But read that result through the "does and does not tell you" note
+above. The hook pins `gem install bundler -v 4.0.13` — a **nonexistent
+bundler version** (bundler is 2.x). The 7/7 structural + 5/5 judge run
+did not catch it, because activation was off and nothing ever ran the
+hook. A structural pass confirms the runtimes and services are right; it
+says nothing about whether the hook commands work. So this is a genuine
+positive for Ruby's *package/service resolution* — contrary to the
+assumption that Ruby is a weak ecosystem going in — but it is emphatically
+not a clean bill of health for Ruby onboarding. The real pain is in the
+hook (the invalid bundler pin), which only an `--activate` run would
+surface, and this is one repo at one commit; PostHog/Sentry/Supabase
+remain unrun.
+
+### Run
+
+```bash
+# Single repo (validated so far):
+python3 tier2.py --only mastodon
+
+# All registered repos (heavy — large clones + long skill runs):
+python3 tier2.py
+
+# Opt in to activation verification:
+python3 tier2.py --only mastodon --activate
+
+# Custom timeouts (defaults: 900s clone, 1800s agent run):
+python3 tier2.py --only sentry --clone-timeout 1200 --agent-timeout 2400
+
+# Custom skill dir / output path (same conventions as run_floxify.py):
+python3 tier2.py --skill-dir /path/to/flox-plugin --out results/my-run.json
+```
+
+Results land in `results/tier2.json` by default. Unlike Tier 1, there's
+no committed baseline or regression diff yet — with only one of four
+repos run so far, a diff isn't meaningful. Add one once more repos have
+a run to compare against.
+
+### Unit tests
+
+`test_tier2.py` covers the deterministic, unit-testable pieces
+(structural-conformance regexes, registry loading, the clone-at-SHA
+fallback chain) with `unittest` + mocked `subprocess`/clone-strategy
+calls. The agentic skill run and LLM judge call are integration-only,
+same as Tier 1 — exercised by an actual `--only <id>` run, not unit
+tests.
+
+```bash
+python3 -m unittest test_tier2 -v
+```
+
+### CI
+
+Not wired into `.github/workflows/evals.yml` yet. Like Tier 1's
+`floxify-evals` job, Tier 2 needs a live `flox` + network + Claude
+credentials and is too slow for per-PR gating; unlike Tier 1, it isn't
+on the weekly schedule either — these are large repos and 4 full runs
+would be expensive on every scheduled tick. Run manually via `--only`
+per repo until there's a cheaper subset or a case for scheduling it.
