@@ -1017,6 +1017,11 @@ flox run -p python313 -- python3 "<skill-dir>/scripts/verify.py" \
   "$DETECT_JSON" "$TARGET_DIR/.flox/env/manifest.toml"
 ```
 
+(Confirmed live: `flox run -p <pkg> -- ...` inherits the caller's `PATH`
+rather than replacing it, so `flox` itself stays reachable inside this
+subshell — the catalog leg (`flox show`) genuinely runs here, not just
+when verify.py is invoked directly.)
+
 - Exit 0, "No violations" → proceed to Phase 4.
 - Any violation printed → **stop**. Each one names the manifest section and
   the fact it disagrees with, e.g. `client 'pg' (package.json) implies

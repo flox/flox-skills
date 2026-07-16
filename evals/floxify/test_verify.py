@@ -12,31 +12,31 @@ Runnable two ways:
     python3 test_verify.py            # standalone, prints PASS/FAIL
     pytest test_verify.py             # each test_* function is a pytest case
 """
-import importlib.util
-import sys
+import io
+import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from _skill_module_loader import load_module
+
 HERE = Path(__file__).resolve().parent
 VERIFY = HERE.parent.parent / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
+DETECT = HERE.parent.parent / "flox-plugin" / "skills" / "floxify" / "scripts" / "detect.py"
 
+# Unique sys.modules key so @patch("...") resolves THIS file's instance —
+# test_golden_lint.py loads the same verify.py under its OWN unique key.
+# Sharing a key (both used to register under the bare "verify") let
+# whichever file's import ran second silently steal the other's @patch
+# target when both run in one interpreter, as CI's free-tests step does.
+# See _skill_module_loader.py and test_skill_module_loader.py.
+_MODULE_KEY = "verify_under_test_verify"
 
-def _load_verify():
-    spec = importlib.util.spec_from_file_location("verify", VERIFY)
-    mod = importlib.util.module_from_spec(spec)
-    # Register under sys.modules *before* exec so `unittest.mock.patch`
-    # (which resolves string targets via importlib.import_module) finds
-    # this in-memory module instead of failing to locate a "verify" package
-    # on sys.path — verify.py lives outside this directory, unlike the
-    # sibling-module imports test_detect_usage_eval.py relies on.
-    sys.modules["verify"] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-verify_mod = _load_verify()
+verify_mod = load_module(VERIFY, sys_modules_key=_MODULE_KEY)
 verify = verify_mod.verify
+# No @patch target needed for detect.py here -- private instance, no key.
+detect = load_module(DETECT)
 
 
 def _violations(detect, manifest_text, **kw):
@@ -177,6 +177,46 @@ python3.pkg-path = "python313"
             manifest = f'[install]\ngo.pkg-path = "{pkg_path}"\n'
             self.assertEqual(_violations(detect, manifest), [], pkg_path)
 
+    # --- Important review finding: bare "python3" and "rustup" are real,
+    # resolvable pkg-paths (confirmed live: `flox show python3` ->
+    # python3@3.14.6, `flox show rustup` -> rustup@1.29.0) that the
+    # original patterns rejected, false-firing on correct manifests.
+
+    def test_bare_python3_satisfies_python_runtime(self):
+        detect = {"runtimes": [{"language": "python", "version": "3.13", "source": "pyproject.toml"}]}
+        manifest = '[install]\npython3.pkg-path = "python3"\n'
+        self.assertEqual(_violations(detect, manifest), [])
+
+    def test_bare_python_without_a_3_does_not_satisfy(self):
+        # Confirmed live: bare "python" resolves to Python 2.7 -- must NOT
+        # be accepted as satisfying a detected Python 3 runtime.
+        detect = {"runtimes": [{"language": "python", "version": "3.13", "source": "pyproject.toml"}]}
+        manifest = '[install]\npython.pkg-path = "python"\n'
+        v = _violations(detect, manifest)
+        self.assertEqual(_rules(v), {"runtime-not-installed"})
+
+    def test_rustup_satisfies_rust_runtime(self):
+        detect = {"runtimes": [{"language": "rust", "version": None, "source": "Cargo.toml"}]}
+        manifest = '[install]\nrustup.pkg-path = "rustup"\n'
+        self.assertEqual(_violations(detect, manifest), [])
+
+    def test_runtime_pattern_coverage_matches_detects_tool_lang(self):
+        """Every language detect.py's TOOL_LANG can emit is either checked
+        here or has a documented reason it's deliberately excluded — a new
+        TOOL_LANG entry must be triaged into one list or the other, not
+        silently fall through check_runtimes_installed unnoticed (the
+        posthog/AI-453 failure mode this whole invariant exists to catch).
+        """
+        detect_langs = set(detect.TOOL_LANG.values())
+        covered = set(verify_mod.RUNTIME_PKG_PATTERNS)
+        excluded = set(verify_mod.RUNTIME_PATTERNS_DELIBERATELY_EXCLUDED)
+        missing = detect_langs - covered - excluded
+        self.assertEqual(
+            missing, set(),
+            f"detect.py can emit these languages but verify.py neither "
+            f"checks them nor documents why not: {missing}",
+        )
+
 
 # ---------------------------------------------------------------------------
 # invariant 2 — leaf-datastore client gets a [services.*] entry
@@ -255,6 +295,35 @@ command = "postgres -k /tmp/lemmy-postgres"
 '''
         self.assertEqual(_violations({}, manifest), [])
 
+    # --- host-blindness fix (Minor review finding): an external managed
+    # datastore with no local service is a common, often-intentional
+    # pattern -- must be ADVISORY, not HARD. ---
+
+    def test_external_managed_host_downgrades_to_advisory(self):
+        manifest = (
+            '[vars]\nDATABASE_URL = '
+            '"postgres://u:p@db.prod.internal.example.com:5432/app"\n'
+        )
+        v = _violations({}, manifest)
+        self.assertEqual(len(v), 1)
+        self.assertEqual(v[0]["rule"], "vars-endpoint-not-served")
+        self.assertEqual(v[0]["severity"], "advisory")
+
+    def test_advisory_endpoint_never_contributes_to_hard_violations(self):
+        manifest = (
+            '[vars]\nDATABASE_URL = '
+            '"postgres://u:p@db.prod.internal.example.com:5432/app"\n'
+        )
+        self.assertEqual(_hard(_violations({}, manifest)), [])
+
+    def test_bare_compose_service_name_host_stays_hard(self):
+        # A dotless hostname ("db") is almost certainly a docker-compose /
+        # k8s service name, not a real external FQDN -- stays HARD.
+        manifest = '[vars]\nDATABASE_URL = "postgres://u:p@db:5432/app"\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"vars-endpoint-not-served"})
+        self.assertEqual(v[0]["severity"], "hard")
+
     def test_non_connection_string_vars_are_ignored(self):
         manifest = '[vars]\nRAILS_ENV = "development"\n'
         self.assertEqual(_violations({}, manifest), [])
@@ -270,8 +339,34 @@ class TestVarsLiteral(unittest.TestCase):
         v = _violations({}, manifest)
         self.assertEqual(_rules(v), {"vars-not-literal"})
 
+    def test_fires_on_braced_expansion(self):
+        manifest = '[vars]\nDATA_DIR = "${FLOX_ENV_CACHE}/data"\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"vars-not-literal"})
+
     def test_does_not_fire_on_plain_literal_vars(self):
         manifest = '[vars]\nPGDATABASE = "myapp_dev"\nPGPORT = "5432"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    # --- false-positive shapes a plain "any '$'" check used to HARD-fire on
+    # (Important review finding: a password, a bcrypt hash, or an argon2
+    # hash each contain a literal '$' with no shell-expansion intent) ---
+
+    def test_does_not_fire_on_password_containing_dollar(self):
+        manifest = '[vars]\nPGPASSWORD = "p@ss$word5"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_bcrypt_hash(self):
+        manifest = '[vars]\nADMIN_HASH = "$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_argon2_hash(self):
+        manifest = ('[vars]\nARGON_HASH = '
+                    '"$argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$hash"\n')
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_price_template_with_lowercase_after_dollar(self):
+        manifest = '[vars]\nNOTE = "cost is $5 per unit, see $doc for details"\n'
         self.assertEqual(_violations({}, manifest), [])
 
 
@@ -294,6 +389,75 @@ on-activate = """
         manifest = '[hook]\non-activate = "git checkout main"\n'
         v = _violations({}, manifest)
         self.assertEqual(_rules(v), {"hook-mutates-tree"})
+
+    # --- previously-missed verbs (Important review finding) --------------
+
+    def test_fires_on_git_restore(self):
+        manifest = '[hook]\non-activate = "git restore ."\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+
+    def test_fires_on_git_switch(self):
+        manifest = '[hook]\non-activate = "git switch main"\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+
+    def test_fires_on_git_revert(self):
+        manifest = '[hook]\non-activate = "git revert HEAD --no-edit"\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+
+    # --- false-positive shapes (Important review finding: comments,
+    # echoed/printed text, and read-only dry-run forms must not fire) ----
+
+    def test_does_not_fire_on_git_verb_inside_a_comment(self):
+        manifest = '''
+[hook]
+on-activate = """
+  # if things break, git reset --hard and start over
+  uv sync
+"""
+'''
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_git_verb_inside_echoed_text(self):
+        manifest = '''
+[hook]
+on-activate = """
+  echo "Tip: run git checkout main to switch branches"
+"""
+'''
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_git_verb_inside_printf_text(self):
+        manifest = '[hook]\non-activate = "printf \\"see: git commit --amend\\\\n\\""\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_git_apply_check_dry_run(self):
+        manifest = '[hook]\non-activate = "git apply --check patch.diff"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_still_fires_on_git_apply_without_check(self):
+        # The exemption above must be narrow -- a real `git apply` (no
+        # dry-run flag) still mutates the tree and must still fire.
+        manifest = '[hook]\non-activate = "git apply patch.diff"\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+
+    def test_comment_and_real_mutation_on_separate_lines_both_handled(self):
+        # A comment mentioning a git verb must not mask a REAL mutation
+        # elsewhere in the same hook.
+        manifest = '''
+[hook]
+on-activate = """
+  # note: git checkout is sometimes needed manually
+  git reset --hard origin/main
+"""
+'''
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+        self.assertEqual(len(v), 1)
+        self.assertIn("git reset --hard origin/main", v[0]["message"])
 
     def test_does_not_fire_on_realistic_rust_hook(self):
         # Real golden shape (lemmy): env exports + echoes, no git mutation.
@@ -361,6 +525,36 @@ Other versions:
 """
 
 
+# Header `Systems:` line restricted to 3 platforms, but the "Other versions"
+# block does NOT repeat an entry for Latest -- the shape that used to make
+# check_catalog silently default an unpinned install to ALL_SYSTEMS instead
+# of the (restricted) header line.
+MISSING_LATEST_ENTRY_SHOW = """flaky-pkg - a package whose Other-versions list omits Latest
+Catalog: nixpkgs
+Latest:  flaky-pkg@9.9.9
+License: MIT
+Outputs: out* (* installed by default)
+Systems: x86_64-linux, aarch64-linux
+
+Other versions:
+    flaky-pkg@8.0.0
+"""
+
+# An "Other versions" annotation that isn't the recognized "(... only)"
+# form -- must be treated as genuinely unknown, not silently as either
+# "all four systems" or "exactly the parenthetical contents".
+UNRECOGNIZED_ANNOTATION_SHOW = """weird-pkg - a package with an unrecognized annotation format
+Catalog: nixpkgs
+Latest:  weird-pkg@2.0.0
+License: MIT
+Outputs: out* (* installed by default)
+Systems: x86_64-linux
+
+Other versions:
+    weird-pkg@2.0.0 (deprecated, use weird-pkg2)
+"""
+
+
 def _mock_show(pkg_path, flox_bin, timeout):
     if pkg_path == "postgresql":
         return _FakeProc(stdout=POSTGRESQL_SHOW)
@@ -368,7 +562,23 @@ def _mock_show(pkg_path, flox_bin, timeout):
         return _FakeProc(stdout=NODEJS_24_SHOW)
     if pkg_path == "python313":
         return _FakeProc(stdout=PYTHON313_SHOW)
+    if pkg_path == "flaky-pkg":
+        return _FakeProc(stdout=MISSING_LATEST_ENTRY_SHOW)
+    if pkg_path == "weird-pkg":
+        return _FakeProc(stdout=UNRECOGNIZED_ANNOTATION_SHOW)
     return _FakeProc(returncode=1, stderr=f"✘ ERROR: no packages matched this pkg-path: '{pkg_path}'")
+
+
+class TestRunShowCommand(unittest.TestCase):
+    """Minor review finding: a leading-dash pkg_path must not be read as a
+    flag by `flox show` — `--` separates the positional argument."""
+
+    @patch(f"{_MODULE_KEY}.subprocess.run")
+    def test_pkg_path_passed_after_double_dash_separator(self, mock_run):
+        verify_mod._run_show_command("-weird-pkg", "flox", 30)
+        args = mock_run.call_args[0][0]
+        self.assertIn("--", args)
+        self.assertEqual(args[args.index("--") + 1], "-weird-pkg")
 
 
 class TestCatalog(unittest.TestCase):
@@ -376,21 +586,21 @@ class TestCatalog(unittest.TestCase):
         verify_mod._SHOW_CACHE.clear()
 
     @patch("shutil.which", return_value="/usr/bin/flox")
-    @patch("verify._run_show_command", side_effect=_mock_show)
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
     def test_unresolved_pkg_path_fires(self, mock_run, mock_which):
         manifest = '[install]\nghost.pkg-path = "nonexistent-pkg-zzz"\n'
         v = verify({}, manifest, check_catalog_live=True)["violations"]
         self.assertEqual(_rules(v), {"catalog-unresolved"})
 
     @patch("shutil.which", return_value="/usr/bin/flox")
-    @patch("verify._run_show_command", side_effect=_mock_show)
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
     def test_missing_version_fires(self, mock_run, mock_which):
         manifest = '[install]\npg.pkg-path = "postgresql"\npg.version = "99.99"\n'
         v = verify({}, manifest, check_catalog_live=True)["violations"]
         self.assertEqual(_rules(v), {"catalog-version-missing"})
 
     @patch("shutil.which", return_value="/usr/bin/flox")
-    @patch("verify._run_show_command", side_effect=_mock_show)
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
     def test_systems_mismatch_fires_for_mastodon_shape(self, mock_run, mock_which):
         # Real AI-455 shape: nodejs_24@24.18.0 has no x86_64-darwin build,
         # but options.systems declares it.
@@ -407,7 +617,7 @@ systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
         self.assertIn("x86_64-darwin", v[0]["message"])
 
     @patch("shutil.which", return_value="/usr/bin/flox")
-    @patch("verify._run_show_command", side_effect=_mock_show)
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
     def test_resolved_pkg_and_version_within_declared_systems_is_clean(
         self, mock_run, mock_which,
     ):
@@ -423,7 +633,7 @@ systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
         self.assertEqual(v, [])
 
     @patch("shutil.which", return_value="/usr/bin/flox")
-    @patch("verify._run_show_command", side_effect=_mock_show)
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
     def test_unpinned_version_checks_against_latest(self, mock_run, mock_which):
         # nodejs_24 with no .version pinned -> latest (24.18.0), which is
         # missing x86_64-darwin; default systems (no [options]) = all four.
@@ -432,7 +642,7 @@ systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
         self.assertEqual(_rules(v), {"catalog-systems-mismatch"})
 
     @patch("shutil.which", return_value="/usr/bin/flox")
-    @patch("verify._run_show_command", side_effect=_mock_show)
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
     def test_per_package_systems_override_default(self, mock_run, mock_which):
         # A package explicitly scoped to Linux-only never trips the darwin gap.
         manifest = '''
@@ -443,6 +653,53 @@ nodejs.systems = ["x86_64-linux", "aarch64-linux"]
 '''
         v = verify({}, manifest, check_catalog_live=True)["violations"]
         self.assertEqual(v, [])
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_unpinned_install_uses_header_systems_not_all_systems_default(
+        self, mock_run, mock_which,
+    ):
+        # Regression for the "overclaims" finding: flaky-pkg's Latest
+        # (9.9.9) isn't relisted under "Other versions" (only 8.0.0 is),
+        # so an unpinned install used to fall through to
+        # `.get(show["latest"], set(ALL_SYSTEMS))` and silently claim all
+        # four systems. The header `Systems:` line (x86_64-linux,
+        # aarch64-linux only) is now the ground truth instead.
+        manifest = '''
+[install]
+flaky.pkg-path = "flaky-pkg"
+
+[options]
+systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
+'''
+        result = verify({}, manifest, check_catalog_live=True)
+        v = result["violations"]
+        self.assertEqual(_rules(v), {"catalog-systems-mismatch"})
+        self.assertIn("x86_64-darwin", v[0]["message"])
+        self.assertIn("aarch64-darwin", v[0]["message"])
+        self.assertEqual(result["catalog_unknown"], [])
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_unrecognized_annotation_is_unknown_not_asserted_either_way(
+        self, mock_run, mock_which,
+    ):
+        # weird-pkg@2.0.0's "Other versions" parenthetical isn't the
+        # recognized "(... only)" form. Must be excluded from both
+        # "confirmed clean" and "violation" -- never guessed.
+        manifest = '''
+[install]
+weird.pkg-path = "weird-pkg"
+weird.version = "2.0.0"
+
+[options]
+systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
+'''
+        result = verify({}, manifest, check_catalog_live=True)
+        self.assertEqual(result["violations"], [])
+        self.assertEqual(len(result["catalog_unknown"]), 1)
+        self.assertEqual(result["catalog_unknown"][0]["install_id"], "weird")
+        self.assertEqual(result["catalog_unknown"][0]["pkg_path"], "weird-pkg")
 
     @patch("shutil.which", return_value=None)
     def test_skips_cleanly_when_flox_unavailable(self, mock_which):
@@ -458,7 +715,7 @@ nodejs.systems = ["x86_64-linux", "aarch64-linux"]
         self.assertFalse(result["catalog_checked"])
 
     @patch("shutil.which", return_value="/usr/bin/flox")
-    @patch("verify._run_show_command", side_effect=_mock_show)
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
     def test_partial_version_matches_as_prefix_wildcard(self, mock_run, mock_which):
         # Confirmed against live `flox edit`: "17" for postgresql resolves
         # to the latest 17.x (17.10 here), not a literal "17" catalog entry.
@@ -470,7 +727,7 @@ nodejs.systems = ["x86_64-linux", "aarch64-linux"]
         self.assertEqual(v, [])
 
     @patch("shutil.which", return_value="/usr/bin/flox")
-    @patch("verify._run_show_command", side_effect=_mock_show)
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
     def test_prefixed_catalog_scheme_requires_the_full_string(self, mock_run, mock_which):
         # Real posthog golden defect, confirmed against live `flox edit`:
         # python313's catalog version is "python3-3.13.13" — pinning the
@@ -480,7 +737,7 @@ nodejs.systems = ["x86_64-linux", "aarch64-linux"]
         self.assertEqual(_rules(v), {"catalog-version-missing"})
 
     @patch("shutil.which", return_value="/usr/bin/flox")
-    @patch("verify._run_show_command", side_effect=_mock_show)
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
     def test_range_versions_are_not_exact_matched(self, mock_run, mock_which):
         # "^16" is a legitimate semver range, not an exact pin — must not
         # false-fire catalog-version-missing (it will never equal a literal
@@ -557,6 +814,106 @@ class TestOutputFraming(unittest.TestCase):
     def test_disclaimer_says_consistent_not_correct(self):
         self.assertIn("consistent", verify_mod.DISCLAIMER.lower())
         self.assertIn("not", verify_mod.DISCLAIMER.lower())
+
+
+# ---------------------------------------------------------------------------
+# CLI layer (main()) — the skill's Phase 3c Step 4 depends on exit-code
+# semantics (exit 0 -> proceed, non-zero -> stop) and the stdin '-' /
+# --no-catalog fallbacks it documents. Zero coverage here previously meant
+# a regression that inverted the exit code or broke a flag would pass every
+# test that only calls verify() directly. (Minor review finding.)
+# ---------------------------------------------------------------------------
+
+class TestMainCLI(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+        self.detect_path = self.tmp / "detect.json"
+        self.manifest_path = self.tmp / "manifest.toml"
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def _write(self, detect_obj, manifest_text):
+        self.detect_path.write_text(json.dumps(detect_obj))
+        self.manifest_path.write_text(manifest_text)
+
+    def test_exit_0_on_clean_manifest(self):
+        self._write({}, AI449_GOOD_MANIFEST)
+        code = verify_mod.main([
+            "verify.py", str(self.detect_path), str(self.manifest_path), "--no-catalog",
+        ])
+        self.assertEqual(code, 0)
+
+    def test_exit_1_on_hard_violation(self):
+        self._write(AI449_DETECT, AI449_BAD_MANIFEST)
+        code = verify_mod.main([
+            "verify.py", str(self.detect_path), str(self.manifest_path), "--no-catalog",
+        ])
+        self.assertEqual(code, 1)
+
+    def test_exit_2_on_missing_detect_json_file(self):
+        self.manifest_path.write_text(AI449_GOOD_MANIFEST)
+        code = verify_mod.main([
+            "verify.py", str(self.tmp / "does-not-exist.json"),
+            str(self.manifest_path), "--no-catalog",
+        ])
+        self.assertEqual(code, 2)
+
+    def test_exit_2_on_missing_manifest_file(self):
+        self.detect_path.write_text("{}")
+        code = verify_mod.main([
+            "verify.py", str(self.detect_path),
+            str(self.tmp / "does-not-exist.toml"), "--no-catalog",
+        ])
+        self.assertEqual(code, 2)
+
+    def test_exit_2_on_invalid_detect_json(self):
+        self.detect_path.write_text("not valid json {{{")
+        self.manifest_path.write_text(AI449_GOOD_MANIFEST)
+        code = verify_mod.main([
+            "verify.py", str(self.detect_path), str(self.manifest_path), "--no-catalog",
+        ])
+        self.assertEqual(code, 2)
+
+    def test_stdin_dash_reads_detect_json_from_stdin(self):
+        self.manifest_path.write_text(AI449_GOOD_MANIFEST)
+        with patch("sys.stdin", io.StringIO(json.dumps({}))):
+            code = verify_mod.main([
+                "verify.py", "-", str(self.manifest_path), "--no-catalog",
+            ])
+        self.assertEqual(code, 0)
+
+    def test_empty_stdin_treated_as_empty_facts_not_an_error(self):
+        self.manifest_path.write_text(AI449_GOOD_MANIFEST)
+        with patch("sys.stdin", io.StringIO("")):
+            code = verify_mod.main([
+                "verify.py", "-", str(self.manifest_path), "--no-catalog",
+            ])
+        self.assertEqual(code, 0)
+
+    def test_json_flag_emits_parseable_json_with_expected_keys(self):
+        self._write(AI449_DETECT, AI449_BAD_MANIFEST)
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            verify_mod.main([
+                "verify.py", str(self.detect_path), str(self.manifest_path),
+                "--no-catalog", "--json",
+            ])
+        payload = json.loads(buf.getvalue())
+        self.assertIn("violations", payload)
+        self.assertIn("catalog_checked", payload)
+        self.assertIn("catalog_unknown", payload)
+        self.assertIn("_meta", payload)
+        self.assertEqual(len(payload["violations"]), 3)
+
+    def test_no_catalog_flag_never_invokes_flox_show(self):
+        self._write({}, AI449_GOOD_MANIFEST)
+        with patch(f"{_MODULE_KEY}._run_show_command") as mock_run:
+            verify_mod.main([
+                "verify.py", str(self.detect_path), str(self.manifest_path), "--no-catalog",
+            ])
+        mock_run.assert_not_called()
 
 
 if __name__ == "__main__":
