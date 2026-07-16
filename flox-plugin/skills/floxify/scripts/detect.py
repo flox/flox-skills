@@ -73,6 +73,15 @@ SERVICE_CLIENTS = {
     "motor": ["mongodb-ce"],
     "mongoose": ["mongodb-ce"],
     "mongodb": ["mongodb-ce"],
+    # PostgreSQL (Rust — Cargo.lock package names)
+    "pq-sys": ["postgresql"],            # native libpq binding; diesel's "postgres" feature pulls this in
+    "tokio-postgres": ["postgresql"],
+    "sqlx-postgres": ["postgresql"],
+    # Redis (Rust)
+    "fred": ["redis"],
+    # MySQL / MariaDB (Rust)
+    "mysql_async": ["mariadb"],
+    "sqlx-mysql": ["mariadb"],
     # Native crypto / parsing / imaging
     "cryptography": ["pkg-config", "openssl"],
     "cffi": ["pkg-config", "libffi"],
@@ -318,6 +327,27 @@ def scan(target):
             native.append({"trigger": "build.rs", "search_terms": ["pkg-config", "gcc"],
                            "source": "Cargo.toml + build.rs"})
         mark("Cargo.toml")
+
+    # ---- Cargo.lock: resolved crate names -> service-client search hints
+    # `[[package]]` is TOML array-of-tables, so this parses the same way as
+    # any other TOML file here (no custom lockfile grammar). Cargo.lock does
+    # not record which crate FEATURES were enabled (e.g. diesel's "postgres"
+    # feature), so this deliberately keys off crate names that are only
+    # pulled into the lockfile when a matching feature/driver is actually in
+    # use (pq-sys arrives via diesel's postgres feature; sqlx-postgres is its
+    # own published crate, not a feature flag) -- the same "evidence read
+    # from a file, not inferred" discipline as every other extractor here.
+    if "Cargo.lock" in root_files:
+        data = _parse_toml(_read(target / "Cargo.lock"))
+        names = []
+        if isinstance(data, dict):
+            for pkg in data.get("package") or []:
+                if isinstance(pkg, dict) and pkg.get("name"):
+                    names.append(pkg["name"])
+        elif _read(target / "Cargo.lock"):
+            note("Cargo.lock: could not parse TOML")
+        _add_clients(names, "Cargo.lock", clients)
+        mark("Cargo.lock")
 
     # ---- pyproject.toml / Pipfile --------------------------------------
     if "pyproject.toml" in root_files:

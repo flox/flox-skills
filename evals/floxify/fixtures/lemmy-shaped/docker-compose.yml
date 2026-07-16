@@ -1,0 +1,9 @@
+services:
+  postgres:
+    image: pgautoupgrade/pgautoupgrade:18-alpine
+    volumes:
+      - ./volumes/postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: lemmy
+  pictrs:
+    image: asonix/pictrs:0.5

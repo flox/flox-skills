@@ -1,0 +1,8 @@
+[package]
+name = "lemmy_server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+diesel = { version = "2.3.7", features = ["postgres"] }
+tokio = { version = "1", features = ["full"] }
