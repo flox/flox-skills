@@ -49,27 +49,14 @@ redis.pkg-path = "redis"
 #                      pdo session simplexml tokenizer xml xmlwriter
 #
 # The `php85` catalog package is nixpkgs `php.buildEnv` with a FIXED default
-# extension set baked in. That set (verified against nixpkgs
-# interpreters/php/default.nix + top-level/php-packages.nix) COVERS:
-#   bcmath  curl  fileinfo  iconv  intl  mbstring  openssl  pdo  pdo_mysql
-#   pdo_pgsql  session  simplexml  tokenizer  xmlwriter          (13 of 14)
-#   ext-json is compiled into PHP core (8.0+) and is always present; there is
-#   deliberately no `php85Extensions.json` catalog package.
-#
-# NOT COVERED: ext-xml (the expat/SAX `xml` extension).
-#   * `xml` is absent from the default php85 enabled set.
-#   * It is NOT pulled in transitively: nixpkgs `dom`, `simplexml`, and
-#     `xmlwriter` depend only on libxml2 (no internalDeps on `xml`);
-#     `xmlreader`'s only internalDep is `dom`. Verified in
-#     pkgs/top-level/php-packages.nix.
-#   * `php85Extensions.xml@8.5.8` exists as a catalog package, but installing
-#     it standalone drops a .so into the env WITHOUT wiring it into the
-#     prebuilt php85 binary's ini/extension_dir, so it will not load.
-#   * Idiomatic fix = rebuild the interpreter with the extension enabled,
-#     e.g. a Flox manifest [build] running `php85.withExtensions (e: ...)`.
-#     That is out of scope for this [install]-only golden manifest, so the
-#     on-activate bootstrap below skips the ext-xml platform check as a
-#     clearly-flagged workaround (XML-import code paths may still need it).
+# extension set baked in. Verified directly against the running interpreter
+# (`flox run -p php85 -- php -m`, AI-457) rather than reasoned from the
+# nixpkgs source -- the loaded-module list includes bcmath, curl, dom,
+# fileinfo, iconv, intl, mbstring, openssl, pdo, pdo_mysql, pdo_pgsql,
+# session, SimpleXML, tokenizer, xml, xmlwriter. All 14 required ext-* are
+# present: xml is NOT a gap, contradicting an earlier claim in this
+# manifest (see firefly-iii-notes.md for the corrected verification log).
+# ext-json is compiled into PHP core (8.0+) and needs no catalog package.
 # ===========================================================================
 
 [services.mariadb]
@@ -105,11 +92,11 @@ if [ ! -f .env ]; then
   echo "[firefly] copied .env.example -> .env"
 fi
 
-# PHP deps from composer.lock. ext-xml platform check skipped because the
-# prebuilt php85 lacks that extension (see [install] notes); for real XML
-# support rebuild via php85.withExtensions instead.
+# PHP deps from composer.lock. No --ignore-platform-req needed: php85's
+# default extension set covers every ext-* firefly-iii requires, including
+# ext-xml (verified live, AI-457 -- see [install] notes).
 if [ ! -d vendor ]; then
-  composer install --no-interaction --ignore-platform-req=ext-xml
+  composer install --no-interaction
 fi
 
 # Frontend workspace deps (v1 laravel-mix, v2 vite).
