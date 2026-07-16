@@ -23,6 +23,13 @@ environments realize a full closure on first activation, and the Tier 1
 budget of 120s silently recorded posthog as "skipped" rather than measuring
 it. A timeout is now a FAILURE, not a skip.
 
+Service probing is off by default too (`--services`, and only meaningful with
+`--activate`). It exists because the three tiers below it can all be green
+while the environment is useless: `has_service_postgres` matches a section
+header, `valid_toml` parses the file, and `flox activate` proves the packages
+resolve — none of them ever *run* the service command. `--services` starts the
+services and asks each one for a connection.
+
 Reuses `_run_claude_agent`, `_is_valid_toml`, `_check_activation`,
 `_run_judge`, `_stats`, `_skill_identity`, and `DEFAULT_SKILL_DIR` from
 run_floxify.py rather than duplicating that machinery.
@@ -31,6 +38,7 @@ Usage:
     python3 tier2.py --only mastodon             # single repo
     python3 tier2.py                              # all registered repos
     python3 tier2.py --activate                   # opt in to flox activate
+    python3 tier2.py --activate --services        # ...and prove services serve
     python3 tier2.py --skill-dir /path/to/flox-plugin
     python3 tier2.py --out results/my-run.json
 
@@ -201,6 +209,150 @@ def _structural_checks(entry, manifest_text):
     return checks
 
 
+# --- service startup + connectivity probe (AI-447) -------------------------
+# `has_service_postgres` only proves a [services.*] section header exists, and
+# `flox activate` only proves the packages resolve — neither runs the service
+# command. A manifest can pass both and still hand the developer a dead
+# database: lemmy wired `[services.postgres]` whose command referenced $PGDATA,
+# which was exported only in [hook] (service commands do NOT inherit hook
+# exports), so `postgres -D ""` would fail at start while every check we had
+# reported green.
+#
+# The postgres probe deliberately passes NO host/port. `pg_isready` reads
+# PGHOST/PGPORT from the environment, and the environment is what the
+# manifest's own [vars] set — so a bare `pg_isready` asserts the service is
+# reachable *at the address the manifest advertises*. That is what catches a
+# manifest whose [vars] point at a datastore nothing serves (plausible).
+
+PROBE_COMMANDS = {
+    "postgres": "pg_isready -q",
+    "postgresql": "pg_isready -q",
+    "redis": 'redis-cli ${REDIS_PORT:+-p "$REDIS_PORT"} ping',
+    "valkey": 'redis-cli ${REDIS_PORT:+-p "$REDIS_PORT"} ping',
+    "mariadb": "mariadb-admin ping",
+    "mysql": "mysqladmin ping",
+}
+
+
+def _probe_command_for(kind):
+    """Connectivity probe for a service kind, or None if we can't probe it.
+
+    None means "not probeable" (e.g. clickhouse), never "broken" — the caller
+    records those as skipped so an unprobeable service can't fail a run.
+    """
+    return PROBE_COMMANDS.get((kind or "").lower())
+
+
+def _run_flox(args, cwd=None, timeout=120):
+    """Run a flox subcommand -> (ok, combined stdout+stderr)."""
+    try:
+        proc = subprocess.run(
+            ["flox", *args], cwd=cwd, capture_output=True, text=True, timeout=timeout
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"timed out after {timeout}s"
+    except Exception as exc:  # noqa: BLE001 - never crash a run on a probe
+        return False, str(exc)
+    return proc.returncode == 0, (proc.stdout or "") + (proc.stderr or "")
+
+
+SERVICE_OK = "__SERVICE_OK__"
+SERVICE_DEAD = "__SERVICE_DEAD__"
+
+
+def _probe_script(probe, settle):
+    """Poll `probe` for up to `settle` seconds, printing a sentinel either way.
+
+    Services start asynchronously, so an immediate single probe races the
+    postmaster. The sentinels let the caller tell a real verdict ("polled and
+    nothing ever answered") apart from flox erroring before the script ever
+    ran — those must not look the same.
+    """
+    return (
+        f'for _ in $(seq {settle}); do '
+        f'  if {probe} >/dev/null 2>&1; then echo {SERVICE_OK}; exit 0; fi; '
+        f'  sleep 1; '
+        f'done; '
+        f'echo {SERVICE_DEAD}; exit 1'
+    )
+
+
+def _probe_services(target_dir, expected_services, manifest_text=None,
+                    timeout=300, settle=30):
+    """Prove each *declared* service actually serves. -> {svc: {ok, skipped, notes}}
+
+    Services can only be started from *inside* an activation (`flox services
+    start` on an unactivated env errors), so this is a single
+    `flox activate --start-services -c <polling script>` per service. The
+    activation owns the service lifetime, so there is nothing to stop
+    afterwards.
+
+    Only services the manifest actually declares are probed. Probing an
+    undeclared service is a false-positive machine: lemmy shipped a manifest
+    with no [services.*] whose [hook] started postgres to bootstrap the DB, a
+    bare `pg_isready` answered, and the probe credited it — for an environment
+    with no service at all. `has_service_*` owns "did you wire it"; this owns
+    "does the wired service work".
+
+    Advisory, like activation. Outcomes, deliberately distinct:
+      ok=True             the declared service answered at the advertised address
+      ok=False            polled to exhaustion, nothing answered (real verdict)
+      skipped, ok=None    flox absent / service not declared / no probe for this
+                          kind / flox errored before the script ran — never a
+                          verdict on the manifest
+    """
+    results = {
+        svc: {"ok": None, "skipped": True, "notes": ""} for svc in expected_services
+    }
+    if not shutil.which("flox"):
+        for svc in results:
+            results[svc]["notes"] = "flox not in PATH"
+        return results
+
+    for svc in expected_services:
+        if manifest_text is not None and not _service_present(manifest_text, svc):
+            results[svc]["notes"] = (
+                f"[services.{svc}] not declared in the manifest — nothing to "
+                f"probe (see has_service_{svc}). A hook-started process is not "
+                f"a Flox-managed service."
+            )
+            continue
+
+        probe = _probe_command_for(svc)
+        if not probe:
+            results[svc]["notes"] = (
+                f"no connectivity probe for '{svc}' — not probeable, not failed"
+            )
+            continue
+
+        ok, out = _run_flox(
+            ["activate", "--start-services", "-c", _probe_script(probe, settle)],
+            cwd=str(target_dir),
+            timeout=timeout,
+        )
+        if SERVICE_OK in out:
+            results[svc].update(ok=True, skipped=False, notes="")
+        elif SERVICE_DEAD in out:
+            results[svc].update(
+                ok=False, skipped=False,
+                notes=(
+                    f"service declared but never answered `{probe}` within "
+                    f"{settle}s: {out.strip()[:200]}"
+                ),
+            )
+        else:
+            # No sentinel => the script never ran. That is a harness/env
+            # problem, not a verdict on the service.
+            results[svc].update(
+                ok=None, skipped=True,
+                notes=(
+                    f"could not be probed (flox error, not a service verdict): "
+                    f"{out.strip()[:200]}"
+                ),
+            )
+    return results
+
+
 # --- Tier 2 LLM judge ------------------------------------------------------
 # Tier 1's _judge diffs the produced manifest against a hand-tuned gold
 # TOML file. Tier 2 has no gold manifest for these repos — the reference is
@@ -299,8 +451,9 @@ def _base(entry):
 
 # --- per-entry runner --------------------------------------------------------
 
-def process_entry(entry, skill_dir, activate=False, clone_timeout=900,
-                  agent_timeout=1800, activation_timeout=TIER2_ACTIVATION_TIMEOUT):
+def process_entry(entry, skill_dir, activate=False, services=False,
+                  clone_timeout=900, agent_timeout=1800,
+                  activation_timeout=TIER2_ACTIVATION_TIMEOUT):
     """Clone the repo at its pinned SHA, run /floxify against it, and score
     the produced manifest with structural conformance + LLM judge."""
     tmpdir = tempfile.mkdtemp(prefix=f"floxify-tier2-{entry['id']}-")
@@ -356,13 +509,38 @@ def process_entry(entry, skill_dir, activate=False, clone_timeout=900,
                 "dev envs are too heavy to reliably activate)",
             )
 
+        # Service probe (AI-447). Requires a working activation — probing a
+        # environment that can't even activate would report a misleading
+        # service failure rather than the real (activation) one.
+        if services and act_ok:
+            svc_results = _probe_services(
+                tmp, entry.get("expected_services", []),
+                manifest_text=manifest_text,
+            )
+        elif services:
+            svc_results = {
+                svc: {"ok": None, "skipped": True,
+                      "notes": "activation did not succeed — service probe not attempted"}
+                for svc in entry.get("expected_services", [])
+            }
+        else:
+            svc_results = {}
+
         verdict = _judge_tier2(entry, manifest_text)
 
         status = "PASS" if hard_pass else "FAIL"
         act_str = "skipped" if act_skipped else ("ok" if act_ok else "FAIL")
+        svc_str = ""
+        if svc_results:
+            failed = [s for s, r in svc_results.items() if r["ok"] is False]
+            served = [s for s, r in svc_results.items() if r["ok"] is True]
+            svc_str = (
+                f"  services={'FAIL:' + ','.join(failed) if failed else 'ok'}"
+                f"({len(served)}/{len(svc_results)} serving)"
+            )
         print(
             f"  {entry['id']}: hard={status}  judge={verdict['score']}/5  "
-            f"activate={act_str}",
+            f"activate={act_str}{svc_str}",
             flush=True,
         )
 
@@ -371,6 +549,7 @@ def process_entry(entry, skill_dir, activate=False, clone_timeout=900,
             "hard_checks": hard,
             "hard_pass": hard_pass,
             "activation": {"ok": act_ok, "skipped": act_skipped, "notes": act_notes},
+            "services": svc_results,
             "judge": verdict,
             "manifest_excerpt": (manifest_text or "")[:3000],
             "agent_output_excerpt": (agent_out or "")[:800],
@@ -379,14 +558,15 @@ def process_entry(entry, skill_dir, activate=False, clone_timeout=900,
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-def process_task(entry, skill_dir, reps=1, activate=False, clone_timeout=900,
-                  agent_timeout=1800, activation_timeout=TIER2_ACTIVATION_TIMEOUT):
+def process_task(entry, skill_dir, reps=1, activate=False, services=False,
+                  clone_timeout=900, agent_timeout=1800,
+                  activation_timeout=TIER2_ACTIVATION_TIMEOUT):
     """Run `reps` repetitions of an entry. A single rep returns the plain
     per-entry result (dashboard-compatible with a Tier-1-shaped result);
     multiple reps return an aggregate with each run kept under "runs"."""
     runs = [
         process_entry(
-            entry, skill_dir, activate=activate,
+            entry, skill_dir, activate=activate, services=services,
             clone_timeout=clone_timeout, agent_timeout=agent_timeout,
             activation_timeout=activation_timeout,
         )
@@ -467,6 +647,15 @@ def main():
         ),
     )
     ap.add_argument(
+        "--services", action="store_true",
+        help=(
+            "Opt in to service startup + connectivity probing (AI-447): after a "
+            "successful activation, `flox services start`, probe each expected "
+            "service for real connectivity (pg_isready / redis-cli ping), then "
+            "stop. Advisory. Implies --activate to be meaningful."
+        ),
+    )
+    ap.add_argument(
         "--concurrency", type=int, default=1,
         help="Parallel repo runs (default 1 — clones + skill runs are heavy)",
     )
@@ -517,6 +706,7 @@ def main():
             pool.map(
                 lambda e: process_task(
                     e, skill_dir, reps=args.reps, activate=args.activate,
+                    services=args.services,
                     clone_timeout=args.clone_timeout,
                     agent_timeout=args.agent_timeout,
                     activation_timeout=args.activation_timeout,

@@ -309,5 +309,148 @@ class TestRegistryPatternDriftGuard(unittest.TestCase):
         self.assertTrue(all(checks.values()), checks)
 
 
+class TestProbeCommandFor(unittest.TestCase):
+    """AI-447: per-kind connectivity probes.
+
+    The postgres probe deliberately passes NO host/port. `pg_isready` reads
+    PGHOST/PGPORT from the environment, and the environment is what the
+    manifest's own [vars] set — so a bare `pg_isready` asserts the service is
+    reachable *at the address the manifest advertises*. That is the check that
+    catches a manifest whose [vars] point at a datastore nothing serves.
+    """
+
+    def test_postgres_probe_is_bare_pg_isready(self):
+        cmd = tier2._probe_command_for("postgres")
+        self.assertIn("pg_isready", cmd)
+        self.assertNotIn("-h ", cmd)
+        self.assertNotIn("-p ", cmd)
+
+    def test_postgresql_alias_resolves(self):
+        self.assertIn("pg_isready", tier2._probe_command_for("postgresql"))
+
+    def test_redis_probe_expects_pong(self):
+        cmd = tier2._probe_command_for("redis")
+        self.assertIn("redis-cli", cmd)
+        self.assertIn("ping", cmd.lower())
+
+    def test_mariadb_probe(self):
+        self.assertIn("admin", tier2._probe_command_for("mariadb"))
+
+    def test_unknown_kind_has_no_probe(self):
+        self.assertIsNone(tier2._probe_command_for("clickhouse"))
+
+
+class TestProbeServices(unittest.TestCase):
+    """AI-447: prove services actually serve, not just that a section exists.
+
+    Services can only be started from *inside* an activation — `flox services
+    start` on an unactivated env errors with "Cannot start services for an
+    environment that is not activated". So the probe is a single
+    `flox activate --start-services -c <script>`, where the script polls the
+    connectivity probe and prints a sentinel.
+
+    The sentinels matter: they separate "the service did not serve" (a real
+    verdict about the manifest) from "flox/the environment errored" (a harness
+    problem that must never be reported as a service failure).
+    """
+
+    @patch("tier2.shutil.which", return_value=None)
+    def test_flox_absent_skips_rather_than_fails(self, _which):
+        res = tier2._probe_services("/tmp/x", ["postgres"])
+        self.assertTrue(res["postgres"]["skipped"])
+        self.assertIsNone(res["postgres"]["ok"])
+
+    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
+    @patch("tier2._run_flox")
+    def test_uses_activate_start_services_not_bare_services_start(
+        self, mock_flox, _which
+    ):
+        mock_flox.return_value = (True, "__SERVICE_OK__")
+        tier2._probe_services("/tmp/x", ["postgres"])
+        args = mock_flox.call_args_list[0].args[0]
+        self.assertIn("activate", args)
+        self.assertIn("--start-services", args)
+
+    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
+    @patch("tier2._run_flox")
+    def test_service_serving_is_ok(self, mock_flox, _which):
+        mock_flox.return_value = (True, "__SERVICE_OK__")
+        res = tier2._probe_services("/tmp/x", ["postgres"])
+        self.assertTrue(res["postgres"]["ok"], res)
+        self.assertFalse(res["postgres"]["skipped"])
+
+    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
+    @patch("tier2._run_flox")
+    def test_service_never_comes_up_is_a_real_failure(self, mock_flox, _which):
+        # THE case this ticket exists for: [services.*] present, activation ok,
+        # but nothing ever answers on the advertised address.
+        mock_flox.return_value = (False, "__SERVICE_DEAD__")
+        res = tier2._probe_services("/tmp/x", ["postgres"])
+        self.assertFalse(res["postgres"]["ok"], res)
+        self.assertFalse(res["postgres"]["skipped"], res)
+
+    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
+    @patch("tier2._run_flox")
+    def test_harness_error_is_skipped_not_a_service_failure(self, mock_flox, _which):
+        # No sentinel in the output => flox itself errored (bad flag, env
+        # broken, timeout). Reporting that as "your postgres is broken" would
+        # be a lie — exactly the confusion AI-454 flags for activation.
+        mock_flox.return_value = (False, "ERROR: unknown flag --start-services")
+        res = tier2._probe_services("/tmp/x", ["postgres"])
+        self.assertTrue(res["postgres"]["skipped"], res)
+        self.assertIsNone(res["postgres"]["ok"], res)
+        self.assertIn("could not be probed", res["postgres"]["notes"])
+
+    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
+    @patch("tier2._run_flox")
+    def test_unprobeable_service_is_skipped_not_failed(self, mock_flox, _which):
+        # clickhouse has no probe; absence of a probe must never read as failure.
+        mock_flox.return_value = (True, "__SERVICE_OK__")
+        res = tier2._probe_services("/tmp/x", ["clickhouse"])
+        self.assertTrue(res["clickhouse"]["skipped"])
+        self.assertIsNone(res["clickhouse"]["ok"])
+
+    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
+    @patch("tier2._run_flox")
+    def test_undeclared_service_is_not_probed(self, mock_flox, _which):
+        """A service the manifest never declared must not be probed at all.
+
+        Regression: lemmy produced a manifest with NO [services.*] section
+        whose [hook] nevertheless started postgres to bootstrap the database.
+        A bare `pg_isready` then answered, and the probe reported OK — for an
+        environment with no service. A hook-spawned postgres is not a
+        Flox-managed service: `flox services` can't start/stop/status it and it
+        dies with the activation. Crediting it is a false positive.
+
+        `has_service_*` owns "did you wire it"; the probe owns "does the wired
+        service work". Probing an undeclared service answers neither.
+        """
+        manifest = '[install]\npg.pkg-path = "postgresql_16"\n[hook]\non-activate = "pg_ctl start"\n'
+        res = tier2._probe_services("/tmp/x", ["postgres"], manifest_text=manifest)
+        self.assertTrue(res["postgres"]["skipped"], res)
+        self.assertIsNone(res["postgres"]["ok"], res)
+        self.assertIn("not declared", res["postgres"]["notes"])
+        mock_flox.assert_not_called()
+
+    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
+    @patch("tier2._run_flox")
+    def test_declared_service_is_probed(self, mock_flox, _which):
+        mock_flox.return_value = (True, "__SERVICE_OK__")
+        manifest = '[services.postgres]\ncommand = "postgres"\n'
+        res = tier2._probe_services("/tmp/x", ["postgres"], manifest_text=manifest)
+        self.assertTrue(res["postgres"]["ok"], res)
+        mock_flox.assert_called()
+
+    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
+    @patch("tier2._run_flox")
+    def test_probe_script_polls_for_readiness(self, mock_flox, _which):
+        # Services start asynchronously — a single immediate probe would race.
+        mock_flox.return_value = (True, "__SERVICE_OK__")
+        tier2._probe_services("/tmp/x", ["postgres"])
+        script = mock_flox.call_args_list[0].args[0][-1]
+        self.assertIn("pg_isready", script)
+        self.assertIn("sleep", script)
+
+
 if __name__ == "__main__":
     unittest.main()
