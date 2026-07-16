@@ -47,6 +47,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 try:
     import tomllib  # Python 3.11+
@@ -69,6 +70,31 @@ DISCLAIMER = (
 
 def violation(rule, message, severity=HARD, **extra):
     return {"rule": rule, "severity": severity, "message": message, **extra}
+
+
+def hard_violations(violations_or_result):
+    """The HARD-severity subset — from either a `verify()` result dict or
+    a raw violations list. Centralizes the severity partition so callers
+    (this module's own `main`/`_print_report`, the harness, tests) never
+    re-derive it from the raw "hard" string literal, which is exactly the
+    kind of scattered duplication that lets a typo silently stop gating.
+    """
+    violations = (
+        violations_or_result["violations"]
+        if isinstance(violations_or_result, dict)
+        else violations_or_result
+    )
+    return [v for v in violations if v["severity"] == HARD]
+
+
+def advisory_violations(violations_or_result):
+    """The ADVISORY-severity subset — see `hard_violations`."""
+    violations = (
+        violations_or_result["violations"]
+        if isinstance(violations_or_result, dict)
+        else violations_or_result
+    )
+    return [v for v in violations if v["severity"] == ADVISORY]
 
 
 # ---------------------------------------------------------------------------
@@ -96,12 +122,16 @@ def _pkg_path_str(descriptor):
 # invariant 1 — every detected runtime is installed
 # ---------------------------------------------------------------------------
 
+# NOTE: bare "python" (no `3`) deliberately does NOT match -- confirmed
+# live, it resolves to Python 2.7 in the catalog. Matching it would make
+# this check pass a manifest that installed Python 2 for a repo needing
+# Python 3, which is worse than not checking at all.
 RUNTIME_PKG_PATTERNS = {
-    "python": re.compile(r"^python\d{2,3}(Full|FreeThreading)?$"),
+    "python": re.compile(r"^python3(\d{2})?(Full|FreeThreading)?$"),
     "node": re.compile(r"^nodejs(_\d+)?$"),
     "ruby": re.compile(r"^ruby(_\d+_\d+)?$"),
     "go": re.compile(r"^go(_\d+_\d+)?$"),
-    "rust": re.compile(r"^(cargo|rustc)$"),
+    "rust": re.compile(r"^(cargo|rustc|rustup)$"),
     "elixir": re.compile(r"^elixir$"),
     "php": re.compile(r"^php\d*(Packages\..+)?$"),
     "deno": re.compile(r"^deno$"),
@@ -112,6 +142,31 @@ RUNTIME_PKG_PATTERNS = {
     "swift": re.compile(r"^swift$"),
     "zig": re.compile(r"^zig$"),
     "bun": re.compile(r"^bun$"),
+}
+
+# detect.py's TOOL_LANG dict (.tool-versions / .mise.toml) can emit a
+# canonical language this table has no pattern for -- check_runtimes_installed
+# silently skips those (nothing to compare against), which is exactly the
+# posthog/AI-453 failure mode this invariant exists to catch. Rather than
+# leave that gap implicit, every TOOL_LANG value is either a
+# RUNTIME_PKG_PATTERNS key or has a documented reason here for staying out.
+# test_verify.py asserts this list is exhaustive against detect.py's own
+# TOOL_LANG, so a new language added there fails CI until it's triaged here.
+RUNTIME_PATTERNS_DELIBERATELY_EXCLUDED = {
+    # Bundled inside the `elixir` catalog package -- the skill's own
+    # guidance (SKILL.md) is "do NOT add erlang separately". A standalone
+    # (non-Elixir) Erlang project would false-negative here; narrow enough
+    # in practice that a dedicated pattern isn't worth the false-positive
+    # risk of guessing the wrong catalog name for the bundled case.
+    "erlang": "bundled in the elixir package; see SKILL.md",
+    # No catalog pkg-path this checker can verify without risking a wrong
+    # guess: bare "java" does not resolve (confirmed live); the real name
+    # is version-qualified ("jdk", "jdk21", ...) and detect.py doesn't
+    # extract a specific JDK version to disambiguate against.
+    "java": "catalog name is version-qualified (jdk/jdk21/...); not yet mapped",
+    # Not a language runtime the [install]-matching convention above
+    # applies to the same way; out of scope for this invariant.
+    "terraform": "infra tool, not a language runtime this invariant targets",
 }
 
 
@@ -225,9 +280,39 @@ def check_leaf_datastore_services(detect, manifest):
     return violations
 
 
+def _looks_local(host):
+    """True for hosts a Flox [services.*] block could plausibly be serving:
+    loopback forms, `*.local`, and bare single-label names (no dot) —
+    docker-compose/k8s service names like `postgres` or `db-primary`
+    almost never carry a dot, unlike a real external FQDN. A host that
+    doesn't match any of these (`db.prod.internal.example.com`, a public
+    IP) is a strong signal the datastore is intentionally external — see
+    check_vars_endpoints' ADVISORY downgrade for that case.
+    """
+    if not host:
+        return True  # unparseable -- don't assume external on no evidence
+    host = host.lower()
+    if host in ("localhost", "0.0.0.0", "::1"):
+        return True
+    if re.match(r"^127(?:\.\d{1,3}){3}$", host):
+        return True
+    if host.endswith(".local"):
+        return True
+    if "." not in host and ":" not in host:
+        return True
+    return False
+
+
 def check_vars_endpoints(detect, manifest):
     """A [vars] value that advertises a datastore connection string must be
-    backed by a matching [services.*] (or a compose service)."""
+    backed by a matching [services.*] (or a compose service).
+
+    HARD when the host looks local (a Flox service could plausibly be the
+    thing missing); ADVISORY when the host doesn't (`db.prod.internal.
+    example.com`, a public IP) — a managed external datastore with no
+    local service is a common, often intentional pattern, not necessarily
+    a bug (see check_vars_endpoints' _looks_local for the exact rule).
+    """
     violations = []
     for key, value in (manifest.get("vars", {}) or {}).items():
         if not isinstance(value, str):
@@ -238,11 +323,22 @@ def check_vars_endpoints(detect, manifest):
         kind = _CONN_STRING_KIND[m.group(1).lower()]
         if _compose_covers(detect, kind) or _service_covers(manifest, kind):
             continue
-        violations.append(violation(
-            "vars-endpoint-not-served",
-            f"[vars] {key}='{_truncate(value)}' advertises {kind} but no "
-            f"[services.{kind}] serves it",
-        ))
+        host = urlsplit(value[m.start():]).hostname
+        if _looks_local(host):
+            violations.append(violation(
+                "vars-endpoint-not-served",
+                f"[vars] {key}='{_truncate(value)}' advertises {kind} but "
+                f"no [services.{kind}] serves it",
+            ))
+        else:
+            violations.append(violation(
+                "vars-endpoint-not-served",
+                f"[vars] {key}='{_truncate(value)}' advertises {kind} at a "
+                f"non-local host ('{host}') with no [services.{kind}] — "
+                f"confirm this is an intentionally external/managed "
+                f"datastore, not an oversight",
+                severity=ADVISORY,
+            ))
     return violations
 
 
@@ -250,10 +346,21 @@ def check_vars_endpoints(detect, manifest):
 # invariant 4 — [vars] are literal strings, never `$`-expanded
 # ---------------------------------------------------------------------------
 
+# Matches EXPANSION-SHAPED references only: `${VAR}` (braced -- always
+# intentional shell syntax) or a bare `$UPPER_SNAKE_CASE` identifier,
+# the standard env-var naming convention (`$FLOX_ENV_CACHE`, `$HOME`).
+# Deliberately excludes any `$` followed by lowercase or digits, which is
+# what a plain "any '$' at all" check used to false-fire HARD on: a
+# password (`p@ss$word5`), a bcrypt hash (`$2b$10$...`), an argon2 hash
+# (`$argon2id$v=19$...`) -- none of these contain an upper-snake-case
+# identifier, so none match.
+_VARS_EXPANSION_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Z][A-Z0-9_]*\b")
+
+
 def check_vars_literal(manifest):
     violations = []
     for key, value in (manifest.get("vars", {}) or {}).items():
-        if isinstance(value, str) and "$" in value:
+        if isinstance(value, str) and _VARS_EXPANSION_RE.search(value):
             violations.append(violation(
                 "vars-not-literal",
                 f"[vars] {key} contains '{value}' — [vars] are literal; "
@@ -268,38 +375,73 @@ def check_vars_literal(manifest):
 
 _GIT_MUTATION_RE = re.compile(
     r"\bgit\s+(?:submodule\s+update|checkout|reset|clean|pull|commit|add|"
-    r"stash|rm|mv|apply|cherry-pick|rebase|merge)\b"
+    r"stash|rm|mv|apply|cherry-pick|rebase|merge|restore|switch|revert)\b"
 )
 
+# Flags that turn an otherwise-mutating git verb into a dry run / read-only
+# check in the SAME statement (e.g. `git apply --check patch.diff` validates
+# a patch without touching the tree).
+_GIT_READ_ONLY_FLAGS_RE = re.compile(r"--check\b|--dry-run\b|--stat\b")
 
-def _line_containing(text, offset):
-    start = text.rfind("\n", 0, offset) + 1
-    end = text.find("\n", offset)
-    if end == -1:
-        end = len(text)
-    return text[start:end]
+_ECHO_OR_PRINTF_RE = re.compile(r"^\s*(echo|printf)\b")
+
+
+def _strip_comment(line):
+    """Strip a trailing `# ...` comment, respecting simple '/" quoting.
+
+    Not a full shell parser — good enough for hook scripts, which are
+    short and rarely nest quoting deeply. A `#` inside a quoted string
+    (`echo "price is $5 #1"`) is left alone; an unquoted `#` starts a
+    comment, matching how bash itself treats it.
+    """
+    in_single = in_double = False
+    for i, ch in enumerate(line):
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == "#" and not in_single and not in_double:
+            return line[:i]
+    return line
 
 
 def check_hook_no_mutation(manifest):
     """Hooks run on EVERY activation — a hook that mutates the tracked git
     tree (`git submodule update`, `git checkout`, ...) re-mutates it every
-    time the developer activates."""
+    time the developer activates.
+
+    Comments and `echo`/`printf` text are excluded before matching (a git
+    verb *mentioned* in a comment or printed to the user is not executed),
+    and a dry-run flag (`--check`, `--dry-run`, `--stat`) in the same
+    statement exempts it (`git apply --check` validates without mutating).
+    """
     violations = []
     hook = manifest.get("hook", {}) or {}
     script = hook.get("on-activate")
     if not isinstance(script, str):
         return violations
+
     seen = set()
-    for m in _GIT_MUTATION_RE.finditer(script):
-        line = _line_containing(script, m.start()).strip()
-        if line in seen:
+    for raw_line in script.splitlines():
+        line = _strip_comment(raw_line)
+        if not line.strip():
             continue
-        seen.add(line)
-        violations.append(violation(
-            "hook-mutates-tree",
-            f"[hook] on-activate runs '{line}' — hooks run on every "
-            f"activation and must not mutate the tracked git tree",
-        ))
+        for stmt in re.split(r"[;&|]+", line):
+            stmt = stmt.strip()
+            if not stmt or _ECHO_OR_PRINTF_RE.match(stmt):
+                continue
+            if not _GIT_MUTATION_RE.search(stmt):
+                continue
+            if _GIT_READ_ONLY_FLAGS_RE.search(stmt):
+                continue
+            if stmt in seen:
+                continue
+            seen.add(stmt)
+            violations.append(violation(
+                "hook-mutates-tree",
+                f"[hook] on-activate runs '{stmt}' — hooks run on every "
+                f"activation and must not mutate the tracked git tree",
+            ))
     return violations
 
 
@@ -307,6 +449,16 @@ def check_hook_no_mutation(manifest):
 # invariant 6 — catalog resolution (pkg-path / version / per-system)
 # ---------------------------------------------------------------------------
 
+# Per-process, per-pkg-path cache -- avoids re-running `flox show` for the
+# same pkg-path twice within one `verify()` call (or across the multiple
+# goldens test_golden_lint.py checks in a single run). It does NOT persist
+# across separate process invocations, and each dynamically-loaded module
+# instance (see _skill_module_loader.py) gets its OWN empty cache -- the
+# harness's per-task reload in run_floxify.py therefore pays for a fresh
+# `flox show` per task rather than sharing a cache across the whole eval
+# run. That's an accepted trade-off, not a bug: it keeps each task's
+# result independent of load/call order, at the cost of some redundant
+# network calls across a multi-task harness run.
 _SHOW_CACHE = {}
 
 # Matches a pinned version string ("24.13.0", "14", "python3-3.13.13").
@@ -347,24 +499,45 @@ def _pinned_version_match(declared, catalog_versions):
 
 def _run_show_command(pkg_path, flox_bin, timeout):
     """Thin wrapper around `flox show <pkg-path>` — the whole surface a test
-    needs to mock to keep catalog checks off the network."""
+    needs to mock to keep catalog checks off the network.
+
+    `--` separates the positional pkg-path from option parsing: a
+    manifest-derived pkg_path beginning with `-` (accidental or malicious)
+    would otherwise be read as a flag by `flox show` instead of yielding a
+    clean catalog-unresolved verdict.
+    """
     return subprocess.run(
-        [flox_bin, "show", pkg_path], capture_output=True, text=True, timeout=timeout,
+        [flox_bin, "show", "--", pkg_path], capture_output=True, text=True, timeout=timeout,
     )
 
 
 def _parse_flox_show(text):
-    """Parse `flox show <pkg-path>` output into {version: {systems}}.
+    """Parse `flox show <pkg-path>` output.
 
-    An "Other versions" line with no "(... only)" annotation supports all
-    four systems; an annotated line is restricted to exactly the systems
-    listed. `Latest:` gives the version to use when a manifest entry omits
-    `version`.
+    Returns `{"latest": version-or-None, "latest_systems": set-or-None,
+    "versions": {version: systems-set-or-None}}`.
+
+    `latest_systems` comes from the header `Systems:` line, confirmed
+    against live output to describe ONLY the `Latest:` entry (it matches
+    that version's own "Other versions" parenthetical exactly) — NOT a
+    default for every version, and never treated as one. Each "Other
+    versions" entry carries its own systems: no parenthetical means all
+    four platforms; "(sys1, sys2 only)" restricts it to exactly those.
+    A parenthetical that does NOT end in "only" is a format this parser
+    doesn't recognize, so that version's systems is None — genuinely
+    unknown, never asserted as either present or absent (see
+    check_catalog's handling of `available is None`).
     """
     latest = None
     m = re.search(r"^Latest:\s*\S+@(\S+)", text, re.M)
     if m:
         latest = m.group(1)
+
+    latest_systems = None
+    m = re.search(r"^Systems:\s*(.+)$", text, re.M)
+    if m:
+        latest_systems = {s.strip() for s in m.group(1).split(",") if s.strip()}
+
     versions = {}
     in_other = False
     for line in text.splitlines():
@@ -374,13 +547,19 @@ def _parse_flox_show(text):
             continue
         if not in_other or not stripped:
             continue
-        vm = re.match(r"^\S+@(\S+?)\s*(?:\(([^)]*?)\s+only\))?$", stripped)
+        vm = re.match(r"^\S+@(\S+?)\s*(?:\((?P<paren>[^)]*)\))?$", stripped)
         if not vm:
             continue
-        ver, sys_group = vm.group(1), vm.group(2)
-        systems = {s.strip() for s in sys_group.split(",")} if sys_group else set(ALL_SYSTEMS)
+        ver, paren = vm.group(1), vm.group("paren")
+        if paren is None:
+            systems = set(ALL_SYSTEMS)
+        elif paren.rstrip().endswith("only"):
+            names = paren.rsplit("only", 1)[0]
+            systems = {s.strip() for s in names.split(",") if s.strip()}
+        else:
+            systems = None
         versions[ver] = systems
-    return {"latest": latest, "versions": versions}
+    return {"latest": latest, "latest_systems": latest_systems, "versions": versions}
 
 
 def _flox_show(pkg_path, flox_bin="flox", timeout=30):
@@ -409,11 +588,19 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
     harness gives its own activation check, for the same reason: this needs
     a live catalog and network access neither test environment nor CI
     always has.
+
+    Returns `(violations, catalog_checked, unknown)`. `unknown` lists
+    install entries whose per-system availability `flox show`'s own text
+    didn't establish (see `_parse_flox_show`) — these are NOT asserted
+    clean. A caller that reports "every pkg-path was confirmed" (the
+    harness's judge note) must exclude this list from that claim, not
+    silently fold it into a default-to-all-systems guess.
     """
     if not live or not shutil.which(flox_bin):
-        return [], False
+        return [], False, []
 
     violations = []
+    unknown = []
     options = manifest.get("options", {}) or {}
     default_systems = set(options.get("systems") or ALL_SYSTEMS)
 
@@ -429,6 +616,7 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
                 "catalog-unresolved",
                 f"[install] {install_id}.pkg-path = \"{pkg_path}\" does not "
                 f"resolve in the catalog ({show['error']})",
+                pkg_path=pkg_path, install_id=install_id,
             ))
             continue
 
@@ -442,13 +630,28 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
                     "catalog-version-missing",
                     f"[install] {install_id}.version = \"{version}\" does not "
                     f"exist for pkg-path \"{pkg_path}\"",
+                    pkg_path=pkg_path, install_id=install_id,
                 ))
                 continue
             available = show["versions"][matched]
             version_label = matched
         else:
-            available = show["versions"].get(show["latest"], set(ALL_SYSTEMS))
+            # Unpinned -> resolves to Latest. Ground truth for Latest's
+            # systems is the header `Systems:` line (`latest_systems`),
+            # not a guess — falling back to the "Other versions" entry
+            # only if the header itself was unparseable.
+            available = show.get("latest_systems")
+            if available is None:
+                available = show["versions"].get(show["latest"])
             version_label = show["latest"] or "latest"
+
+        if available is None:
+            # flox show's own text didn't establish this version's
+            # systems — genuinely unknown. Never asserted clean OR
+            # mismatched; excluded from the harness's "confirmed" table.
+            unknown.append({"install_id": install_id, "pkg_path": pkg_path,
+                            "version": version_label})
+            continue
 
         missing = entry_systems - available
         if missing:
@@ -457,8 +660,9 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
                 f"[install] {install_id}.pkg-path = \"{pkg_path}\" "
                 f"(version {version_label}) has no build for "
                 f"{', '.join(sorted(missing))}, but options.systems declares it",
+                pkg_path=pkg_path, install_id=install_id,
             ))
-    return violations, True
+    return violations, True, unknown
 
 
 # ---------------------------------------------------------------------------
@@ -509,13 +713,20 @@ def check_outputs_heuristic(detect, manifest):
 
 def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
           catalog_timeout=30):
-    """Run every check. Returns {"violations": [...], "catalog_checked": bool}.
+    """Run every check. Returns {"violations": [...], "catalog_checked": bool,
+    "catalog_unknown": [...]}.
 
     `detect` may be None/{} — the detect-cross-check invariants (runtimes
     installed, leaf-datastore clients served) degrade to no-ops when there
     are no facts to cross-check against; the manifest-only invariants
     ([vars] literal, hook mutation, catalog resolution, outputs heuristic)
     always run.
+
+    `catalog_unknown` lists install entries the catalog leg could not
+    establish per-system availability for (see check_catalog) — these are
+    NEITHER violations NOR confirmed-clean; a caller claiming "every
+    pkg-path was confirmed" (e.g. the harness's judge note) must exclude
+    them from that claim.
     """
     detect = detect or {}
     manifest, parse_error = parse_manifest(manifest_text)
@@ -525,6 +736,7 @@ def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
                 "invalid-toml", f"manifest.toml does not parse: {parse_error}",
             )],
             "catalog_checked": False,
+            "catalog_unknown": [],
         }
 
     violations = []
@@ -533,19 +745,23 @@ def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
     violations += check_vars_endpoints(detect, manifest)
     violations += check_vars_literal(manifest)
     violations += check_hook_no_mutation(manifest)
-    catalog_violations, catalog_checked = check_catalog(
+    catalog_violations, catalog_checked, catalog_unknown = check_catalog(
         manifest, flox_bin=flox_bin, live=check_catalog_live, timeout=catalog_timeout,
     )
     violations += catalog_violations
     violations += check_outputs_heuristic(detect, manifest)
 
-    return {"violations": violations, "catalog_checked": catalog_checked}
+    return {
+        "violations": violations,
+        "catalog_checked": catalog_checked,
+        "catalog_unknown": catalog_unknown,
+    }
 
 
 def _print_report(result):
     print(DISCLAIMER)
-    hard = [v for v in result["violations"] if v["severity"] == HARD]
-    advisory = [v for v in result["violations"] if v["severity"] == ADVISORY]
+    hard = hard_violations(result)
+    advisory = advisory_violations(result)
 
     if not hard and not advisory:
         print("\nNo violations — manifest is consistent with the detected facts.")
@@ -561,6 +777,15 @@ def _print_report(result):
         print(
             "\nNOTE: catalog checks were skipped (flox not on PATH or "
             "--no-catalog) — pkg-path/version/systems were NOT verified."
+        )
+    unknown = result.get("catalog_unknown") or []
+    if unknown:
+        names = ", ".join(u["install_id"] for u in unknown)
+        print(
+            f"\nNOTE: {len(unknown)} install entr{'y' if len(unknown) == 1 else 'ies'} "
+            f"({names}) had UNKNOWN per-system availability — `flox show`'s "
+            f"own text didn't establish it, so it was neither confirmed nor "
+            f"flagged."
         )
 
 
@@ -603,7 +828,7 @@ def main(argv):
     else:
         _print_report(result)
 
-    return 1 if any(v["severity"] == HARD for v in result["violations"]) else 0
+    return 1 if hard_violations(result) else 0
 
 
 if __name__ == "__main__":
