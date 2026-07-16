@@ -1,5 +1,15 @@
 name: skill-evals
 
+# ─────────────────────────────────────────────────────────────────────────────
+# EVAL CI TEMPORARILY PAUSED for API cost while the skill iterates rapidly.
+# No automatic trigger spends money: PR runs short-circuit to a passing
+# `evals` required check without running any suite, and the weekly floxify
+# schedule is commented out. Manual workflow_dispatch still runs everything
+# on demand. To re-enable, revert the commit that introduced this notice
+# (restores the PR path-diff, the schedule trigger, and the floxify PR
+# clauses). The comments below describe normal (un-paused) operation.
+# ─────────────────────────────────────────────────────────────────────────────
+#
 # Gates changes to the Flox skill / eval suite on the eval harness:
 # run.py --gate exits non-zero only if a functional `should`-tier task fails its
 # deterministic hard-checks. Judge score and implicit-triggering rate are
@@ -25,9 +35,10 @@ name: skill-evals
 # gate only on schedule/dispatch, and Tier 2 is report-only in all modes.
 on:
   pull_request:
-  schedule:
-    # Weekly regression watch for the /floxify skill — Monday 06:00 UTC.
-    - cron: "0 6 * * 1"
+  # Weekly floxify regression watch (Monday 06:00 UTC) disabled while eval CI
+  # is paused for cost.
+  # schedule:
+  #   - cron: "0 6 * * 1"
   workflow_dispatch:
     inputs:
       mode:
@@ -58,6 +69,8 @@ jobs:
     # filter step is skipped and the output is empty, which is fine because
     # those event branches of the floxify `if` don't consult it. This job does
     # NOT gate the fast `evals` (skills) job, which keeps running on every PR.
+    # While eval CI is paused, no `if:` consults its output; kept so the pause
+    # revert stays a one-commit operation.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -91,14 +104,10 @@ jobs:
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "Non-PR event; running the full eval suite."
             echo "run=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only \
-                 "${{ github.event.pull_request.base.sha }}" \
-                 "${{ github.event.pull_request.head.sha }}" \
-               | grep -qE '^(flox-plugin/|evals/|[.]github/workflows/evals[.]yml)'; then
-            echo "Skill/eval sources changed; running the full eval suite."
-            echo "run=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No skill/eval changes; reporting evals as passed without running the suite."
+            # Eval CI paused for cost: every PR short-circuits to a passing
+            # required check. Run the suite via workflow_dispatch instead.
+            echo "Eval CI paused; reporting evals as passed without running the suite."
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -147,8 +156,9 @@ jobs:
     # dispatch, and on PRs that touch the floxify eval sources or the skill
     # (via the `changes` filter). --gate binds on should-tier hard-checks;
     # judge score and activation are advisory.
+    # PR clause dropped while eval CI is paused for cost.
     needs: changes
-    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_floxify == 'true') || (github.event_name == 'pull_request' && needs.changes.outputs.floxify == 'true') }}
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_floxify == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -192,8 +202,9 @@ jobs:
     # build on eval outcome. Activation stays OFF for CI cost — the manifest's
     # hook commands (e.g. Ruby's bundler pin) are not validated here; a live
     # Ruby-activation run is a known follow-up (AI-431).
+    # PR clause dropped while eval CI is paused for cost.
     needs: changes
-    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_floxify == 'true') || (github.event_name == 'pull_request' && needs.changes.outputs.floxify == 'true') }}
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_floxify == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
