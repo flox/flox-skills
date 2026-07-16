@@ -65,6 +65,46 @@ Ecosystem: Ruby (Rails 8.1 monolith) + Node streaming/API service.
 | `flox show gcc` | 15.2.0 | `gcc` |
 | `flox show gnumake` | 4.4.1 | `gnumake` |
 
+### 2a. AI-457 re-verification (per-system availability + outputs, 2026-07-16)
+
+| Command | Result | Decision |
+|---------|--------|----------|
+| `flox show nodejs_24` | `24.18.0` (aarch64-darwin, aarch64-linux, x86_64-linux only) | missing x86_64-darwin |
+| `flox show ffmpeg` | latest `8.1.2` (aarch64-darwin, aarch64-linux, x86_64-linux only) | missing x86_64-darwin |
+| `flox show libidn` | latest `1.44` (aarch64-darwin, aarch64-linux, x86_64-linux only) | missing x86_64-darwin |
+| `flox show postgresql_14` | `Outputs: dev, doc, jit, lib, man*, out*, ...` | `out`+`man` default; `lib`/`dev` NOT default — added for pg gem |
+| `flox show vips` | `Outputs: bin*, dev, man*, out` | `bin`+`man` default; `libvips.so` lives in `out` (not default) |
+| `flox show icu` | `Outputs: dev, out*` | `out` default; `dev` (headers) NOT default — added for charlock_holmes |
+| `flox show libidn` | `Outputs: bin*, dev, out, info, devdoc` | `bin` only default; `out`/`dev` NOT default — added for idn-ruby |
+
+All three of nodejs_24, ffmpeg, and libidn are HARD runtime dependencies
+(Node streaming service, video transcoding, idn-ruby respectively), so
+`[options].systems` drops `x86_64-darwin` entirely rather than scoping a
+per-package `systems` override — the environment cannot activate on Intel
+macOS regardless of which of the three is asked for. `ruby_4_0`,
+`postgresql_14`, `icu`, and `yarn-berry` DO have x86_64-darwin builds
+(verified, all four systems, no parenthetical restriction) but there is no
+reason to keep the whole environment claiming a platform it can't actually
+run on for three of its own hard deps.
+
+### AI-457 activation validation
+
+This golden was actually `flox activate`d (x86_64-linux, in a throwaway
+directory seeded only with `.flox/env/manifest.toml` -- no real mastodon
+checkout, so `bundle install`/`yarn install` fail on a missing Gemfile/
+package.json as expected; that is a scratch-test artifact, not a manifest
+defect). The systems fix alone was not enough: with only `nodejs_24`,
+`ffmpeg`, and `libidn` fixed, resolution failed with `constraints for
+group 'toplevel' are too tight` -- the catalog has no single page
+containing `ruby_4_0@4.0.5` and `nodejs_24@24.18.0` together with
+`postgresql_14`/`redis`/`vips`/`icu`/`libidn`. Confirmed by reverting to
+the pre-AI-457 manifest: it failed with a *different*, more specific error
+(`No version compatible with '24.18.0' found for 'nodejs_24' on
+'x86_64-darwin'`), proving the toplevel conflict was masked behind the
+systems bug and not a new regression from this fix. Isolating `ruby_4_0`
+and `nodejs_24` each into their own `pkg-group` resolved it -- the
+manifest now activates cleanly with `flox activate -c "echo __ok__"`.
+
 ---
 
 ## 3. Chosen versions + mismatches vs catalog

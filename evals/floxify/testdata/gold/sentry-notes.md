@@ -104,6 +104,54 @@ reason to defer them is stronger than availability:
 So: catalog availability ≠ correct to wire. Deferring to `devservices` is
 the idiomatic and functionally-correct answer.
 
+## AI-457 re-verification (per-system availability + outputs, 2026-07-16)
+
+The manifest had no `[options].systems` at all, so every `[install]` entry
+defaulted to requiring all four platforms. Live re-check found five
+packages that don't have an x86_64-darwin build at their pin/latest:
+
+| pkg-path | Result | Note |
+|----------|--------|------|
+| `flox show python313` | latest `python3-3.13.14` (aarch64-darwin, aarch64-linux, x86_64-linux only); unpinned in the manifest | missing x86_64-darwin |
+| `flox show nodejs_24` | latest `24.18.0` (same three systems); unpinned | missing x86_64-darwin |
+| `flox show uv` | latest `0.11.26` (same three systems) | missing x86_64-darwin |
+| `flox show pnpm_10` | latest `10.34.5` (same three systems) | missing x86_64-darwin |
+| `flox show openssl` | latest `3.6.3` (same three systems) | missing x86_64-darwin |
+| `flox show postgresql`, `redis`, `xmlsec`, `libxml2`, `libxslt`, `pkg-config`, `watchman` | all four systems, no restriction | unaffected |
+
+Blanket-dropping `x86_64-darwin` from `[options].systems` (the pattern used
+for mastodon/gitea/posthog, where every constrained package is a genuine
+hard blocker for the whole env) would have needlessly stranded
+postgres/redis/xmlsec/libxml2/libxslt/pkg-config/watchman on Intel macOS
+too — none of those are actually broken there. Instead each of the five
+constrained packages gets its own `.systems = [...]` override (the
+per-package platform-conditional pattern the floxify skill documents in
+SKILL.md), leaving the seven unaffected packages available on all four
+systems.
+
+Also fixed: `xmlsec`, `libxml2`, `libxslt`, and `openssl` all default to a
+partial output set (`Outputs: dev, out*` for xmlsec — `out` only by
+default; `Outputs: bin*, dev, out` for libxml2 and libxslt — `bin` only by
+default; `Outputs: bin*, dev, ... out` for openssl — `bin`+`man` only by
+default). None shipped headers (`dev`) by default, which the notes above
+already say these packages exist for (xmlsec-python/lxml/cryptography
+building from source against them) — added `.outputs = ["out", "dev"]` to
+each so the from-source build path this manifest documents can actually
+link.
+
+**Activation validation.** Per-package `systems` alone was not enough to
+activate: `flox activate` (x86_64-linux, throwaway directory, no real
+sentry checkout) failed with `constraints for group 'toplevel' are too
+tight` even after the systems fix -- leaving python313/nodejs_24/uv/
+pnpm_10/openssl in the shared toplevel group alongside postgresql/redis/
+xmlsec/libxml2/libxslt/pkg-config/watchman had no single catalog page
+satisfying all of them together. Giving the five systems-constrained
+packages a shared `pkg-group = "no-x86-darwin"` (isolating them from the
+seven cross-platform packages, which stay in toplevel) resolved it; the
+manifest now activates cleanly (hook errors are only from the missing
+`pyproject.toml`/`package.json` in the scratch test directory, expected
+without a real checkout).
+
 ## Native dependencies — how they were found
 
 Sourced from `pyproject.toml` `dependencies` (C-extension packages) and
