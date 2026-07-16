@@ -31,8 +31,10 @@ resolve — none of them ever *run* the service command. `--services` starts the
 services and asks each one for a connection.
 
 Reuses `_run_claude_agent`, `_is_valid_toml`, `_check_activation`,
-`_run_judge`, `_stats`, `_skill_identity`, and `DEFAULT_SKILL_DIR` from
-run_floxify.py rather than duplicating that machinery.
+`_run_judge`, `_stats`, `_skill_identity`, `DEFAULT_SKILL_DIR`, and the
+verify.py deterministic leg (`_run_verify`, `_hard_verify_violations`,
+`_advisory_verify_violations`, `_catalog_note`) from run_floxify.py
+rather than duplicating that machinery.
 
 Usage:
     python3 tier2.py --only mastodon             # single repo
@@ -58,10 +60,14 @@ from run_floxify import (
     DEFAULT_SKILL_DIR,
     DEFAULT_ACTIVATION_TIMEOUT,
     MODEL,
+    _advisory_verify_violations,
+    _catalog_note,
     _check_activation,
+    _hard_verify_violations,
     _is_valid_toml,
     _run_claude_agent,
     _run_judge,
+    _run_verify,
     _skill_identity,
     _stats,
 )
@@ -373,9 +379,13 @@ def _golden_manifest(entry_id):
     return path.read_text() if path.exists() else None
 
 
-def _judge_tier2(entry, manifest_text):
+def _judge_tier2(entry, manifest_text, verify_result=None):
     """Grade produced manifest vs the registry's gold characterization, plus a
-    concrete golden reference manifest when one exists (testdata/gold/<id>.toml)."""
+    concrete golden reference manifest when one exists (testdata/gold/<id>.toml).
+
+    `verify_result` (AI-465) is the deterministic verify.py leg's confirmed
+    catalog resolution table — handed to the judge the same way Tier 1's
+    `_judge` does, so it stops grading catalog facts from memory (AI-451)."""
     gold = entry.get("gold", {})
     gold_manifest = _golden_manifest(entry["id"])
     reference_block = (
@@ -396,10 +406,14 @@ def _judge_tier2(entry, manifest_text):
         f"EXPECTED SERVICES: {gold.get('services', 'unknown')}\n"
         f"NOTES: {gold.get('notes', '')}\n\n"
         f"{reference_block}"
-        f"PRODUCED manifest:\n```toml\n{manifest_text or '(manifest not produced)'}\n```\n\n"
+        f"PRODUCED manifest:\n```toml\n{manifest_text or '(manifest not produced)'}\n```\n"
+        f"{_catalog_note(verify_result)}\n"
         "Grade 1-5 on:\n"
         "  1. Runtime conformance — pins the expected runtime(s) at a "
-        "reasonable version, not a substitute or generic fallback\n"
+        "reasonable version, not a substitute or generic fallback. Do NOT "
+        "assert from memory whether a pkg-path or version exists in the "
+        "Flox catalog — rely on the DETERMINISTIC CATALOG CHECK above; if "
+        "it is unavailable, do not grade catalog existence at all\n"
         "  2. Service wiring — wires each expected service as a Flox "
         "[services.*] block with sane defaults\n"
         "  3. Idiomatic Flox usage — uses $FLOX_ENV_CACHE, no absolute "
@@ -526,10 +540,30 @@ def process_entry(entry, skill_dir, activate=False, services=False,
         else:
             svc_results = {}
 
-        verdict = _judge_tier2(entry, manifest_text)
+        # Deterministic manifest check (AI-461's leg, wired into Tier 2 by
+        # AI-465) — advisory, same reason activation is advisory: the
+        # catalog sub-leg needs live flox+network. Re-scans `tmp`, the same
+        # checkout the agent wrote into — unlike Tier 1's small vendored
+        # fixtures, there is no separate pristine copy to preserve at Tier 2
+        # scale (re-cloning per rep just to get one would be its own cost).
+        # The catalog sub-leg is tied to --activate, same opt-in gate the
+        # rest of Tier 2's live-flox behavior already uses; it degrades to
+        # a clean skip when flox is unavailable regardless (check_catalog's
+        # own shutil.which guard).
+        verify_result = _run_verify(
+            skill_dir, tmp, manifest_text, check_catalog_live=activate,
+        )
+        verify_hard = _hard_verify_violations(verify_result["violations"])
+        verify_advisory = _advisory_verify_violations(verify_result["violations"])
+
+        # LLM judge (advisory) — hand it verify.py's confirmed catalog
+        # resolution table so it stops grading catalog facts from memory
+        # (AI-451), same treatment Tier 1's _judge already gets.
+        verdict = _judge_tier2(entry, manifest_text, verify_result=verify_result)
 
         status = "PASS" if hard_pass else "FAIL"
         act_str = "skipped" if act_skipped else ("ok" if act_ok else "FAIL")
+        verify_str = f"{len(verify_hard)}H/{len(verify_advisory)}A"
         svc_str = ""
         if svc_results:
             failed = [s for s, r in svc_results.items() if r["ok"] is False]
@@ -540,7 +574,7 @@ def process_entry(entry, skill_dir, activate=False, services=False,
             )
         print(
             f"  {entry['id']}: hard={status}  judge={verdict['score']}/5  "
-            f"activate={act_str}{svc_str}",
+            f"activate={act_str}  verify={verify_str}{svc_str}",
             flush=True,
         )
 
@@ -550,6 +584,12 @@ def process_entry(entry, skill_dir, activate=False, services=False,
             "hard_pass": hard_pass,
             "activation": {"ok": act_ok, "skipped": act_skipped, "notes": act_notes},
             "services": svc_results,
+            "verify": {
+                "violations": verify_result["violations"],
+                "hard_count": len(verify_hard),
+                "advisory_count": len(verify_advisory),
+                "catalog_checked": verify_result.get("catalog_checked", False),
+            },
             "judge": verdict,
             "manifest_excerpt": (manifest_text or "")[:3000],
             "agent_output_excerpt": (agent_out or "")[:800],

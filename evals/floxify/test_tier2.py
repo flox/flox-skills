@@ -231,17 +231,20 @@ class TestLoadRegistry(unittest.TestCase):
             Path(path).unlink()
 
 
-def _run(hard_pass=True, score=5, correct=True, error=None):
+def _run(hard_pass=True, score=5, correct=True, error=None, verify=None):
     """Build a per-run result the shape `process_entry` returns."""
     if error is not None:
         return {"id": "x", "error": error}
-    return {
+    result = {
         "id": "x",
         "hard_pass": hard_pass,
         "hard_checks": {"manifest_created": hard_pass},
         "judge": {"score": score, "correct": correct},
         "activation": {"ok": None, "skipped": True},
     }
+    if verify is not None:
+        result["verify"] = verify
+    return result
 
 
 class TestSummarize(unittest.TestCase):
@@ -286,6 +289,37 @@ class TestSummarize(unittest.TestCase):
         summary = tier2._summarize(results, "s")
         self.assertEqual(summary["n_errors"], 1)
         self.assertEqual(summary["n"], 1)  # one scored run among the two
+
+    def test_verify_fields_flow_through(self):
+        # AI-465: tier2 runs must feed _stats the same "verify" shape
+        # run_floxify.py produces, or verify_checked/verify_clean/
+        # verify_hard_violation_rate silently stay zero for tier2 runs.
+        results = [
+            _run(hard_pass=True, score=5, verify={
+                "hard_count": 0, "advisory_count": 0, "catalog_checked": True,
+            }),
+        ]
+        summary = tier2._summarize(results, "skill@branch")
+        self.assertEqual(summary["verify_checked"], 1)
+        self.assertEqual(summary["verify_clean"], 1)
+        self.assertEqual(summary["verify_hard_violation_rate"], 0.0)
+
+    def test_verify_hard_violation_lowers_clean_count_not_checked_count(self):
+        results = [
+            _run(hard_pass=True, score=5, verify={
+                "hard_count": 2, "advisory_count": 0, "catalog_checked": True,
+            }),
+        ]
+        summary = tier2._summarize(results, "skill@branch")
+        self.assertEqual(summary["verify_checked"], 1)
+        self.assertEqual(summary["verify_clean"], 0)
+        self.assertEqual(summary["verify_hard_violation_rate"], 1.0)
+
+    def test_no_verify_block_leaves_rate_none(self):
+        results = [_run(hard_pass=True, score=5)]
+        summary = tier2._summarize(results, "skill@branch")
+        self.assertEqual(summary["verify_checked"], 0)
+        self.assertIsNone(summary["verify_hard_violation_rate"])
 
 
 class TestRegistryPatternDriftGuard(unittest.TestCase):
@@ -450,6 +484,193 @@ class TestProbeServices(unittest.TestCase):
         script = mock_flox.call_args_list[0].args[0][-1]
         self.assertIn("pg_isready", script)
         self.assertIn("sleep", script)
+
+
+class TestProcessEntryVerifyLeg(unittest.TestCase):
+    """AI-465: tier2.py never ran the deterministic verify.py leg
+    run_floxify.py's Tier 1 harness runs (AI-461) — it trusted the
+    skill's self-report. `process_entry` must reuse `_run_verify` the
+    same way Tier 1's `process_task` does: re-scan the cloned checkout,
+    record a per-repo `verify` block, and feed the confirmed-catalog
+    note to the judge.
+
+    Clone, agent invocation, and (where irrelevant to the case) the
+    judge are mocked — no network, no `claude`, no real repo clone."""
+
+    def _entry(self, **overrides):
+        entry = {
+            "id": "x", "repo_url": "https://example.com/r", "sha": "abc123",
+            "expected_runtimes": [], "expected_services": [],
+        }
+        entry.update(overrides)
+        return entry
+
+    @staticmethod
+    def _clone_writes_manifest(manifest_text):
+        """A `_clone_at_sha` stand-in: writes a manifest into `dest` (the
+        real tempdir `process_entry` created) and reports clone success."""
+        def _clone(url, sha, dest, timeout=900):
+            d = Path(dest)
+            (d / ".flox" / "env").mkdir(parents=True, exist_ok=True)
+            (d / ".flox" / "env" / "manifest.toml").write_text(manifest_text)
+            return None
+        return _clone
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_verify")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_verify_leg_result_recorded_in_output(
+        self, mock_clone, mock_agent, mock_verify, mock_judge
+    ):
+        mock_clone.side_effect = self._clone_writes_manifest("[install]\n")
+        mock_agent.return_value = ("agent output", None)
+        mock_verify.return_value = {
+            "violations": [
+                {"rule": "vars-not-literal", "severity": "hard", "message": "m"},
+                {"rule": "outputs-heuristic", "severity": "advisory", "message": "n"},
+            ],
+            "catalog_checked": False,
+            "catalog_unknown": [],
+        }
+        mock_judge.return_value = {"score": 4, "correct": True, "issues": []}
+
+        result = tier2.process_entry(self._entry(), "/fake/skill/dir")
+
+        self.assertIn("verify", result)
+        self.assertEqual(result["verify"]["hard_count"], 1)
+        self.assertEqual(result["verify"]["advisory_count"], 1)
+        self.assertFalse(result["verify"]["catalog_checked"])
+        self.assertEqual(len(result["verify"]["violations"]), 2)
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_verify")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    @patch("tier2._check_activation", return_value=(True, False, ""))
+    def test_catalog_live_follows_activate_true(
+        self, mock_check_act, mock_clone, mock_agent, mock_verify, mock_judge
+    ):
+        mock_clone.side_effect = self._clone_writes_manifest("[install]\n")
+        mock_agent.return_value = ("agent output", None)
+        mock_verify.return_value = {
+            "violations": [], "catalog_checked": True, "catalog_unknown": [],
+        }
+        mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
+
+        tier2.process_entry(self._entry(), "/fake/skill/dir", activate=True)
+
+        self.assertTrue(mock_verify.call_args.kwargs["check_catalog_live"])
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_verify")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_catalog_live_follows_activate_false(
+        self, mock_clone, mock_agent, mock_verify, mock_judge
+    ):
+        # --activate is opt-in and off by default; the catalog sub-leg
+        # must not attempt a live check when the caller never opted in.
+        mock_clone.side_effect = self._clone_writes_manifest("[install]\n")
+        mock_agent.return_value = ("agent output", None)
+        mock_verify.return_value = {
+            "violations": [], "catalog_checked": False, "catalog_unknown": [],
+        }
+        mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
+
+        tier2.process_entry(self._entry(), "/fake/skill/dir", activate=False)
+
+        self.assertFalse(mock_verify.call_args.kwargs["check_catalog_live"])
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_verify")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_verify_result_fed_to_judge(
+        self, mock_clone, mock_agent, mock_verify, mock_judge
+    ):
+        mock_clone.side_effect = self._clone_writes_manifest("[install]\n")
+        mock_agent.return_value = ("agent output", None)
+        sentinel = {"violations": [], "catalog_checked": True, "catalog_unknown": []}
+        mock_verify.return_value = sentinel
+        mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
+
+        tier2.process_entry(self._entry(), "/fake/skill/dir")
+
+        self.assertIs(mock_judge.call_args.kwargs["verify_result"], sentinel)
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_no_manifest_records_verify_as_skipped_not_error(
+        self, mock_clone, mock_agent, mock_judge
+    ):
+        # Clone succeeds but the skill never wrote a manifest — _run_verify
+        # (not mocked here) must short-circuit to a skip, matching Tier 1's
+        # own no-manifest test in test_run_floxify.py.
+        mock_clone.return_value = None
+        mock_agent.return_value = ("agent output", None)
+        mock_judge.return_value = {"score": 0, "correct": False, "issues": []}
+
+        result = tier2.process_entry(self._entry(), str(tier2.DEFAULT_SKILL_DIR))
+
+        self.assertEqual(result["verify"]["violations"], [])
+        self.assertEqual(result["verify"]["hard_count"], 0)
+        self.assertFalse(result["verify"]["catalog_checked"])
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_real_verify_leg_flags_non_literal_vars(
+        self, mock_clone, mock_agent, mock_judge
+    ):
+        # Integration: does NOT mock _run_verify — proves the tier2 wiring
+        # actually reaches the real detect.py/verify.py against the cloned
+        # checkout, not just that a mock was called. check_catalog_live is
+        # False (activate defaults off), so this runs with no network,
+        # mirroring test_run_floxify.py's own TestRunVerify discipline.
+        manifest = '[vars]\nfoo = "$HOME/data"\n'
+        mock_clone.side_effect = self._clone_writes_manifest(manifest)
+        mock_agent.return_value = ("agent output", None)
+        mock_judge.return_value = {"score": 3, "correct": False, "issues": []}
+
+        result = tier2.process_entry(self._entry(), str(tier2.DEFAULT_SKILL_DIR))
+
+        self.assertNotIn("error", result["verify"])
+        rules = {v["rule"] for v in result["verify"]["violations"]}
+        self.assertIn("vars-not-literal", rules)
+        self.assertGreaterEqual(result["verify"]["hard_count"], 1)
+
+
+class TestJudgeTier2CatalogNote(unittest.TestCase):
+    """AI-465: the tier2 judge prompt must carry verify.py's confirmed
+    catalog resolution table, same as Tier 1's `_judge` (AI-451/AI-461) —
+    otherwise the judge grades catalog facts from memory again, just on
+    real OSS repos instead of fixtures."""
+
+    def _entry(self):
+        return {
+            "id": "x", "repo_url": "https://example.com/r", "sha": "abc123",
+            "gold": {"runtimes": "ruby", "services": "postgres"},
+            "rubric": "",
+        }
+
+    @patch("tier2._run_judge")
+    def test_no_verify_result_tells_judge_not_to_assert_from_memory(
+        self, mock_run_judge
+    ):
+        mock_run_judge.return_value = ('{"score": 3, "correct": true, "issues": []}', None)
+        tier2._judge_tier2(self._entry(), "[install]\n", verify_result=None)
+        prompt = mock_run_judge.call_args.args[0]
+        self.assertIn("do not assert catalog facts from memory", prompt.lower())
+
+    @patch("tier2._run_judge")
+    def test_clean_catalog_confirms_resolution_to_judge(self, mock_run_judge):
+        mock_run_judge.return_value = ('{"score": 5, "correct": true, "issues": []}', None)
+        verify_result = {"catalog_checked": True, "violations": []}
+        tier2._judge_tier2(self._entry(), "[install]\n", verify_result=verify_result)
+        prompt = mock_run_judge.call_args.args[0]
+        self.assertIn("confirmed to resolve", prompt.lower())
 
 
 if __name__ == "__main__":

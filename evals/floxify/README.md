@@ -73,13 +73,16 @@ Phase 3c Step 4, gating the report the same way Steps 1-3 already do.
 Three consumers, one checker (no duplicated logic):
 
 - **The skill** (Phase 3c Step 4) — violations stop the flow; fix, re-run.
-- **The eval harness** (`run_floxify.py`) — re-scans each fixture and runs
-  the checker against the produced manifest as its own deterministic leg,
-  reported per-task and in the summary (`verify_checked`, `verify_clean`,
+- **The eval harnesses** (`run_floxify.py` Tier 1, `tier2.py` Tier 2 since
+  AI-465) — each re-scans its fixture/checkout and runs the checker
+  against the produced manifest as its own deterministic leg, reported
+  per-task/per-repo and in the summary (`verify_checked`, `verify_clean`,
   `verify_hard_violation_rate`); advisory, same reason activation is
   advisory (see "Why verify.py is advisory in the harness" below). Its
   confirmed catalog resolution table is handed to the LLM judge so it
-  stops grading catalog facts from memory (AI-451).
+  stops grading catalog facts from memory (AI-451). Tier 2 reuses Tier
+  1's `_run_verify`/`_catalog_note` rather than duplicating them — see
+  "What's different from Tier 1" under the Tier 2 section below.
 - **The goldens** (`testdata/gold/*.toml`) — linted by the same checker as a
   cheap unit-test-tier check (no `claude`, no agent); see `test_golden_lint.py`
   below.
@@ -409,7 +412,10 @@ open-source repos**, which are too large to vendor and too heavy to
 fully `flox activate`. It's a sibling harness that imports shared
 machinery from `run_floxify.py` (`_run_claude_agent`, `_is_valid_toml`,
 `_check_activation`, `_run_judge`, `_stats`, `_skill_identity`,
-`DEFAULT_SKILL_DIR`) rather than duplicating it.
+`DEFAULT_SKILL_DIR`, and — since AI-465 — the verify.py deterministic
+leg: `_run_verify`, `_hard_verify_violations`,
+`_advisory_verify_violations`, `_catalog_note`) rather than duplicating
+it.
 
 ### What's different from Tier 1
 
@@ -438,6 +444,21 @@ machinery from `run_floxify.py` (`_run_claude_agent`, `_is_valid_toml`,
    idiomaticity-focused, not exact-match.
 5. **Report-only — this tier never gates the build**, in any mode.
    There's no `--gate` flag.
+
+Everything else about the verify.py leg is the *same* as Tier 1, not
+different (AI-465): `process_entry` re-runs `detect.py` against the
+cloned checkout, runs `verify.py` against the produced manifest, and
+records the same `verify` block shape (`violations`, `hard_count`,
+`advisory_count`, `catalog_checked`) that flows into `_stats`'
+`verify_checked` / `verify_clean` / `verify_hard_violation_rate`. The
+catalog sub-leg is tied to `--activate` (the Tier 2 analogue of Tier
+1's `--skip-activation`): live `flox show` calls only run when
+`--activate` is set, and degrade to a clean skip if `flox` itself is
+unavailable regardless (`verify.py`'s own `shutil.which` guard). The
+confirmed-catalog note is handed to the Tier 2 judge the same way
+Tier 1's `_judge` gets it — see "Phase 3c checker" above and "Why
+verify.py is advisory in the harness"; this leg never gates Tier 2,
+which has no `--gate` at all.
 
 ### What a structural pass does and does not tell you
 
