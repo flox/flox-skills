@@ -336,6 +336,45 @@ that a hook command resolves is activation's job, not structural
 conformance's. Reading a green structural row as "the environment works"
 is the specific over-read this note exists to prevent.
 
+### …and activation doesn't tell you the services serve (`--services`)
+
+`--activate` closes one gap and reveals the next. It proves the packages
+resolve and build — it never runs the `[services.*]` command. So the ladder
+has three rungs, and each one looks green from the rung above:
+
+| check | proves | blind to |
+|---|---|---|
+| `has_service_postgres` | a `[services.*]` section header exists | whether the command in it is valid |
+| `flox activate` | the packages resolve and build | whether the service ever starts |
+| **`--services`** | **the service starts and answers** | whether the app's queries succeed |
+
+lemmy is the worked example, and it appeared the moment AI-449 closed the rung
+above: with the service guard in place lemmy went to hard=PASS, judge 4/5,
+activate=ok — a fully green row for an environment whose Postgres was still in
+question. Before AI-449 the datastore was *missing*; after it, it was
+*declared*. Both states pass `flox activate`. Only starting it separates them.
+
+`--services` (opt-in, advisory, needs `--activate`) runs one
+`flox activate --start-services -c <script>` per expected service, where the
+script polls a connectivity probe. Two design notes worth knowing:
+
+- **The postgres probe passes no host or port.** Bare `pg_isready` reads
+  `PGHOST`/`PGPORT` from the environment — which is exactly what the manifest's
+  own `[vars]` set. So it asserts the service is reachable *at the address this
+  manifest advertises*, which is what catches plausible's shape: `DATABASE_URL`
+  pointing at a datastore nothing serves.
+- **Three outcomes, deliberately distinct.** `ok` (answered), `fail` (polled to
+  exhaustion, nothing answered — a real verdict on the manifest), and `skipped`
+  (flox absent, no probe for that kind, or flox itself errored). A harness
+  problem must never be reported as a broken service; an unprobeable service
+  (clickhouse) must never read as a failed one.
+
+Services can only be started from *inside* an activation — `flox services
+start` on an unactivated environment errors with "Cannot start services for an
+environment that is not activated". The first version of this probe got that
+wrong, passed its own unit tests, and only real `flox` caught it; the tests now
+pin the actual contract.
+
 ### Golden reference manifests (`testdata/gold/<id>.toml`)
 
 The registry's prose `gold` field characterizes the *right answer* in words.
