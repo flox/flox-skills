@@ -447,6 +447,15 @@ or hand off to the orchestrator, and say so in ⚠ — never hallucinate a catal
 package for them, and never silently drop them. Truly-absent-from-catalog:
 Zookeeper, Cassandra. For Temporal: try `flox search temporal-cli` first.
 
+**Native C-extension system libraries often live in the `Dockerfile`, `Aptfile`,
+or `Brewfile` — not the language manifest.** The analyzer scans `Dockerfile`
+`RUN apt-get install` and `Aptfile` lines for these and maps them to catalog
+search terms; still confirm each with `flox show`. Mastodon's `vips` / `ffmpeg` /
+`icu` / `libidn` are in its Aptfile + Dockerfile, not the Gemfile — and `ffmpeg`
+never appears as a gem at all. Watch the specific-variant gotchas: `idn-ruby`
+needs GNU libidn v1 (`libidn`), not `libidn2`; `charlock_holmes` links system
+ICU (`icu`).
+
 ### Build tool signals
 
 | File or pattern | Search for |
@@ -641,6 +650,24 @@ on-activate = """
 ```
 - pnpm → `pnpm-lock.yaml` staleness check, `pnpm install --frozen-lockfile --silent`
 - yarn → `yarn.lock` staleness check, `yarn install --silent`
+
+**Pinned package manager (`packageManager` field / `engines.pnpm`).** When the
+repo pins an exact pnpm/yarn (`"packageManager": "pnpm@10.24.0"`), do NOT install
+a catalog `pnpm` — the catalog's `pnpm_<major>` floor can exceed the pin, and an
+`.npmrc` `engine-strict=true` will then reject it. Provision the exact version
+with **corepack** (ships with the `nodejs` package) into a *writable* cache dir
+(the Nix node prefix is a read-only store path):
+
+```toml
+[hook]
+on-activate = """
+  export COREPACK_HOME="$FLOX_ENV_CACHE/corepack"
+  mkdir -p "$FLOX_ENV_CACHE/node-bin"
+  corepack enable --install-directory "$FLOX_ENV_CACHE/node-bin" pnpm
+  export PATH="$FLOX_ENV_CACHE/node-bin:$PATH"
+  pnpm install --frozen-lockfile
+"""
+```
 
 **Go**
 ```toml
