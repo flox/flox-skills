@@ -426,11 +426,40 @@ Only install these when docker-compose does NOT already manage them.
 
 Other services in catalog (no specific dependency signal): `rabbitmq` (RabbitMQ).
 
-**Catalog presence does NOT mean "wire it as a Flox service."** A datastore can
-exist in the catalog and still be the wrong thing to run as a bare
-`[services.*]`. Wire directly only the *leaf* datastores the app depends on
-directly (usually `postgres`, `redis`). Defer a service to docker-compose or the
-project's own orchestrator when any of these hold:
+**HARD FLOOR — every leaf datastore the app needs at runtime gets a
+`[services.*]` block.** If the app will not run without a datastore — its
+config, `.env.example`, or your own `[vars]` name a `DATABASE_URL` /
+`REDIS_URL` / host+port — then that datastore MUST be installed **and** wired
+as a Flox service. Not "consider", not "prefer". A manifest that advertises an
+endpoint nothing serves is broken: `flox activate` exits 0 and the developer
+still has no database. If you are about to emit `[vars]` pointing at a
+datastore with no matching `[services.*]`, stop — that is the bug.
+
+**The repo already having a way to start it is NEVER a reason to defer.** A
+`scripts/start_dev_db.sh`, a `make postgres` target, a `docker run` recipe, a
+compose service, a README step — every project has one of these. That manual
+step is *the reason floxify was invoked*; it is not an orchestrator to hand the
+work back to.
+
+**Launcher intricacy is not a licence either.** When the repo's launcher does
+fiddly setup — a cluster under `./target`, a unix socket inside the repo tree, a
+percent-encoded socket path in `DATABASE_URL`, loading `db/schema.sql` — **read
+it and port those steps into the service command and hook.** That is the work.
+"The script does something clever I can't reproduce" is an argument for reading
+it more carefully, not for leaving the developer with nothing. If one detail
+genuinely cannot be reproduced, wire the service anyway and note the divergence
+in ⚠.
+
+Deferring also **cascades** into the rest of the manifest. Because lemmy's
+`start_dev_db.sh` puts its cluster under `$PWD/target`, deferring to it dragged
+`CARGO_TARGET_DIR` into the repo tree as well — one deferral, two defects.
+
+**Catalog presence does NOT mean "wire it as a Flox service."** The floor above
+covers the *leaf* datastores the app depends on directly (usually `postgres`,
+`redis`, `mariadb`). Everything else is a judgement call: a service can exist in
+the catalog and still be the wrong thing to run as a bare `[services.*]`. Defer
+a **non-leaf** service to docker-compose or the project's own orchestrator when
+any of these hold:
 
 - the analyzer flags its compose service `config_coupled` — it mounts server
   config files or `depends_on` other services (a bare package can't reproduce that),
@@ -483,9 +512,20 @@ build-system dep declaration you encounter.
 
 ### Custom service orchestrators
 
-If the project uses a custom tool to manage services and there is **no `docker-compose.yml`**
-at the root, do NOT try to wire services via docker-compose. List them in ⚠ with the
-tool name and the command to start them. Don't claim these are a gap.
+**This section is about services the orchestrator genuinely owns — never the
+leaf datastores.** A Tilt/Skaffold/k8s topology, or a store reached only through
+another service's graph, belongs to the orchestrator. A plain `postgres` that a
+`devservices/config.yml`, `Makefile` target, or shell script happens to launch
+does **not** — that is a leaf datastore and the hard floor above applies: wire
+it. Sentry is the worked example: `devservices` owns snuba → ClickHouse/Kafka
+(defer those), but `shared-postgres`/`shared-redis` are direct leaf deps and
+must still be wired as Flox services. Do not read "the project has an
+orchestrator" as "the project's datastores are not my problem."
+
+If the project uses a custom tool to manage its **non-leaf** services and there is
+**no `docker-compose.yml`** at the root, do NOT try to wire those via docker-compose.
+List them in ⚠ with the tool name and the command to start them. Don't claim these are
+a gap.
 
 **When there's no root `docker-compose.yml`, the service topology usually lives
 elsewhere — probe before concluding a project has no services:**
