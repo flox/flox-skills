@@ -426,8 +426,26 @@ Only install these when docker-compose does NOT already manage them.
 
 Other services in catalog (no specific dependency signal): `rabbitmq` (RabbitMQ).
 
-**Not in Flox catalog** — use docker-compose: ClickHouse, Kafka/Redpanda, Zookeeper, Cassandra.
-For Temporal: try `flox search temporal-cli` first (may exist as `temporalio-cli`).
+**Catalog presence does NOT mean "wire it as a Flox service."** A datastore can
+exist in the catalog and still be the wrong thing to run as a bare
+`[services.*]`. Wire directly only the *leaf* datastores the app depends on
+directly (usually `postgres`, `redis`). Defer a service to docker-compose or the
+project's own orchestrator when any of these hold:
+
+- the analyzer flags its compose service `config_coupled` — it mounts server
+  config files or `depends_on` other services (a bare package can't reproduce that),
+- it's reached only *transitively*, through another service's dependency graph, or
+- it's a customized image (e.g. `supabase/postgres` ships extensions that stock
+  `postgresql` lacks — note the caveat and wire stock postgres for plain dev only).
+
+ClickHouse and Kafka ARE in the catalog now, but PostHog's ClickHouse mounts
+server config and depends on kafka/zookeeper, and Sentry's ClickHouse/Kafka
+arrive transitively through snuba's `devservices` graph — both belong to their
+project's orchestrator, not a Flox `[services.*]`. Start them via docker-compose
+(install `docker-compose`, bring them up in the hook when Docker is available)
+or hand off to the orchestrator, and say so in ⚠ — never hallucinate a catalog
+package for them, and never silently drop them. Truly-absent-from-catalog:
+Zookeeper, Cassandra. For Temporal: try `flox search temporal-cli` first.
 
 ### Build tool signals
 
@@ -452,6 +470,14 @@ build-system dep declaration you encounter.
 If the project uses a custom tool to manage services and there is **no `docker-compose.yml`**
 at the root, do NOT try to wire services via docker-compose. List them in ⚠ with the
 tool name and the command to start them. Don't claim these are a gap.
+
+**When there's no root `docker-compose.yml`, the service topology usually lives
+elsewhere — probe before concluding a project has no services:**
+`devservices/config.yml` (Sentry), `compose.yaml` / `compose.yml`, `Procfile` /
+`Procfile.dev`, `.devcontainer/`, `devenv/`, `Tiltfile`, and dev targets in the
+`Makefile`. Sentry's entire postgres/redis/clickhouse/kafka topology is
+invisible if you only look for `docker-compose.yml`. The analyzer surfaces the
+common orchestrators (`orchestrators` field) and any `compose*.yml` it finds.
 
 | Signal | Orchestrator | What to say in ⚠ |
 |--------|-------------|-------------------|
