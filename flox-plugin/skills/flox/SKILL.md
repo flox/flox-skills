@@ -24,6 +24,13 @@ authoritative; use them inline without opening a reference file.
 
 **Manifest essentials**
 - Every manifest starts with `version = 1`.
+- **Never invent a package name or version.** Verify names with `flox search
+  <term>` and versions with `flox show <pkg>`; pin only to a version `flox show`
+  actually lists — pick the closest available if the exact one is absent. The
+  same rule covers tool versions you put in hooks (`gem install bundler -v …`,
+  `npm i -g pkg@…`, `pip install pkg==…`): take the version from the project's
+  lockfile (`Gemfile.lock` → BUNDLED WITH, `package-lock.json`, `uv.lock`),
+  never a guessed number.
 - `[vars]` holds STATIC values only — no shell/`$VAR` interpolation. Anything
   dynamic (e.g. prepending to `PATH`) goes in `[hook]` or `[profile]`.
 - `[options] systems = ["x86_64-linux", "aarch64-linux", …]` constrains the
@@ -49,6 +56,10 @@ authoritative; use them inline without opening a reference file.
 - Manifest build = `[build.<name>]` `command` in `manifest.toml`, run with
   `flox build`. Nix-expression build = a `.nix` file under `.flox/pkgs/`, run
   with `flox build <name>`.
+- **Need a newer version than the catalog has (or a package it lacks)?** Override
+  the recipe: `.flox/pkgs/<name>/default.nix` with `<pkg>.overrideAttrs` to bump
+  `version`/`src`, then `flox build` (`hash = ""` → build prints the real hash)
+  and `flox publish` to make it available everywhere. Depth in `builds.md`.
 
 **C / C++**
 - ALWAYS add `gcc-unwrapped` alongside `gcc` for the C++ stdlib headers/libs —
@@ -77,6 +88,19 @@ authoritative; use them inline without opening a reference file.
 
 **Editing non-interactively**
 - `flox list -c > manifest.toml`, edit the file, then `flox edit -f manifest.toml`.
+
+**Recent CLI features**
+- **`flox run -p <pkg> -- <cmd>`** — run a command straight from a catalog
+  package, no install and no `.flox/` needed (npx-like). `-p` is required; always
+  use `--` to separate flox flags from the command. Version constraints (`@`) and
+  output selectors (`^`) are not supported here. Example:
+  `flox run -p curl -- curl https://example.com`.
+- **Auto-activation** — Flox can activate an environment automatically when you
+  enter its directory (direnv-like, via the shell hook). Control it per-directory
+  with `flox activate allow` / `flox activate deny`; the default behavior is the
+  `auto_activate` config option (`flox config`), which defaults to prompting.
+- **`flox activate -m dev|run`** — choose dev vs run activation mode, overriding
+  `options.activate.mode` in the manifest.
 
 ## Specialized Topics
 
@@ -162,6 +186,8 @@ flox install <pkg>              # Add package
 flox list [-e | -c | -n | -a]   # List installed packages
 flox activate                   # Enter env
 flox activate -- <cmd>          # Run without subshell
+flox activate -r <owner>/<name> # Activate a FloxHub env (one-off, no clone)
+flox run -p <pkg> -- <cmd>      # Run a command from a catalog package, no install
 flox edit                       # Edit manifest interactively
 ```
 
@@ -173,10 +199,26 @@ many versions:
 - **Search first, and clarify if there are multiple matches.** Names don't
   always match upstream expectations (e.g. `python3` vs `python39`), and search
   is case-sensitive.
+- **Never guess — verify before you pin.** Pin only to a name and version that
+  `flox show <pkg>` actually lists; if the exact version isn't there, pick the
+  closest available (or override — see below). Do not invent a version string.
+  This applies equally to versions placed in hooks (e.g. `gem install bundler
+  -v <X>`): read them from the project's lockfile, never a guess. Hallucinated
+  version pins pass a manifest-shape check but fail the moment the env activates.
 - **`flox search <term>` returns only the *latest* version of each name.** Use
   `flox show <pkg>` to see all available versions *and* per-architecture
   availability (e.g. `vim-darwin@9.1.0412 (aarch64-darwin, x86_64-darwin only)`).
 - Use `flox search <term> --all` for broader results.
+- **The newest catalog version is still too old, or the package is missing
+  entirely.** The catalog tracks nixpkgs with a short lag, so a just-released
+  version may not be there yet. You don't have to wait: override the build
+  recipe to a newer release with a Nix-expression build. Create
+  `.flox/pkgs/<name>/default.nix` that calls `<pkg>.overrideAttrs` to bump
+  `version` and `src`, run `flox build` (leave `hash = ""` and the build prints
+  the real hash to paste back), then `flox publish` so the updated package
+  installs in any environment. Full workflow in `references/builds.md`
+  ("Nix Expression Builds") and the tutorial
+  [Using a newer version of a package](https://flox.dev/docs/tutorials/overriding-packages/).
 
 ## Manifest Structure
 

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Flox skills eval harness.
 
-Runs each task in tasks.jsonl through `claude` headless, in one of three arms:
+Runs each task in tasks.jsonl through `claude` headless, in one of two arms:
 
   --mode skills       skills only, MCP disabled (--strict-mcp-config, no --mcp-config)
-  --mode skills+mcp   skills plus the flox-mcp server (--mcp-config)
   --mode baseline     bare model: no plugin, MCP disabled (unassisted baseline)
 
 Each answer is scored with deterministic hard-checks plus an LLM judge.
@@ -76,9 +75,6 @@ def run_claude(prompt, mode, allow_tools, timeout=420, retries=3):
         cmd += ["--allowedTools", *allow_tools]
     if mode == "skills":
         cmd += ["--plugin-dir", str(PLUGIN_DIR), "--strict-mcp-config"]
-    elif mode == "skills+mcp":
-        mcp_cfg = HERE / "flox-mcp.json"
-        cmd += ["--plugin-dir", str(PLUGIN_DIR), "--mcp-config", str(mcp_cfg)]
     elif mode == "baseline":
         # Bare model: no plugin loaded, MCP disabled. Measures the unassisted baseline.
         cmd += ["--strict-mcp-config"]
@@ -163,7 +159,7 @@ def _read_golden(name):
 def main():
     global MODEL, PLUGIN_DIR
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["skills", "skills+mcp", "baseline"], default="skills")
+    ap.add_argument("--mode", choices=["skills", "baseline"], default="skills")
     ap.add_argument("--model", default=MODEL,
                     help=f"model id for both agent and judge (default {MODEL})")
     ap.add_argument("--tasks", default=str(HERE / "tasks.jsonl"))
@@ -181,8 +177,6 @@ def main():
         PLUGIN_DIR = Path(args.plugin_dir).resolve()
 
     allow = ["Skill", "Read"]
-    if args.mode == "skills+mcp":
-        allow += ["mcp__flox-mcp"]
 
     tasks = [json.loads(l) for l in Path(args.tasks).read_text().splitlines() if l.strip()]
     if args.only:
@@ -287,8 +281,8 @@ def _diff_vs_golden(summary, results, prev_golden):
 
 
 def _metrics_table(summary):
-    """Cross-arm metrics: this run (live) for its arm, committed goldens for the others."""
-    arms = [("baseline", "baseline.json"), ("skills", "skills.json"), ("skills+mcp", "skills_mcp.json")]
+    """Cross-arm metrics: this run (live) for its arm, committed golden for the other."""
+    arms = [("baseline", "baseline.json"), ("skills", "skills.json")]
     summ = {}
     for arm, fn in arms:
         if arm == summary["mode"]:
@@ -315,11 +309,11 @@ def _metrics_table(summary):
 
     metrics = [("Hard-pass", "hard_pass_rate", True), ("Avg judge", "avg_judge_score", False),
                ("Judge-correct", "judge_correct_rate", True), ("Should-trigger", "should_trigger_rate", True)]
-    rows = [f"| metric | {hdr('baseline')} | {hdr('skills')} | {hdr('skills+mcp')} | Δ skills−baseline |",
-            "|---|--:|--:|--:|--:|"]
+    rows = [f"| metric | {hdr('baseline')} | {hdr('skills')} | Δ skills−baseline |",
+            "|---|--:|--:|--:|"]
     for label, key, pct in metrics:
         rows.append(f"| {label} | {cell('baseline', key, pct)} | {cell('skills', key, pct)} "
-                    f"| {cell('skills+mcp', key, pct)} | {delta(key, pct)} |")
+                    f"| {delta(key, pct)} |")
     return rows
 
 
@@ -349,10 +343,9 @@ def write_step_summary(summary, results, binding, bad, errs, gate_enabled, prev_
             "assistant still proactively recommends it.", ""]
     out += _metrics_table(summary)
     out += ["",
-            "_Arms: **baseline** = bare model (no plugin/MCP) · **skills** = plugin loaded, MCP "
-            "off · **skills+mcp** = plugin + Flox MCP server. Bold column = this run (live); the "
-            "others are the last committed golden (`—` if none). Δ compares skills-only to "
-            "baseline, since the MCP is being deprecated._", ""]
+            "_Arms: **baseline** = bare model, no plugin loaded · **skills** = plugin "
+            "loaded. Bold column = this run (live); the other is the last committed "
+            "golden (`—` if none). Δ compares skills-only to baseline._", ""]
 
     areas = {}
     for r in scored:

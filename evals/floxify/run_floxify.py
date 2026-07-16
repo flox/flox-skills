@@ -34,7 +34,7 @@ Usage:
     python3 run_floxify.py --only node-20             # single fixture
     python3 run_floxify.py --gate                     # exit 1 on hard-check failures
     python3 run_floxify.py --out results/my-run.json  # custom output path
-    python3 run_floxify.py --skill-dir /path/to/claude-plugins
+    python3 run_floxify.py --skill-dir /path/to/flox-plugin
     python3 run_floxify.py --skip-activation          # skip flox activate checks
 
 Pure stdlib — no additional packages required.
@@ -57,19 +57,14 @@ GOLD_DIR = HERE / "gold"
 
 
 def _default_skill_dir():
-    """Find claude-plugins as a sibling to the flox-skills repo root.
+    """Return the in-repo flox plugin directory containing the floxify skill.
 
-    Works from both a regular checkout and a git worktree (which adds
-    extra path segments like _worktrees/<slug>/ between the repo root
-    and the file).  Walks ancestors until it finds a directory whose
-    parent contains a claude-plugins directory.
+    The plugin lives at `<repo-root>/flox-plugin`, two levels up from this
+    file (`evals/floxify/`). This holds regardless of whether the repo is
+    a regular checkout or a git worktree — worktree paths only add
+    segments before the repo root, not below it.
     """
-    for ancestor in [HERE, *HERE.parents]:
-        candidate = ancestor.parent / "claude-plugins"
-        if candidate.is_dir():
-            return candidate
-    # Fallback: two dirs up from evals/floxify/ → repo root → sibling
-    return HERE.parent.parent.parent / "claude-plugins"
+    return HERE.parent.parent / "flox-plugin"
 
 
 DEFAULT_SKILL_DIR = _default_skill_dir()
@@ -520,9 +515,8 @@ def main():
         "--skill-dir",
         default=str(DEFAULT_SKILL_DIR),
         help=(
-            "Path to the claude-plugins repo with the floxify skill "
-            f"(default: {DEFAULT_SKILL_DIR}). "
-            "Must have the add-floxify-skill branch checked out."
+            "Path to the flox plugin directory containing the floxify skill "
+            f"(default: {DEFAULT_SKILL_DIR}, the in-repo flox-plugin/)."
         ),
     )
     ap.add_argument("--model", default=MODEL, help=f"Claude model (default {MODEL})")
@@ -569,8 +563,9 @@ def main():
     if not skill_dir.exists():
         print(
             f"ERROR: skill-dir not found: {skill_dir}\n"
-            "Clone or point --skill-dir to the claude-plugins repo on the "
-            "add-floxify-skill branch.",
+            "The floxify skill ships in this repo at "
+            "flox-plugin/skills/floxify/ — check your checkout, or pass "
+            "--skill-dir to point at an alternate flox-plugin directory.",
             file=sys.stderr,
         )
         sys.exit(1)
