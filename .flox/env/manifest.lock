@@ -1,0 +1,274 @@
+{
+  "lockfile-version": 1,
+  "manifest": {
+    "schema-version": "1.13.0",
+    "install": {
+      "claude-code": {
+        "pkg-path": "flox/claude-code",
+        "pkg-group": "claude-code"
+      },
+      "flox-ai": {
+        "pkg-path": "flox/flox-ai",
+        "pkg-group": "flox-ai"
+      }
+    },
+    "options": {},
+    "build": {
+      "skills-flox": {
+        "command": "  mkdir -p \"$out/share/claude-code/plugins/flox\"\n  cp -R flox-plugin/. \"$out/share/claude-code/plugins/flox/\"\n  source .flox/nix/flox-agent-layout.sh\n  flox_agent_layout \"flox\" \"$out/share\"\n",
+        "version": "1.0.0",
+        "description": "Flox skills (flox, floxify) packaged for Claude Code, Codex, Pi, and OpenCode"
+      }
+    }
+  },
+  "packages": [
+    {
+      "attr_path": "claude-code",
+      "broken": false,
+      "derivation": "/nix/store/vvrjbn9jsz63lf7hlazrnlbdrdfq1742-claude-code-2.1.211.drv",
+      "description": "Agentic coding tool from Anthropic",
+      "install_id": "claude-code",
+      "license": "Unfree",
+      "locked_url": "https://github.com/flox/floxenvs?rev=843e927344d1218c1945ce93689c84c05a01cb04",
+      "name": "claude-code-2.1.211",
+      "pname": "claude-code",
+      "rev": "843e927344d1218c1945ce93689c84c05a01cb04",
+      "rev_count": 14690,
+      "rev_date": "2026-07-16T01:00:19Z",
+      "scrape_date": "2026-07-16T15:25:54.544456Z",
+      "stabilities": [
+        "stable",
+        "staging",
+        "unstable"
+      ],
+      "unfree": true,
+      "version": "2.1.211",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/i7q02dzcs80g5wqqx9rqgg0m583pz763-claude-code-2.1.211"
+      },
+      "system": "aarch64-darwin",
+      "group": "claude-code",
+      "priority": 5
+    },
+    {
+      "attr_path": "claude-code",
+      "broken": false,
+      "derivation": "/nix/store/39yfsj1p5ilpn2qbzxvnih63x9r2rf18-claude-code-2.1.211.drv",
+      "description": "Agentic coding tool from Anthropic",
+      "install_id": "claude-code",
+      "license": "Unfree",
+      "locked_url": "https://github.com/flox/floxenvs?rev=843e927344d1218c1945ce93689c84c05a01cb04",
+      "name": "claude-code-2.1.211",
+      "pname": "claude-code",
+      "rev": "843e927344d1218c1945ce93689c84c05a01cb04",
+      "rev_count": 14690,
+      "rev_date": "2026-07-16T01:00:19Z",
+      "scrape_date": "2026-07-16T15:25:54.544469Z",
+      "stabilities": [
+        "stable",
+        "staging",
+        "unstable"
+      ],
+      "unfree": true,
+      "version": "2.1.211",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/q7ywss7yz0bvx32a0qckm7gi4gm6jmfh-claude-code-2.1.211"
+      },
+      "system": "aarch64-linux",
+      "group": "claude-code",
+      "priority": 5
+    },
+    {
+      "attr_path": "claude-code",
+      "broken": false,
+      "derivation": "/nix/store/qsnj7wbwksabzcswfr9qrzihjl1s535r-claude-code-2.1.211.drv",
+      "description": "Agentic coding tool from Anthropic",
+      "install_id": "claude-code",
+      "license": "Unfree",
+      "locked_url": "https://github.com/flox/floxenvs?rev=843e927344d1218c1945ce93689c84c05a01cb04",
+      "name": "claude-code-2.1.211",
+      "pname": "claude-code",
+      "rev": "843e927344d1218c1945ce93689c84c05a01cb04",
+      "rev_count": 14690,
+      "rev_date": "2026-07-16T01:00:19Z",
+      "scrape_date": "2026-07-16T15:25:54.544470Z",
+      "stabilities": [
+        "stable",
+        "staging",
+        "unstable"
+      ],
+      "unfree": true,
+      "version": "2.1.211",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/7k1vk076m9gdys7f3saj5rqnlj6h6ik5-claude-code-2.1.211"
+      },
+      "system": "x86_64-darwin",
+      "group": "claude-code",
+      "priority": 5
+    },
+    {
+      "attr_path": "claude-code",
+      "broken": false,
+      "derivation": "/nix/store/484jss1s2d8z7c2i7lgcgqicz081375y-claude-code-2.1.211.drv",
+      "description": "Agentic coding tool from Anthropic",
+      "install_id": "claude-code",
+      "license": "Unfree",
+      "locked_url": "https://github.com/flox/floxenvs?rev=843e927344d1218c1945ce93689c84c05a01cb04",
+      "name": "claude-code-2.1.211",
+      "pname": "claude-code",
+      "rev": "843e927344d1218c1945ce93689c84c05a01cb04",
+      "rev_count": 14690,
+      "rev_date": "2026-07-16T01:00:19Z",
+      "scrape_date": "2026-07-16T15:25:54.544471Z",
+      "stabilities": [
+        "stable",
+        "staging",
+        "unstable"
+      ],
+      "unfree": true,
+      "version": "2.1.211",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/472p5a0bbfsc8ihzxym6isy4bghmrsck-claude-code-2.1.211"
+      },
+      "system": "x86_64-linux",
+      "group": "claude-code",
+      "priority": 5
+    },
+    {
+      "attr_path": "flox-ai",
+      "broken": false,
+      "derivation": "/nix/store/zp4w0cwp0sxbdch8fij6ifa2rpww45gi-flox-ai-0.8.0.drv",
+      "description": "Flox-native config management for Claude Code CLI",
+      "install_id": "flox-ai",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=69304793cb90e07c2adefd7a05f0f678aed9bf55",
+      "name": "flox-ai-0.8.0",
+      "pname": "flox-ai",
+      "rev": "69304793cb90e07c2adefd7a05f0f678aed9bf55",
+      "rev_count": 14161,
+      "rev_date": "2026-07-13T15:44:29Z",
+      "scrape_date": "2026-07-16T15:25:54.544486Z",
+      "stabilities": [
+        "stable",
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.8.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/f0lzb5ni2d1sxrnpji9yrl5h12ij6qih-flox-ai-0.8.0"
+      },
+      "system": "aarch64-darwin",
+      "group": "flox-ai",
+      "priority": 5
+    },
+    {
+      "attr_path": "flox-ai",
+      "broken": false,
+      "derivation": "/nix/store/q68na0i39gz4x3j61ivpdfyanrrp16dk-flox-ai-0.8.0.drv",
+      "description": "Flox-native config management for Claude Code CLI",
+      "install_id": "flox-ai",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=69304793cb90e07c2adefd7a05f0f678aed9bf55",
+      "name": "flox-ai-0.8.0",
+      "pname": "flox-ai",
+      "rev": "69304793cb90e07c2adefd7a05f0f678aed9bf55",
+      "rev_count": 14161,
+      "rev_date": "2026-07-13T15:44:29Z",
+      "scrape_date": "2026-07-16T15:25:54.544489Z",
+      "stabilities": [
+        "stable",
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.8.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/ngx0s4wqfx12631i5ak5yn6bzmk29b2b-flox-ai-0.8.0"
+      },
+      "system": "aarch64-linux",
+      "group": "flox-ai",
+      "priority": 5
+    },
+    {
+      "attr_path": "flox-ai",
+      "broken": false,
+      "derivation": "/nix/store/n3ha548ngmaczyjliqbni4xwla76s48f-flox-ai-0.8.0.drv",
+      "description": "Flox-native config management for Claude Code CLI",
+      "install_id": "flox-ai",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=69304793cb90e07c2adefd7a05f0f678aed9bf55",
+      "name": "flox-ai-0.8.0",
+      "pname": "flox-ai",
+      "rev": "69304793cb90e07c2adefd7a05f0f678aed9bf55",
+      "rev_count": 14161,
+      "rev_date": "2026-07-13T15:44:29Z",
+      "scrape_date": "2026-07-16T15:25:54.544490Z",
+      "stabilities": [
+        "stable",
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.8.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/g53gm910jsgaqcld3hjxlndd068qbli0-flox-ai-0.8.0"
+      },
+      "system": "x86_64-darwin",
+      "group": "flox-ai",
+      "priority": 5
+    },
+    {
+      "attr_path": "flox-ai",
+      "broken": false,
+      "derivation": "/nix/store/scgz7wagyl5sv48ykpzrck78ja6rf310-flox-ai-0.8.0.drv",
+      "description": "Flox-native config management for Claude Code CLI",
+      "install_id": "flox-ai",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=69304793cb90e07c2adefd7a05f0f678aed9bf55",
+      "name": "flox-ai-0.8.0",
+      "pname": "flox-ai",
+      "rev": "69304793cb90e07c2adefd7a05f0f678aed9bf55",
+      "rev_count": 14161,
+      "rev_date": "2026-07-13T15:44:29Z",
+      "scrape_date": "2026-07-16T15:25:54.544492Z",
+      "stabilities": [
+        "stable",
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.8.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/fw9wj78gija7qx4r09ia48fqnpm7j2kh-flox-ai-0.8.0"
+      },
+      "system": "x86_64-linux",
+      "group": "flox-ai",
+      "priority": 5
+    }
+  ]
+}

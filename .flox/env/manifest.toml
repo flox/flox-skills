@@ -1,0 +1,22 @@
+schema-version = "1.13.0"
+
+[install]
+claude-code.pkg-path = "flox/claude-code"
+claude-code.pkg-group = "claude-code"
+flox-ai.pkg-path = "flox/flox-ai"
+flox-ai.pkg-group = "flox-ai"
+
+# Packages the flox plugin (skills: flox, floxify) for all agents.
+# Stages the plugin under share/claude-code/plugins/flox, then
+# flox_agent_layout rewrites it into the per-agent launch layout
+# share/flox/{claude,codex,pi,opencode}/flox and drops the staging,
+# matching the floxenvs skills-* packages.
+[build.skills-flox]
+version = "1.0.0"
+description = "Flox skills (flox, floxify) packaged for Claude Code, Codex, Pi, and OpenCode"
+command = '''
+  mkdir -p "$out/share/claude-code/plugins/flox"
+  cp -R flox-plugin/. "$out/share/claude-code/plugins/flox/"
+  source .flox/nix/flox-agent-layout.sh
+  flox_agent_layout "flox" "$out/share"
+'''
