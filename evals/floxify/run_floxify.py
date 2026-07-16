@@ -20,9 +20,13 @@ Hard checks (deterministic — bind the gate for should-tier under --gate):
   pins_rust            manifest references cargo
   pins_ruby            manifest references ruby
 
-Activation check (advisory — skipped when flox unavailable or network restricted):
+Activation check (advisory — never gates):
   Runs `flox activate -c "echo __ok__"` in the temp dir.
-  Recorded as skipped (not failed) when flox is not in PATH or times out.
+  Recorded as skipped ONLY when we could not run the check (flox not in PATH,
+  --skip-activation, or a harness-side error). A timeout is recorded as a
+  FAILURE, not a skip — we ran the check and the env did not come up within
+  the budget. Budget is --activation-timeout (default 120s here; Tier 2 uses
+  1800s since its first activations realize a full closure).
 
 LLM judge (advisory — reported, never blocks the gate):
   Grades the produced manifest vs gold/<id>.toml 1-5 on package choices,
@@ -300,11 +304,22 @@ def _judge(task, produced_toml):
 
 # --- activation check ---------------------------------------------------------
 
-def _check_activation(target_dir):
+DEFAULT_ACTIVATION_TIMEOUT = 120
+
+
+def _check_activation(target_dir, timeout=DEFAULT_ACTIVATION_TIMEOUT):
     """Attempt `flox activate -c 'echo __ok__'` — returns (ok, skipped, notes).
 
-    Recorded as skipped (not failed) when flox is absent, network is restricted,
-    or the environment times out — the caller records it as advisory.
+    `skipped` means we could not run the check at all (flox absent, or the
+    harness itself errored). A **timeout is a failure, not a skip**: we ran the
+    check and the environment did not come up within the budget. Conflating the
+    two silently inflated `activation_skipped` and read as benign — posthog
+    exceeded the old hardcoded 120s and was recorded as skipped, so the largest
+    repo in the corpus yielded no activation signal at all (AI-454).
+
+    `timeout` is caller-set because the right budget depends on the tier: small
+    Tier 1 fixtures activate in seconds, while a Tier 2 monorepo's first
+    activation realizes an entire closure.
     """
     if not shutil.which("flox"):
         return None, True, "flox not in PATH"
@@ -314,7 +329,7 @@ def _check_activation(target_dir):
             cwd=str(target_dir),
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=timeout,
         )
         activated = proc.returncode == 0 and "__ok__" in proc.stdout
         notes = "" if activated else (
@@ -322,8 +337,14 @@ def _check_activation(target_dir):
         )
         return activated, False, notes
     except subprocess.TimeoutExpired:
-        return None, True, "activation timed out after 120 s"
+        return False, False, (
+            f"TIMEOUT: activation exceeded {timeout}s. This is a finding, not a "
+            f"skip — the environment may work but is too slow to verify at this "
+            f"budget. Raise --activation-timeout if the budget is wrong."
+        )
     except Exception as exc:
+        # A harness-side error (fork failure, etc.) is our problem, not the
+        # manifest's — that genuinely is 'we could not check'.
         return None, True, str(exc)
 
 
@@ -333,7 +354,8 @@ def _base(task):
     return {"id": task["id"], "tier": task["tier"], "ecosystem": task.get("ecosystem", "")}
 
 
-def process_task(task, skill_dir, skip_activation=False):
+def process_task(task, skill_dir, skip_activation=False,
+                 activation_timeout=DEFAULT_ACTIVATION_TIMEOUT):
     """Copy fixture to temp dir, run the skill, score the result."""
     fixture_src = FIXTURES_DIR / task["id"]
     if not fixture_src.exists():
@@ -381,7 +403,9 @@ def process_task(task, skill_dir, skip_activation=False):
         if skip_activation:
             act_ok, act_skipped, act_notes = None, True, "--skip-activation flag set"
         else:
-            act_ok, act_skipped, act_notes = _check_activation(tmp)
+            act_ok, act_skipped, act_notes = _check_activation(
+                tmp, timeout=activation_timeout
+            )
 
         # LLM judge (advisory).
         verdict = _judge(task, manifest_text)
@@ -547,6 +571,17 @@ def main():
         help="Skip flox activate verification (records as skipped, not failed)",
     )
     ap.add_argument(
+        "--activation-timeout",
+        type=int,
+        default=DEFAULT_ACTIVATION_TIMEOUT,
+        help=(
+            f"Seconds allowed for `flox activate` (default "
+            f"{DEFAULT_ACTIVATION_TIMEOUT}). Exceeding it is recorded as a "
+            f"FAILURE, not a skip — raise this if the budget is wrong for the "
+            f"fixture rather than reading a timeout as 'unchecked'."
+        ),
+    )
+    ap.add_argument(
         "--baseline",
         default=BASELINE_FILE,
         help=(
@@ -592,7 +627,10 @@ def main():
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         results = list(
             pool.map(
-                lambda t: process_task(t, skill_dir, skip_activation=args.skip_activation),
+                lambda t: process_task(
+                    t, skill_dir, skip_activation=args.skip_activation,
+                    activation_timeout=args.activation_timeout,
+                ),
                 tasks,
             )
         )
