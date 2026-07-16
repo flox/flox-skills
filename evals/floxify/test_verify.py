@@ -145,6 +145,119 @@ class TestAI449WorkedExample(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# AI-466 forensic reproduction: the lemmy x5 re-run came back 3/5, and
+# forensics traced both failures to false negatives in verify.py -- the
+# model ran the gate honestly and it exited 0 on a defective manifest.
+# This exercises the REAL detect.py against a lemmy-shaped fixture
+# (fixtures/lemmy-shaped/: a compose file with a postgres service, and a
+# Cargo.lock with pq-sys/diesel) rather than a hand-built detect dict, so
+# it proves the fix at the same integration boundary the incident lived
+# at, not just each invariant in isolation.
+# ---------------------------------------------------------------------------
+
+LEMMY_SHAPED_REP3_MANIFEST = '''
+schema-version = "1.13.0"
+
+[install]
+cargo.pkg-path = "cargo"
+rustc.pkg-path = "rustc"
+
+[vars]
+LEMMY_DATABASE_URL = "postgres://lemmy:password@localhost:5433/lemmy"
+
+[hook]
+on-activate = """
+  export PGDATA="$FLOX_ENV_CACHE/postgres"
+  initdb -D "$PGDATA" --auth=trust
+"""
+'''
+
+LEMMY_SHAPED_GOOD_MANIFEST = '''
+schema-version = "1.13.0"
+
+[install]
+cargo.pkg-path = "cargo"
+rustc.pkg-path = "rustc"
+postgresql.pkg-path = "postgresql_18"
+
+[vars]
+LEMMY_DATABASE_URL = "postgres://lemmy:password@localhost:5433/lemmy"
+
+[hook]
+on-activate = """
+  export PGDATA="$FLOX_ENV_CACHE/postgres"
+  initdb -D "$PGDATA" --auth=trust
+"""
+
+[services.postgres]
+command = "postgres -D \\"$FLOX_ENV_CACHE/postgres\\" -p 5433"
+'''
+
+
+class TestAI466LemmyForensicReproduction(unittest.TestCase):
+    def _detect(self):
+        return detect.scan(str(HERE / "fixtures" / "lemmy-shaped"))
+
+    def test_rep3_shaped_manifest_fires_holes_1_and_2(self):
+        # No [services.*] at all: HARD-fires both the pq-sys client
+        # (Hole 2 -- Cargo.lock now parsed) and the [vars] postgres
+        # endpoint (Hole 1 -- the repo's compose file no longer silences
+        # this just because detect.py happened to find it).
+        detected = self._detect()
+        v = _hard(_violations(detected, LEMMY_SHAPED_REP3_MANIFEST))
+        rules = _rules(v)
+        self.assertEqual(rules, {"leaf-datastore-not-served", "vars-endpoint-not-served"})
+
+    def test_good_manifest_with_wired_service_is_clean(self):
+        detected = self._detect()
+        v = _hard(_violations(detected, LEMMY_SHAPED_GOOD_MANIFEST))
+        self.assertEqual(v, [])
+
+    def test_good_manifest_plus_git_dash_c_hook_mutation_fires_hole_3_only(self):
+        mutated = LEMMY_SHAPED_GOOD_MANIFEST.replace(
+            'initdb -D "$PGDATA" --auth=trust',
+            'initdb -D "$PGDATA" --auth=trust\n'
+            '  git -C "$FLOX_ENV_PROJECT" submodule update --init',
+        )
+        detected = self._detect()
+        v = _hard(_violations(detected, mutated))
+        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+
+    def test_genuine_docker_compose_up_hook_satisfies_the_floor_without_a_service_block(self):
+        manifest = '''
+schema-version = "1.13.0"
+
+[install]
+cargo.pkg-path = "cargo"
+rustc.pkg-path = "rustc"
+docker-compose.pkg-path = "docker-compose"
+
+[vars]
+LEMMY_DATABASE_URL = "postgres://lemmy:password@localhost:5433/lemmy"
+
+[hook]
+on-activate = """
+  docker-compose up -d
+"""
+'''
+        detected = self._detect()
+        v = _hard(_violations(detected, manifest))
+        self.assertEqual(v, [])
+
+    def test_compose_service_that_is_not_a_leaf_datastore_never_triggers_anything(self):
+        # pictrs (image hosting) is in the fixture's compose file but is
+        # not a leaf datastore client or a [vars] endpoint -- must never
+        # be the reason anything fires.
+        detected = self._detect()
+        pictrs_only_clients = [
+            c for c in detected["service_clients"] if c["package"] != "pq-sys"
+        ]
+        manifest_with_no_pictrs_signal = '[install]\ncargo.pkg-path = "cargo"\n'
+        v = _violations({"service_clients": pictrs_only_clients}, manifest_with_no_pictrs_signal)
+        self.assertEqual(v, [])
+
+
+# ---------------------------------------------------------------------------
 # invariant 1 — every detected runtime is installed (AI-453)
 # ---------------------------------------------------------------------------
 
@@ -243,14 +356,55 @@ command = "postgres"
 '''
         self.assertEqual(_violations(detect, manifest), [])
 
-    def test_does_not_fire_when_docker_compose_already_manages_it(self):
+    def test_repo_side_compose_presence_alone_does_not_satisfy_the_floor(self):
+        # AI-466 Hole 1: repo-side compose FILE presence (a detect.py fact)
+        # is NOT the same as the MANIFEST serving the datastore. SKILL.md's
+        # HARD FLOOR: "The repo already having a way to start it is NEVER
+        # a reason to defer." A manifest with no [services.*] AND no hook
+        # that actually invokes docker-compose must still fire, even
+        # though detect.py found a compose file with a matching service.
         detect = {
             "service_clients": [
                 {"package": "psycopg2", "search_terms": ["postgresql"], "source": "requirements.txt"},
             ],
             "services": [{"name": "db", "kind": "postgres", "config_coupled": True}],
         }
-        self.assertEqual(_violations(detect, "[install]\n"), [])
+        v = _violations(detect, "[install]\n")
+        self.assertEqual(_rules(v), {"leaf-datastore-not-served"})
+
+    def test_manifest_hook_genuinely_running_docker_compose_up_satisfies_the_floor(self):
+        # The fix's positive case: the manifest itself (not just the repo)
+        # actually starts the compose service via `docker-compose up`,
+        # with docker-compose installed.
+        detect = {
+            "service_clients": [
+                {"package": "psycopg2", "search_terms": ["postgresql"], "source": "requirements.txt"},
+            ],
+            "services": [{"name": "db", "kind": "postgres", "config_coupled": True}],
+        }
+        manifest = '''
+[install]
+docker-compose.pkg-path = "docker-compose"
+
+[hook]
+on-activate = """
+  docker-compose up -d
+"""
+'''
+        self.assertEqual(_violations(detect, manifest), [])
+
+    def test_docker_compose_up_without_the_package_installed_does_not_satisfy_the_floor(self):
+        # The hook TEXT alone isn't enough either -- docker-compose must
+        # actually be installed for the invocation to be real.
+        detect = {
+            "service_clients": [
+                {"package": "psycopg2", "search_terms": ["postgresql"], "source": "requirements.txt"},
+            ],
+            "services": [{"name": "db", "kind": "postgres", "config_coupled": True}],
+        }
+        manifest = '[hook]\non-activate = "docker-compose up -d"\n'
+        v = _violations(detect, manifest)
+        self.assertEqual(_rules(v), {"leaf-datastore-not-served"})
 
     def test_non_leaf_client_terms_are_ignored(self):
         # cryptography -> pkg-config/openssl: not a leaf datastore, no service expected.
@@ -315,6 +469,57 @@ command = "postgres -k /tmp/lemmy-postgres"
             '"postgres://u:p@db.prod.internal.example.com:5432/app"\n'
         )
         self.assertEqual(_hard(_violations({}, manifest)), [])
+
+    # --- AI-466 Hole 1: repo-side compose presence must not silence this
+    # invariant. This is the exact forensic reproduction from the lemmy x5
+    # re-run: reps 3+4 both had a [vars] postgres URL and a hook, no
+    # [services.postgres], and both "passed" because the repo's own
+    # docker-compose.yml (a detect.py fact, not anything the manifest
+    # wired) was read as sufficient. ---
+
+    def test_fires_even_when_detect_found_a_matching_compose_service(self):
+        detect = {"services": [{"name": "db", "kind": "postgres", "config_coupled": True}]}
+        manifest = '[vars]\nDATABASE_URL = "postgres://u:p@localhost:5433/app"\n'
+        v = _violations(detect, manifest)
+        self.assertEqual(_rules(v), {"vars-endpoint-not-served"})
+        self.assertEqual(v[0]["severity"], "hard")
+
+    def test_stays_clean_when_hook_genuinely_runs_docker_compose_up(self):
+        detect = {"services": [{"name": "db", "kind": "postgres", "config_coupled": True}]}
+        manifest = '''
+[install]
+docker-compose.pkg-path = "docker-compose"
+
+[vars]
+DATABASE_URL = "postgres://u:p@localhost:5433/app"
+
+[hook]
+on-activate = """
+  docker-compose up -d
+"""
+'''
+        self.assertEqual(_violations(detect, manifest), [])
+
+    def test_docker_compose_mentioned_in_a_comment_does_not_satisfy_the_floor(self):
+        # A hook that only TALKS about docker-compose (doesn't run it) must
+        # not be read as wiring the service -- same discipline as the
+        # comment-stripping already applied to hook-mutation detection.
+        detect = {"services": [{"name": "db", "kind": "postgres", "config_coupled": True}]}
+        manifest = '''
+[install]
+docker-compose.pkg-path = "docker-compose"
+
+[vars]
+DATABASE_URL = "postgres://u:p@localhost:5433/app"
+
+[hook]
+on-activate = """
+  # run `docker-compose up` manually if you need postgres
+  echo "ready"
+"""
+'''
+        v = _violations(detect, manifest)
+        self.assertEqual(_rules(v), {"vars-endpoint-not-served"})
 
     def test_bare_compose_service_name_host_stays_hard(self):
         # A dotless hostname ("db") is almost certainly a docker-compose /
@@ -458,6 +663,63 @@ on-activate = """
         self.assertEqual(_rules(v), {"hook-mutates-tree"})
         self.assertEqual(len(v), 1)
         self.assertIn("git reset --hard origin/main", v[0]["message"])
+
+    # --- AI-466 Hole 3: `git [global options] <verb>` forms must not
+    # evade detection. Reproduced: `git -C "$FLOX_ENV_PROJECT" submodule
+    # update --init` exited 0 (false negative) while the bare form fired
+    # HARD. ---
+
+    def test_fires_on_git_dash_c_submodule_update(self):
+        manifest = (
+            '[hook]\non-activate = '
+            '\'git -C "$FLOX_ENV_PROJECT" submodule update --init\'\n'
+        )
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+
+    def test_fires_on_git_dash_c_checkout(self):
+        manifest = '[hook]\non-activate = "git -C /repo checkout main"\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+
+    def test_fires_on_git_dash_c_config_option_reset(self):
+        manifest = (
+            '[hook]\non-activate = '
+            '"git -c user.name=flox -C /repo reset --hard"\n'
+        )
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+
+    def test_fires_on_git_dir_option_commit(self):
+        # Deliberately does NOT end the path in "/.git" -- that would let
+        # the OLD regex accidentally match on the unrelated "git" inside
+        # the path value itself (a coincidental true positive that proves
+        # nothing about the actual --git-dir= handling).
+        manifest = (
+            '[hook]\non-activate = '
+            '"git --git-dir=/repo/custom-gitdir commit -am wip"\n'
+        )
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+
+    def test_does_not_fire_on_read_only_git_dash_c_log(self):
+        manifest = '[hook]\non-activate = "git -C /repo log --oneline -5"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_read_only_git_dash_c_apply_check(self):
+        manifest = '[hook]\non-activate = "git -C /repo apply --check patch.diff"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_git_dash_c_verb_inside_a_comment_still_does_not_fire(self):
+        # Comment-stripping discipline must hold for the -C form too.
+        manifest = '''
+[hook]
+on-activate = """
+  # if things break: git -C "$FLOX_ENV_PROJECT" reset --hard
+  uv sync
+"""
+'''
+        self.assertEqual(_violations({}, manifest), [])
 
     def test_does_not_fire_on_realistic_rust_hook(self):
         # Real golden shape (lemmy): env exports + echoes, no git mutation.

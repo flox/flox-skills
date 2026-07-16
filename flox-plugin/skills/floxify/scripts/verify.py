@@ -218,13 +218,6 @@ SERVICE_KIND_ALIASES = {
     "mongodb": ("mongo",),
 }
 
-COMPOSE_KIND_MAP = {
-    "postgres": "postgres", "postgis": "postgres",
-    "redis": "redis", "valkey": "redis",
-    "mysql": "mariadb", "mariadb": "mariadb",
-    "mongo": "mongodb",
-}
-
 _CONN_STRING_RE = re.compile(
     r"\b(postgres(?:ql)?|mysql|mariadb|redis|mongodb)://", re.I
 )
@@ -234,12 +227,41 @@ _CONN_STRING_KIND = {
     "redis": "redis", "mongodb": "mongodb",
 }
 
+_DOCKER_COMPOSE_UP_RE = re.compile(r"\bdocker(?:-|\s+)compose\s+up\b")
 
-def _compose_covers(detect, kind):
-    for svc in (detect or {}).get("services", []):
-        if COMPOSE_KIND_MAP.get((svc.get("kind") or "").lower()) == kind:
-            return True
-    return False
+
+def _manifest_wires_compose(manifest):
+    """True only if the manifest ITSELF actually invokes docker-compose in
+    its on-activate hook (`docker-compose up` / `docker compose up`) AND
+    has docker-compose installed.
+
+    Repo-side compose FILE presence (a detect.py fact) is never
+    sufficient by itself (AI-466 Hole 1) — SKILL.md's HARD FLOOR: "The
+    repo already having a way to start it is NEVER a reason to defer."
+    A prior version of this check asked only whether detect.py had found
+    a compose service of the right kind, which let the repo simply
+    HAVING a compose file silence a manifest that never actually started
+    anything — reproduced against a real lemmy re-run where two produced
+    manifests advertised a postgres endpoint with no [services.postgres]
+    and no compose invocation, and both "passed."
+
+    Comments are stripped before matching (a mention of docker-compose in
+    a `#` note doesn't run it — same discipline as
+    check_hook_no_mutation). Does not parse WHICH services a named
+    invocation (`docker-compose up -d clickhouse kafka`) starts — a hook
+    that starts only unrelated services would still read as covering an
+    untouched leaf datastore; narrower than that is out of scope here.
+    """
+    hook = manifest.get("hook", {}) or {}
+    script = hook.get("on-activate")
+    if not isinstance(script, str):
+        return False
+    stripped = "\n".join(_strip_comment(line) for line in script.splitlines())
+    if not _DOCKER_COMPOSE_UP_RE.search(stripped):
+        return False
+    install = manifest.get("install", {}) or {}
+    pkg_paths = {_pkg_path_str(d) for d in install.values() if isinstance(d, dict)}
+    return "docker-compose" in pkg_paths
 
 
 def _service_covers(manifest, kind):
@@ -260,8 +282,10 @@ def _truncate(value, limit=64):
 
 def check_leaf_datastore_services(detect, manifest):
     """A detected leaf-datastore client (`pg`, `psycopg2`, `redis`, ...) must
-    be served by a `[services.*]` block, unless docker-compose already
-    manages it."""
+    be served by a `[services.*]` block, unless the manifest's own hook
+    genuinely starts it via `docker-compose up` (see
+    `_manifest_wires_compose` — repo-side compose FILE presence alone
+    does not count, AI-466 Hole 1)."""
     violations = []
     for client in (detect or {}).get("service_clients", []):
         seen_kinds = set()
@@ -270,7 +294,7 @@ def check_leaf_datastore_services(detect, manifest):
             if not kind or kind in seen_kinds:
                 continue
             seen_kinds.add(kind)
-            if _compose_covers(detect, kind) or _service_covers(manifest, kind):
+            if _manifest_wires_compose(manifest) or _service_covers(manifest, kind):
                 continue
             violations.append(violation(
                 "leaf-datastore-not-served",
@@ -305,7 +329,9 @@ def _looks_local(host):
 
 def check_vars_endpoints(detect, manifest):
     """A [vars] value that advertises a datastore connection string must be
-    backed by a matching [services.*] (or a compose service).
+    backed by a matching [services.*], or by a hook that genuinely starts
+    it via `docker-compose up` (see `_manifest_wires_compose` — repo-side
+    compose FILE presence alone does not count, AI-466 Hole 1).
 
     HARD when the host looks local (a Flox service could plausibly be the
     thing missing); ADVISORY when the host doesn't (`db.prod.internal.
@@ -321,7 +347,7 @@ def check_vars_endpoints(detect, manifest):
         if not m:
             continue
         kind = _CONN_STRING_KIND[m.group(1).lower()]
-        if _compose_covers(detect, kind) or _service_covers(manifest, kind):
+        if _manifest_wires_compose(manifest) or _service_covers(manifest, kind):
             continue
         host = urlsplit(value[m.start():]).hostname
         if _looks_local(host):
@@ -373,8 +399,20 @@ def check_vars_literal(manifest):
 # invariant 5 — hooks must not mutate the tracked git tree
 # ---------------------------------------------------------------------------
 
+# Global options that can appear BETWEEN `git` and its subcommand
+# (`git -C <path> submodule update`, `git --git-dir=<path> checkout`, `git
+# -c <name>=<value> commit`) -- AI-466 Hole 3: these let a mutating verb
+# evade the plain "`git` directly followed by the verb" match entirely.
+# Reproduced live: `git -C "$FLOX_ENV_PROJECT" submodule update --init`
+# exited 0 while the bare form correctly fired HARD. Modeled on `git
+# help`'s "OPTIONS" section for the global flags that take a path/value.
+_GIT_GLOBAL_OPT = (
+    r"(?:-C\s+\S+|-c\s+\S+|--git-dir=\S+|--work-tree=\S+|--namespace=\S+|"
+    r"--exec-path(?:=\S+)?|--bare|--no-pager|--paginate|-p)"
+)
 _GIT_MUTATION_RE = re.compile(
-    r"\bgit\s+(?:submodule\s+update|checkout|reset|clean|pull|commit|add|"
+    r"\bgit\s+(?:" + _GIT_GLOBAL_OPT + r"\s+)*"
+    r"(?:submodule\s+update|checkout|reset|clean|pull|commit|add|"
     r"stash|rm|mv|apply|cherry-pick|rebase|merge|restore|switch|revert)\b"
 )
 

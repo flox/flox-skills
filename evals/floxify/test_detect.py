@@ -146,6 +146,108 @@ def test_rust_detected_from_cargo():
 
 
 # --------------------------------------------------------------------------
+# Cargo.lock: Rust service-client crates -> leaf-datastore search hints
+# (AI-466 Hole 2 — Cargo.lock was recorded as "present" (LOCKFILES) but its
+# package names were never parsed for clients, so the leaf-datastore
+# invariant was inert on every Rust repo: lemmy's pq-sys — pulled in
+# transitively by diesel's "postgres" feature — never registered as a
+# postgres client, even though the exact same signal from a Python
+# requirements.txt or a Ruby Gemfile.lock already did.)
+# --------------------------------------------------------------------------
+
+def test_cargo_lock_detects_postgres_client_pq_sys():
+    lock = '''
+[[package]]
+name = "pq-sys"
+version = "0.7.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "diesel"
+version = "2.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+'''
+    r = _scan_tmp({"Cargo.toml": '[package]\nname = "x"\n', "Cargo.lock": lock})
+    pkgs = [c["package"] for c in r["service_clients"]]
+    assert "pq-sys" in pkgs, pkgs
+    assert "postgresql" in _client_terms(r)
+
+
+def test_cargo_lock_detects_tokio_postgres_and_sqlx_postgres():
+    lock = '''
+[[package]]
+name = "tokio-postgres"
+version = "0.7.12"
+
+[[package]]
+name = "sqlx-postgres"
+version = "0.8.2"
+'''
+    r = _scan_tmp({"Cargo.toml": '[package]\nname = "x"\n', "Cargo.lock": lock})
+    pkgs = {c["package"] for c in r["service_clients"]}
+    assert {"tokio-postgres", "sqlx-postgres"} <= pkgs, pkgs
+    assert "postgresql" in _client_terms(r)
+
+
+def test_cargo_lock_detects_redis_clients():
+    lock = '''
+[[package]]
+name = "redis"
+version = "0.27.0"
+
+[[package]]
+name = "fred"
+version = "9.2.1"
+'''
+    r = _scan_tmp({"Cargo.toml": '[package]\nname = "x"\n', "Cargo.lock": lock})
+    terms = _client_terms(r)
+    assert "redis" in terms, terms
+
+
+def test_cargo_lock_detects_mysql_clients():
+    lock = '''
+[[package]]
+name = "mysql_async"
+version = "0.34.2"
+
+[[package]]
+name = "sqlx-mysql"
+version = "0.8.2"
+'''
+    r = _scan_tmp({"Cargo.toml": '[package]\nname = "x"\n', "Cargo.lock": lock})
+    terms = _client_terms(r)
+    assert "mariadb" in terms, terms
+
+
+def test_cargo_lock_source_is_attributed():
+    lock = '[[package]]\nname = "pq-sys"\nversion = "0.7.5"\n'
+    r = _scan_tmp({"Cargo.toml": '[package]\nname = "x"\n', "Cargo.lock": lock})
+    sources = {c["source"] for c in r["service_clients"]}
+    assert "Cargo.lock" in sources, sources
+
+
+def test_cargo_lock_unrelated_crates_do_not_false_positive():
+    # serde/tokio are ubiquitous and imply nothing about a datastore --
+    # a wrong invariant here is worse than none.
+    lock = '''
+[[package]]
+name = "serde"
+version = "1.0.210"
+
+[[package]]
+name = "tokio"
+version = "1.40.0"
+'''
+    r = _scan_tmp({"Cargo.toml": '[package]\nname = "x"\n', "Cargo.lock": lock})
+    assert r["service_clients"] == [], r["service_clients"]
+
+
+def test_cargo_lock_missing_is_not_an_error():
+    r = _scan_tmp({"Cargo.toml": '[package]\nname = "x"\n'})
+    assert r["service_clients"] == [], r["service_clients"]
+
+
+# --------------------------------------------------------------------------
 # invariant: the analyzer never asserts catalog names, only search hints
 # --------------------------------------------------------------------------
 
