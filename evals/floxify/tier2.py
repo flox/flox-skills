@@ -37,7 +37,10 @@ rather than being anchored by — or refusing to overwrite — an existing
 one. The upstream env is never silently discarded, though: it's a known-
 working answer worth comparing against this fixture's golden route, so
 it's captured as `had_upstream_flox`/`upstream_manifest`/
-`upstream_flox_files` in the per-rep result before being removed.
+`upstream_flox_files`/`upstream_flox_note` in the per-rep result before
+being removed. Never follows a symlink out of the checkout: a symlinked
+`.flox` or `.flox/env/manifest.toml` is unlinked/skipped rather than
+recursed into or read through, with `upstream_flox_note` saying why.
 
 Reuses `_run_claude_agent`, `_is_valid_toml`, `_check_activation`,
 `_run_judge`, `_stats`, `_skill_identity`, `DEFAULT_SKILL_DIR`, and the
@@ -563,32 +566,60 @@ def _capture_and_strip_upstream_flox(target_dir):
     fixture needs — whether the repo's own answer agrees with or
     contradicts this fixture's golden route is the point, not a nicety.
 
-    Returns (had_upstream_flox, upstream_manifest, upstream_flox_files):
-      had_upstream_flox   True if a .flox/ directory existed pre-strip
+    Never follows a symlink out of the checkout. A `.flox` that is itself
+    a symlink is unlinked directly rather than treated as a directory to
+    recurse into or delete through — `is_dir()` follows symlinks, so a
+    naive directory check would reach `shutil.rmtree`, which refuses to
+    operate on a symlinked root (`OSError`) and would otherwise abort the
+    whole run with nothing between here and `main`'s `pool.map` to catch
+    it. A `.flox/env/manifest.toml` that is itself a symlink is left
+    unread — `exists()`/`read_text()` also follow symlinks, which would
+    land arbitrary host-file contents in `upstream_manifest`, a value
+    that persists to the results JSON and uploads as a CI artifact. Both
+    cases still report `had_upstream_flox=True` (something was there);
+    they just aren't captured, and `note` says why.
+
+    Returns (had_upstream_flox, upstream_manifest, upstream_flox_files, note):
+      had_upstream_flox   True if a .flox/ path existed pre-strip, real
+                          directory or symlink alike
       upstream_manifest   full text of .flox/env/manifest.toml if it
-                          existed, else None — never truncated, same
-                          full-text discipline as the produced manifest's
-                          own "manifest" field (AI-468)
+                          existed and was a real file, else None — never
+                          truncated, same full-text discipline as the
+                          produced manifest's own "manifest" field
+                          (AI-468); None (not read) when it was a symlink
       upstream_flox_files sorted list of every file path under .flox/,
                           relative to it (e.g. "env/manifest.toml",
                           "env/on-activate.sh") — what else shipped
                           alongside the manifest, for repos with a
                           separate on-activate script or multiple env
-                          files
+                          files; empty when .flox itself was a symlink
+      note                 non-empty only when a symlink was found where
+                          a real file/dir was expected and therefore
+                          skipped rather than followed
     """
     flox_dir = Path(target_dir) / ".flox"
+
+    if flox_dir.is_symlink():
+        flox_dir.unlink()
+        return True, None, [], "upstream .flox was a symlink — not captured"
+
     if not flox_dir.is_dir():
-        return False, None, []
+        return False, None, [], ""
 
     files = sorted(
         str(p.relative_to(flox_dir)) for p in flox_dir.rglob("*") if p.is_file()
     )
     manifest_path = flox_dir / "env" / "manifest.toml"
-    upstream_manifest = (
-        manifest_path.read_text(encoding="utf-8") if manifest_path.exists() else None
-    )
+    note = ""
+    if manifest_path.is_symlink():
+        upstream_manifest = None
+        note = "upstream .flox/env/manifest.toml was a symlink — not captured"
+    elif manifest_path.exists():
+        upstream_manifest = manifest_path.read_text(encoding="utf-8")
+    else:
+        upstream_manifest = None
     shutil.rmtree(flox_dir)
-    return True, upstream_manifest, files
+    return True, upstream_manifest, files, note
 
 
 # --- per-entry runner --------------------------------------------------------
@@ -615,13 +646,15 @@ def process_entry(entry, skill_dir, activate=False, services=False,
         # anchor or short-circuit the conversion task — but capture it
         # first as data (AI-469). Must run before the prompt is built:
         # the prompt points the agent at this same tmpdir.
-        had_upstream_flox, upstream_manifest, upstream_flox_files = (
+        had_upstream_flox, upstream_manifest, upstream_flox_files, upstream_flox_note = (
             _capture_and_strip_upstream_flox(tmp)
         )
         if had_upstream_flox:
+            note_suffix = f" ({upstream_flox_note})" if upstream_flox_note else ""
             print(
                 f"  {entry['id']}: stripped upstream .flox/ "
-                f"({len(upstream_flox_files)} file(s)) before conversion",
+                f"({len(upstream_flox_files)} file(s)) before conversion"
+                f"{note_suffix}",
                 flush=True,
             )
 
@@ -740,6 +773,7 @@ def process_entry(entry, skill_dir, activate=False, services=False,
             "had_upstream_flox": had_upstream_flox,
             "upstream_manifest": upstream_manifest,
             "upstream_flox_files": upstream_flox_files,
+            "upstream_flox_note": upstream_flox_note,
             "hard_checks": hard,
             "hard_pass": hard_pass,
             "activation": {"ok": act_ok, "skipped": act_skipped, "notes": act_notes},
