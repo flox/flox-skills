@@ -444,6 +444,19 @@ it.
    idiomaticity-focused, not exact-match.
 5. **Report-only — this tier never gates the build**, in any mode.
    There's no `--gate` flag.
+6. **A cloned checkout can ship its own in-tree `.flox/`** (Tier 1's
+   vendored fixtures deliberately never do — "the skill creates it").
+   `process_entry` strips it before the conversion task runs, so the
+   skill starts from a clean slate rather than being anchored by — or
+   refusing to overwrite — an existing env (AI-469: PostHog ships a
+   git-tracked, hand-maintained `manifest.toml` at its pinned SHA, and
+   one un-stripped rep scored that UPSTREAM manifest instead of the
+   skill's own output). The upstream env is captured, not discarded:
+   `had_upstream_flox`, `upstream_manifest` (full text), and
+   `upstream_flox_files` (every path under `.flox/`) land in the per-rep
+   result — a known-working answer worth comparing against this
+   fixture's golden route, feeding a separate golden-vs-upstream
+   adoption review rather than this harness's own scoring.
 
 Everything else about the verify.py leg is the *same* as Tier 1, not
 different (AI-465): `process_entry` re-runs `detect.py` against the
