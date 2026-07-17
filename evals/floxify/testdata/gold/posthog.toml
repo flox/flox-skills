@@ -12,51 +12,84 @@ schema-version = "1.13.0"
 # disposition" table (AI-470) for the full per-service reasoning.
 
 [install]
-# Each exact-pinned package below gets its own pkg-group: AI-457 found
-# live (`flox activate`) that leaving them together in the shared toplevel
-# group fails resolution ("constraints for group 'toplevel' are too
-# tight") even though each resolves fine individually via `flox show` --
-# no single catalog page contains all four exact pins together. Isolating
-# each into its own group lets it resolve against its own page.
+# Pkg-group economy (AI-478, 2026-07-17): re-tested the AI-457 5-way
+# isolation empirically against the live catalog per the escalation
+# ladder (SKILL.md "Pkg-group economy"). Step 1 -- pin the toolchain,
+# unpin the libraries -- collapsed FOUR of the five: python313 keeps its
+# exact pin (the one genuinely repo-demanded constraint: `requires-python
+# = "==3.13.13"`, a hard equality, not a floor); nodejs_24, corepack_24,
+# and postgresql_15 dropped their exact `version` (matched docker-compose
+# patches, not repo-required) and now co-resolve with python313 in the
+# shared toplevel group -- confirmed live via `flox edit -f` + `flox
+# activate -c "echo __ok__"`: resolved to nodejs_24@24.16.0,
+# corepack_24@24.16.0, postgresql_15@15.18 (same major line each pkg-path
+# already guarantees). Redis is the one holdout: `flox activate` confirmed
+# a catalog page carrying python313@python3-3.13.13 has ONLY redis 8.x,
+# not 7.x -- unpinning it resolves, but silently jumps the major version
+# away from what docker-compose (redis:7.2-alpine) and this golden are
+# verified against, an unacceptable behavior change disguised as an
+# economy win. Isolating redis alone (LAST rung, seam-justified: it has
+# no native-linkage coupling to python/node/postgres) is the most
+# economical shape that actually resolves -- 5 single-package groups down
+# to 1. Caveat per the escalation ladder's step-1 report rule: nodejs_24,
+# corepack_24, and postgresql_15 are no longer pinned to the exact
+# patches docker-compose runs (24.13.0/24.13.0/15.12) -- they float
+# within their major line. Full attempt log, failure evidence, and
+# resolved versions in posthog-notes.md's "Pkg-group economy (AI-478)"
+# section.
 
 # Python 3.13.13 — pyproject.toml `requires-python = "==3.13.13"`. The
 # catalog's version string carries a "python3-" prefix (confirmed via
 # `flox show python313`) -- pin the exact string it prints, not the bare
-# semver a human would write, or the pin does not resolve at all.
+# semver a human would write, or the pin does not resolve at all. Kept
+# exact: this is the toolchain step 1 of the escalation ladder pins,
+# because it's the one hard repo-demanded equality constraint here.
 python3.pkg-path = "python313"
 python3.version = "python3-3.13.13"
-python3.pkg-group = "python313"
 
-# Node 24 — .nvmrc `v24.13.0`; package.json engines.node ">=24 <25"
+# Node 24 — .nvmrc `v24.13.0`; package.json engines.node ">=24 <25".
+# Version unpinned (AI-478): the exact patch matched .nvmrc, not a hard
+# requirement -- package.json's own engines range only floors at >=24,
+# and the pkg-path already confines resolution to the 24.x line. Floats
+# with python313 in the shared toplevel group; resolved live to
+# nodejs_24@24.16.0 on 2026-07-17 (see posthog-notes.md).
 nodejs.pkg-path = "nodejs_24"
-nodejs.version = "24.13.0"
-nodejs.pkg-group = "nodejs-24"
 
 # uv — uv.lock present; pyproject.toml has [tool.uv] (the Python package manager)
 uv.pkg-path = "uv"
 
 # corepack — installed explicitly rather than relying on nodejs_24's
-# bundled copy, so the exact `packageManager` pin below resolves via a
+# bundled copy, so the pinned `packageManager` below resolves via a
 # known, verified corepack rather than whatever happens to ship inside
 # the nodejs derivation. Lower priority (4 < the manifest default of 5,
 # see options.priority docs) so corepack_24's own binary wins any PATH
 # collision with nodejs_24's bundled one. Idiom confirmed live in
 # PostHog's own upstream .flox/env/manifest.toml, adopted here (AI-470 —
-# see posthog-notes.md's upstream-adoption table).
+# see posthog-notes.md's upstream-adoption table). Version unpinned
+# (AI-478): nothing requires corepack's OWN version to match anything
+# exactly -- its job (provisioning the exact pnpm@10.29.3 pin) doesn't
+# depend on it. Resolved live to corepack_24@24.16.0 on 2026-07-17.
 corepack.pkg-path = "corepack_24"
-corepack.version = "24.13.0"
 corepack.priority = 4
-corepack.pkg-group = "corepack-24"
 
 # PostgreSQL 15 server+client — docker-compose.base.yml `db` = postgres:15.12-alpine
 # Provides initdb/postgres/createdb/pg_isready for [services.postgres].
+# Version unpinned (AI-478): the exact patch matched compose's image, not
+# a hard repo requirement -- the pkg-path already confines resolution to
+# the 15.x line. Resolved live to postgresql_15@15.18 on 2026-07-17.
 postgresql.pkg-path = "postgresql_15"
-postgresql.version = "15.12"
 postgresql.outputs = ["out", "lib", "dev"]  # default is out+man only; exposes libpq/pg_config even though psycopg[binary] ships its own (see notes: "supplies libpq/pg_config as a bonus")
-postgresql.pkg-group = "postgresql-15"
 
 # Redis 7.2 server — docker-compose.base.yml `redis7` = redis:7.2-alpine
-# Provides redis-server for [services.redis].
+# Provides redis-server for [services.redis]. Isolated (last rung, AI-478,
+# 2026-07-17): `flox activate` confirmed no catalog page carrying
+# python313@python3-3.13.13 also carries redis 7.x -- only 8.x. Unpinning
+# to co-resolve would silently jump the major version away from what this
+# golden is verified against; kept exact and isolated instead. No native-
+# linkage coupling to anything else in this manifest (Redis's Python
+# client ships prebuilt wheels), so isolation here forfeits nothing beyond
+# its own catalog page download. See posthog-notes.md for the failure
+# evidence.
 redis.pkg-path = "redis"
 redis.version = "7.2.7"
 redis.pkg-group = "redis-72"

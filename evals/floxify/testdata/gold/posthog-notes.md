@@ -1,5 +1,12 @@
 # Golden manifest notes — PostHog @ 55525a19f353
 
+**AI-478 (2026-07-17):** Applied the pkg-group economy escalation ladder
+(SKILL.md) to the AI-457 5-way single-package isolation. Collapsed 4 of
+5 (python313/nodejs_24/corepack_24/postgresql_15 now share one group);
+redis stays isolated — the one holdout, with live failure evidence — see
+"Pkg-group economy" below. Service disposition (AI-470) and every
+`[services.*]`/`[hook]` block are unchanged.
+
 **AI-470 (2026-07-17):** Rebuilt on Bill's service-disposition adjudication
 — "does a developer need this service running locally to develop against?"
 Dev-time services (postgres, redis) are wired as Flox services; runtime-
@@ -101,16 +108,77 @@ real checkout).
 
 ## Chosen versions + mismatches
 
+Versions below marked "(unpinned, AI-478)" are the pkg-group-economy
+trade-off: the pin was dropped to let the package co-resolve with
+python313's exact pin in a shared group, since nothing in the repo
+demanded that exact patch. The "resolved live" value is what the
+catalog happened to produce on 2026-07-17 — expected to drift forward
+over time, by design (see "Pkg-group economy" below).
+
 | Package | Pinned | Rationale / mismatch |
 |---------|--------|----------------------|
-| python313 | 3.13.13 | Exact `requires-python ==3.13.13` |
-| nodejs_24 | 24.13.0 | Exact `.nvmrc v24.13.0` |
-| postgresql_15 | 15.12 | Exact compose image `postgres:15.12-alpine` |
-| redis | 7.2.7 | Latest 7.2.x; compose uses `redis:7.2-alpine` |
+| python313 | 3.13.13 | Exact `requires-python ==3.13.13` — the one genuinely repo-demanded equality constraint; kept exact as the group's toolchain anchor |
+| nodejs_24 | (unpinned, AI-478) | Resolved live to 24.16.0, 2026-07-17. Was exact `.nvmrc v24.13.0`; the patch pin wasn't load-bearing (package.json's own `engines.node` only floors at `>=24`), and `nodejs_24`'s pkg-path already confines resolution to the 24.x line |
+| postgresql_15 | (unpinned, AI-478) | Resolved live to 15.18, 2026-07-17. Was exact compose image match (`postgres:15.12-alpine`); the pkg-path confines resolution to the 15.x line regardless |
+| redis | 7.2.7 | Latest 7.2.x; compose uses `redis:7.2-alpine`. Isolated in its own group (AI-478) — the one holdout, see "Pkg-group economy" below |
 | uv | (unpinned) | Latest catalog uv fine; version not pinned by repo |
 | docker-compose | (unpinned) | Launcher for the deferred-with-mechanism ClickHouse stack |
-| corepack_24 | 24.13.0 | AI-470 adoption from PostHog's own upstream `.flox/env/manifest.toml` — see "Upstream technique adoption" |
+| corepack_24 | (unpinned, AI-478) | Resolved live to 24.16.0, 2026-07-17 (matches nodejs_24 — both resolve from the same shared group/page). AI-470 adopted this package from PostHog's own upstream `.flox/env/manifest.toml` — see "Upstream technique adoption"; nothing requires corepack's own version to match anything exactly, since its job (provisioning the exact `pnpm@10.29.3` pin) is version-independent |
 | pnpm | NOT installed from catalog | packageManager pins `pnpm@10.29.3` exactly; `pnpm_10` has 42 versions in the 10.x line (confirmed live, AI-457, 2026-07-16), but not that exact patch -- nearest is `pnpm_10@10.29.2`. Honor the byte-exact pin via corepack instead of settling for the nearest catalog version. |
+
+## Pkg-group economy (AI-478, 2026-07-17)
+
+AI-464's golden audit flagged this golden's 5-way single-package
+isolation (`python313`, `nodejs-24`, `corepack-24`, `postgresql-15`,
+`redis-72` — one group per exact pin) as a candidate for collapse under
+the SKILL.md escalation ladder ("Pkg-group economy — fewest groups
+possible is a first-order goal"). Step 1 was never attempted at the time
+(AI-457 went straight to per-package isolation, the ladder's LAST rung).
+This pass attempted it empirically against the live catalog, working
+progressively less aggressive candidates via `flox edit -f` (loads a
+candidate manifest into a scratch env, surfaces resolution failures
+immediately) followed by `flox activate -c "echo __ok__"` (full
+resolution-test) whenever `flox edit -f` succeeded:
+
+| Candidate | Shape tried | Result |
+|-----------|-------------|--------|
+| A | Full collapse, ALL FIVE exact pins kept, one shared group | **Failed** — `constraints for group 'toplevel' are too tight` (the same conflict AI-457 originally hit, unchanged by group name) |
+| B | python313 exact; nodejs/postgresql/redis floored to their major line (`"24"`/`"15"`/`"7"`); corepack unpinned; one shared group | **Failed** — same "too tight" error. A partial/floor pin is still a real constraint the resolver has to satisfy; floors alone weren't enough |
+| C | python313 exact; nodejs/corepack/postgresql/redis FULLY unpinned (no `version` field at all); one shared group | **Resolved and activated** — but `redis` resolved to **8.8.0**, a silent major-version jump away from what this golden (and PostHog's own `docker-compose.base.yml redis7: redis:7.2-alpine`) is actually verified against. Rejected: an unverified functional change disguised as a pkg-group optimization is not an economy win |
+| D | Same as C but `redis.version = "7"` (floor to major) | **Failed** — same "too tight" error. Confirms this is not a "looser pin resolves, tighter doesn't" oddity: no catalog page carrying `python313@python3-3.13.13` has ANY redis 7.x build, floored or exact — only 8.x |
+| E | python313 exact; nodejs/corepack/postgresql fully unpinned, sharing python313's group; redis kept isolated, exact `7.2.7` | **Resolved and activated** — adopted |
+
+Candidate E is the most economical shape that actually resolves without
+silently changing which major version of anything gets installed.
+Resolved versions confirmed via the scratch environment's
+`.flox/env/manifest.lock` after a successful `flox activate`:
+`nodejs_24@24.16.0`, `corepack_24@24.16.0`, `postgresql_15@15.18`, all
+still within their pkg-path's guaranteed major line (`nodejs_24`/
+`postgresql_15` can only ever resolve within the 24.x/15.x lines
+regardless of pin, by pkg-path name) — the trade-off is losing the exact
+patch match to what PostHog's own `docker-compose.base.yml` runs, not
+losing major-version compatibility.
+
+**Step-1 caveat (SKILL.md report rule):** `nodejs_24`, `corepack_24`,
+and `postgresql_15` are no longer pinned to the exact patches
+docker-compose runs (were `24.13.0`/`24.13.0`/`15.12`) — they now float
+within their major line, resolving to whatever the shared group's
+catalog page carries.
+
+**Redis isolation, the failure evidence kept:** the escalation ladder's
+LAST rung (isolate a single package) applies here because co-resolution
+demonstrably failed even with the version constraint relaxed to a bare
+major floor (candidate D), and redis has no native-linkage coupling to
+python/node/postgres in this manifest (PostHog's Python redis client
+ships prebuilt wheels — nothing compiles against `libredis`). Isolating
+it costs one dedicated catalog-page download; the alternative (candidate
+C) would have silently shipped Redis 8 in a golden whose services,
+rubric, and this very notes file describe Redis 7.
+
+**Result:** posthog's single-package pkg-group count drops from 5 to 1
+(`redis-72` only). Service disposition tags (AI-470) and every
+`[services.*]`/`[hook]` block are unchanged by this pass — only
+`[install]`'s version/group fields moved.
 
 ## Service disposition (AI-470)
 

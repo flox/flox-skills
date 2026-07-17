@@ -125,6 +125,23 @@ per-package isolation) should be the skill's general prescription for
 "exact pin conflicts with toplevel" is a broader question tracked
 separately (AI-464) -- not resolved here beyond this one golden.
 
+### Pkg-group economy re-test (AI-478, 2026-07-17)
+
+AI-464's golden audit flagged `nodejs_24`'s standalone `nodejs-24` group
+as a candidate now that the ruby+native cluster above exists as an
+established multi-package group. Re-tested per the SKILL.md escalation
+ladder: does `nodejs_24` fold into `runtime-and-native` (no native-gem
+coupling, so no ABI relationship to protect either way) instead of
+staying isolated? Tried folding it in directly (no version changes --
+`nodejs_24@24.18.0` unchanged) via `flox edit -f` against a scratch
+environment, then `flox activate -c "echo __ok__"`: both succeeded on
+the first attempt, `bundle install`/`yarn install` reaching the expected
+missing-Gemfile/package.json failures (no real mastodon checkout in the
+scratch dir), same as every prior resolution test of this golden.
+Adopted -- `nodejs.pkg-group = "runtime-and-native"`, eliminating
+mastodon's one single-package group (`nodejs-24`) entirely. Mastodon now
+has zero single-package pkg-groups.
+
 ---
 
 ## 3. Chosen versions + mismatches vs catalog
