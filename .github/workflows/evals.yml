@@ -197,14 +197,17 @@ jobs:
   golden-lint:
     # Golden-manifest lint (verify.py, no claude — AI-456 item 2). Unlike
     # floxify-evals/floxify-tier2 below, this spawns no `claude` agent and
-    # costs zero Anthropic API spend (only `flox install` + `flox show`
-    # network calls), so it does NOT need their dispatch-only cost gate —
-    # it runs per-PR via the `changes` filter, exactly as this workflow's
-    # header comment describes, PLUS on manual dispatch and (if the
-    # schedule trigger is restored) weekly. This is where KNOWN_VIOLATIONS
-    # (test_golden_lint.py) gets real teeth against catalog drift; the
-    # free `evals` step above only proves the allowlist machinery imports
-    # (no flox there by design).
+    # costs zero Anthropic API spend (only `flox install` + `flox show`/
+    # `flox edit -f` calls, no closure realization), so it does NOT need
+    # their dispatch-only cost gate — it runs per-PR via the `changes`
+    # filter, exactly as this workflow's header comment describes, PLUS
+    # on manual dispatch and (if the schedule trigger is restored)
+    # weekly. This is where KNOWN_VIOLATIONS (test_golden_lint.py) gets
+    # real teeth against catalog drift; the free `evals` step above only
+    # proves the allowlist machinery imports (no flox there by design).
+    # Also where the whole-manifest lock-resolution leg (AI-479) gets its
+    # only teeth: it needs the same live flox + network this job already
+    # provides, and skips cleanly in the free step's flox-less run.
     needs: changes
     if: >-
       (github.event_name == 'pull_request' && needs.changes.outputs.floxify == 'true') ||
@@ -231,7 +234,16 @@ jobs:
           # actually runs against testdata/gold/*.toml instead of skipping
           # cleanly. KNOWN_VIOLATIONS is an explicit allowlist (AI-457
           # burns it down); a failure here means a genuinely NEW, unlisted
-          # catalog defect.
+          # catalog defect. This single invocation also runs the
+          # whole-manifest lock-resolution leg (AI-479, one
+          # test_<fixture>_locks_cleanly per golden) — no separate command
+          # needed, the dynamically-generated tests are collected the same
+          # way the per-package violation tests already are. A failure
+          # there means a golden whose packages each resolve individually
+          # but cannot co-resolve together on any catalog page
+          # ("constraints for group 'X' are too tight") — a real
+          # cross-pkg-group finding the per-package checks above cannot
+          # see, not something to allowlist.
           python3 -m unittest test_golden_lint -v
 
   floxify-evals:
