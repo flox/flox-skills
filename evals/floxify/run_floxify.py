@@ -483,16 +483,31 @@ def _run_verify(skill_dir, fixture_src, manifest_text, check_catalog_live):
 # --- per-task runner ----------------------------------------------------------
 
 def _base(task):
-    return {"id": task["id"], "tier": task["tier"], "ecosystem": task.get("ecosystem", "")}
+    # `.get("tier", ...)` -- a task fed from tier2.jsonl (AI-463: this
+    # harness is Tier 1 only) has no "tier" key at all, and this function
+    # is called from the fixture-not-found error path below, which is
+    # exactly the shape that reaches it for such a task. A bare
+    # task["tier"] here would just move the KeyError one line down from
+    # the print fix, not actually resolve it.
+    return {"id": task["id"], "tier": task.get("tier", "?"),
+            "ecosystem": task.get("ecosystem", "")}
 
 
 def process_task(task, skill_dir, skip_activation=False,
                  activation_timeout=DEFAULT_ACTIVATION_TIMEOUT):
     """Copy fixture to temp dir, run the skill, score the result."""
-    fixture_src = FIXTURES_DIR / task["id"]
+    task_id = task["id"]
+    fixture_src = FIXTURES_DIR / task_id
     if not fixture_src.exists():
-        print(f"  [{task['tier']}] {task['id']}: ERROR fixture not found", flush=True)
-        return {**_base(task), "error": f"fixture not found: {fixture_src}"}
+        tier = task.get("tier", "?")
+        print(f"  [{tier}] {task_id}: ERROR no fixtures/{task_id} directory", flush=True)
+        return {**_base(task), "error": (
+            f"no fixtures/{task_id} directory -- this harness (run_floxify.py) "
+            f"is Tier 1 only and needs a local fixture checked into "
+            f"fixtures/{task_id}. Real-repo entries (cloned at a pinned SHA) "
+            f"live in tier2.jsonl and run via tier2.py, not this script: "
+            f"python3 tier2.py --only {task_id}"
+        )}
 
     with tempfile.TemporaryDirectory(prefix=f"floxify-eval-{task['id']}-") as tmpdir:
         # Copy fixture into temp dir.  No .flox/ in fixtures — skill creates it.
