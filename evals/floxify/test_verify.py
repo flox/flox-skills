@@ -1255,6 +1255,155 @@ command = "postgres"
 
 
 # ---------------------------------------------------------------------------
+# heuristic — compiled-extension runtime split from its native build dep
+# (ADVISORY) — AI-464
+# ---------------------------------------------------------------------------
+
+# cryptography's search_terms carry no leaf-datastore term (unlike
+# psycopg2's "postgresql"), so these fixtures isolate THIS heuristic from
+# check_leaf_datastore_services -- same discipline as the existing
+# test_non_leaf_client_terms_are_ignored fixture above.
+CRYPTOGRAPHY_DETECT = {
+    "service_clients": [
+        {"package": "cryptography", "search_terms": ["pkg-config", "openssl"],
+         "source": "requirements.txt"},
+    ],
+}
+
+RUBY_VIPS_DETECT = {
+    "service_clients": [
+        {"package": "ruby-vips", "search_terms": ["vips"], "source": "Gemfile"},
+    ],
+}
+
+
+class TestNativeGroupCoherence(unittest.TestCase):
+    def test_fires_advisory_when_runtime_and_native_dep_split(self):
+        manifest = '''
+[install]
+python3.pkg-path = "python313"
+python3.pkg-group = "python313"
+openssl.pkg-path = "openssl"
+'''
+        v = _violations(CRYPTOGRAPHY_DETECT, manifest)
+        fired = [x for x in v if x["rule"] == "native-group-split"]
+        self.assertEqual(len(fired), 1, v)
+        self.assertEqual(fired[0]["severity"], "advisory")
+
+    def test_never_contributes_to_hard_violations(self):
+        manifest = '''
+[install]
+python3.pkg-path = "python313"
+python3.pkg-group = "python313"
+openssl.pkg-path = "openssl"
+'''
+        self.assertEqual(_hard(_violations(CRYPTOGRAPHY_DETECT, manifest)), [])
+
+    def test_does_not_fire_when_runtime_and_native_dep_share_a_group(self):
+        # Mastodon golden shape: ruby + vips share "runtime-and-native".
+        manifest = '''
+[install]
+ruby.pkg-path = "ruby_4_0"
+ruby.pkg-group = "runtime-and-native"
+vips.pkg-path = "vips"
+vips.pkg-group = "runtime-and-native"
+'''
+        self.assertEqual(_violations(RUBY_VIPS_DETECT, manifest), [])
+
+    def test_does_not_fire_when_both_default_to_toplevel(self):
+        manifest = '''
+[install]
+python3.pkg-path = "python313"
+openssl.pkg-path = "openssl"
+'''
+        self.assertEqual(_violations(CRYPTOGRAPHY_DETECT, manifest), [])
+
+    def test_does_not_fire_for_pure_runtime_client_no_native_term(self):
+        # pg (ruby) implies only postgresql -- no native-link term, so this
+        # heuristic has no evidence to cross-check (leaf-datastore-served
+        # is the check that owns "is postgres wired", not this one; the
+        # [services.postgres] block here satisfies THAT check so only
+        # native-group-split's own behavior is under test).
+        detect = {"service_clients": [
+            {"package": "pg", "search_terms": ["postgresql"], "source": "Gemfile"},
+        ]}
+        manifest = '''
+[install]
+ruby.pkg-path = "ruby_4_0"
+ruby.pkg-group = "runtime-and-native"
+postgresql.pkg-path = "postgresql"
+
+[services.postgres]
+command = "postgres"
+'''
+        self.assertEqual(_violations(detect, manifest), [])
+
+    def test_does_not_fire_when_native_dep_not_installed(self):
+        # openssl never installed at all -- a coverage gap, not a split.
+        manifest = '[install]\npython3.pkg-path = "python313"\n'
+        self.assertEqual(_violations(CRYPTOGRAPHY_DETECT, manifest), [])
+
+    def test_does_not_fire_when_runtime_not_installed(self):
+        manifest = '[install]\nopenssl.pkg-path = "openssl"\n'
+        self.assertEqual(_violations(CRYPTOGRAPHY_DETECT, manifest), [])
+
+    def test_does_not_fire_without_detect_facts(self):
+        manifest = '''
+[install]
+python3.pkg-path = "python313"
+python3.pkg-group = "python313"
+openssl.pkg-path = "openssl"
+'''
+        self.assertEqual(_violations({}, manifest), [])
+
+
+# ---------------------------------------------------------------------------
+# heuristic — manifest fragmentation: too many single-package pkg-groups
+# (ADVISORY) — AI-464
+# ---------------------------------------------------------------------------
+
+def _single_pkg_group_manifest(n):
+    lines = ["[install]"]
+    for i in range(n):
+        lines.append(f'pkg{i}.pkg-path = "pkg{i}"')
+        lines.append(f'pkg{i}.pkg-group = "group{i}"')
+    return "\n".join(lines) + "\n"
+
+
+class TestGroupFragmentation(unittest.TestCase):
+    def test_fires_advisory_past_the_threshold(self):
+        manifest = _single_pkg_group_manifest(verify_mod.MAX_SINGLE_PKG_GROUPS + 1)
+        v = _violations({}, manifest)
+        fired = [x for x in v if x["rule"] == "group-fragmentation"]
+        self.assertEqual(len(fired), 1, v)
+        self.assertEqual(fired[0]["severity"], "advisory")
+
+    def test_never_contributes_to_hard_violations(self):
+        manifest = _single_pkg_group_manifest(verify_mod.MAX_SINGLE_PKG_GROUPS + 1)
+        self.assertEqual(_hard(_violations({}, manifest)), [])
+
+    def test_does_not_fire_at_the_threshold(self):
+        # posthog's current shape: exactly MAX_SINGLE_PKG_GROUPS (5) single-
+        # package groups must NOT trip this heuristic.
+        manifest = _single_pkg_group_manifest(verify_mod.MAX_SINGLE_PKG_GROUPS)
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_for_shared_groups(self):
+        # sentry golden shape: 5 packages sharing ONE group is economical,
+        # not fragmented -- must not fire regardless of package count.
+        lines = ["[install]"]
+        for i in range(10):
+            lines.append(f'pkg{i}.pkg-path = "pkg{i}"')
+            lines.append(f'pkg{i}.pkg-group = "shared"')
+        manifest = "\n".join(lines) + "\n"
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_for_toplevel_only_manifest(self):
+        manifest = '[install]\na.pkg-path = "a"\nb.pkg-path = "b"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+
+# ---------------------------------------------------------------------------
 # invalid manifest handling + output framing
 # ---------------------------------------------------------------------------
 
