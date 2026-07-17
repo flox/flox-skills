@@ -300,10 +300,25 @@ def test_gemfile_gems_inside_production_named_group_stay_runtime():
 
 
 def test_gemfile_multi_name_group_with_one_dev_name_is_scope_dev():
+    # Every named group is dev/test -- gem is genuinely dev-only.
     text = "group :development, :test do\n  gem 'pg'\nend\n"
     r = _scan_tmp({"Gemfile": text})
     by_pkg = {c["package"]: c["scope"] for c in r["service_clients"]}
     assert by_pkg == {"pg": "dev"}, r["service_clients"]
+
+
+def test_gemfile_mixed_group_with_a_production_name_stays_runtime():
+    # AI-467 review I1: a gem declared under MULTIPLE group names belongs
+    # to all of them simultaneously in Bundler -- `group :production,
+    # :test do` genuinely installs the gem in production. Marking it dev
+    # (an `any()`-over-names bug) would silently downgrade a corroborated
+    # client from HARD to ADVISORY -- a gate-direction false negative.
+    # This fixture distinguishes any() from all(): both prior tests use
+    # all-dev group lists, which pass under either implementation.
+    text = "group :production, :test do\n  gem 'pg'\nend\n"
+    r = _scan_tmp({"Gemfile": text})
+    by_pkg = {c["package"]: c["scope"] for c in r["service_clients"]}
+    assert by_pkg == {"pg": "runtime"}, r["service_clients"]
 
 
 def test_pyproject_optional_dependencies_are_scope_dev():
@@ -396,6 +411,18 @@ def test_requirements_txt_is_scope_runtime():
     r = _scan_tmp({"requirements.txt": "psycopg2==2.9.10\n"})
     scopes = {c["scope"] for c in r["service_clients"]}
     assert scopes == {"runtime"}, r["service_clients"]
+
+
+def test_requirements_dev_sibling_filenames_are_scope_dev():
+    # AI-467 review M2: requirements-dev.txt was the only dev-signaling
+    # filename recognized; sibling pip-tools/pip conventions were unscanned
+    # entirely (not just misclassified -- invisible to the analyzer).
+    r = _scan_tmp({
+        "dev-requirements.txt": "pymysql==1.1.1\n",
+        "requirements-test.txt": "pymongo==4.9.0\n",
+    })
+    by_pkg = {c["package"]: c["scope"] for c in r["service_clients"]}
+    assert by_pkg == {"pymysql": "dev", "pymongo": "dev"}, r["service_clients"]
 
 
 # --------------------------------------------------------------------------
