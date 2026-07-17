@@ -20,14 +20,19 @@ schema-version = "1.13.0"
 # link against (postgresql_14, vips, icu, libidn) -- keeping a compiled
 # extension's runtime coherent with the libraries it builds against,
 # rather than isolating it alone, resolved cleanly on the first attempt
-# (verified live). nodejs_24 gets its own separate group -- Node has no
-# native-gem coupling to those libraries. See mastodon-notes.md.
+# (verified live). nodejs_24 has no native-gem coupling to those
+# libraries, but pkg-group economy (AI-478, 2026-07-17) re-tested
+# whether it still needed a group of its own now that this cluster is
+# established: it does not — folding nodejs_24 into runtime-and-native
+# (rather than isolating it alone) resolved and activated cleanly
+# (`flox edit -f` + `flox activate -c "echo __ok__"`), eliminating
+# mastodon's one single-package group. See mastodon-notes.md.
 ruby.pkg-path = "ruby_4_0"            # .ruby-version 4.0.6 · Gemfile.lock RUBY 4.0.6 · Dockerfile RUBY_VERSION=4.0.6 (Gemfile allows >=3.3,<4.1)
 ruby.version = "4.0.5"               # catalog max is 4.0.5; repo pins 4.0.6 (1 patch ahead, not yet in catalog)
 ruby.pkg-group = "runtime-and-native"
 nodejs.pkg-path = "nodejs_24"        # .nvmrc 24.18 · Dockerfile NODE_MAJOR_VERSION=24 · package.json engines.node ">=22"
 nodejs.version = "24.18.0"           # exact match to .nvmrc 24.18
-nodejs.pkg-group = "nodejs-24"
+nodejs.pkg-group = "runtime-and-native"  # folded in, AI-478 -- see [install] header note
 
 # --- Package managers ---
 yarn.pkg-path = "yarn-berry"         # package.json packageManager "yarn@4.17.1" (Yarn v4 line; catalog 4.14.1)
