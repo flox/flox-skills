@@ -48,13 +48,17 @@ cannot co-resolve TOGETHER on any single catalog page
 ("constraints for group 'X' are too tight"). AI-457 and AI-478 only
 caught that class by hand, running `flox activate` themselves. This adds
 one more per-golden test, `test_<fixture>_locks_cleanly`, that attempts
-a real `flox edit -f` (resolve-only, never realizes the closure — orders
-of magnitude cheaper than `flox activate`) in a throwaway environment.
-Same skip discipline as the catalog leg above: advisory-skip when `flox`
-is absent or `FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0`, never gating the
-flox-less free-tier step. When it DOES run, a resolution failure is a
-real finding on that golden — report it, don't allowlist it or fix
-golden content in the same change that adds this check.
+a real `flox list -c` (resolution-only — see `_attempt_lock`'s docstring
+for the source-level and empirical proof it never realizes the closure)
+in a throwaway environment. Same skip discipline as the catalog leg
+above: advisory-skip when `flox` is absent or
+`FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0`, never gating the flox-less
+free-tier step. When it DOES run, a genuine resolution failure is a real
+finding on that golden — report it, don't allowlist it or fix golden
+content in the same change that adds this check. A catalog-API
+communication error is a different, transient failure class and is
+reported honestly as such rather than as a resolution finding — see
+`_classify_lock_failure`.
 
 Run:
     python3 test_golden_lint.py
@@ -123,58 +127,137 @@ def _run_flox_init(cwd, timeout=30):
     )
 
 
-def _run_flox_edit(manifest_path, cwd, timeout=120):
+def _run_flox_list_c(cwd, timeout=60):
+    """Thin subprocess wrapper — the whole surface a test needs to mock to
+    keep the lock leg off the network (mirrors verify.py's own
+    `_run_show_command` convention: everything below this line is pure
+    logic over the wrapper's return value)."""
     return subprocess.run(
-        [FLOX_BIN, "edit", "-f", str(manifest_path)], cwd=cwd,
-        capture_output=True, text=True, timeout=timeout,
+        [FLOX_BIN, "list", "-c"], cwd=cwd, capture_output=True, text=True,
+        timeout=timeout,
     )
 
 
-def _attempt_lock(manifest_text, timeout=120):
-    """Attempt a whole-manifest LOCK (resolve, don't realize) in a
-    throwaway environment. Returns (ok, message, elapsed_seconds).
+# _attempt_lock's three possible outcomes. A resolution error is the REAL
+# finding this leg exists to catch; a transient error is an infra/network
+# hiccup that must never be reported as one.
+LOCK_OK = "ok"
+LOCK_RESOLUTION_ERROR = "resolution_error"
+LOCK_TRANSIENT_ERROR = "transient_error"
 
-    `flox edit -f` (not `flox activate`) triggers the resolver and writes
-    manifest.lock but never builds or downloads the resolved store paths —
-    orders of magnitude cheaper than a full activation while exercising
-    exactly the cross-pkg-group resolution activation would. This is the
-    failure class ("constraints for group 'X' are too tight") the
-    per-package `check_catalog` leg above cannot see: packages that each
-    resolve individually can still fail to co-resolve together on any
-    single catalog page, and AI-457/AI-478 could only catch that by
-    running `flox activate` themselves.
 
-    A `flox init` failure or timeout (extremely rare — e.g. no disk space
-    in the throwaway dir) is reported as a lock failure too, elapsed=0.0,
-    rather than raising — a harness-side problem still needs to surface
-    as "this golden's lock leg could not be verified," not crash the run.
+def _classify_lock_failure(stderr):
+    """Discriminate a genuine resolver defect (the class this leg exists
+    to catch) from a catalog-API communication hiccup (must NOT be
+    reported as a resolution finding).
+
+    `flox list -c` is resolution-only (see `_attempt_lock`'s docstring)
+    but it still talks to the catalog API to resolve, so it is
+    "resolution-only," not "network-free" — it can fail on a connectivity
+    problem unrelated to the manifest's content. Confirmed empirically
+    (2026-07-17, forcing an unreachable --floxhub-url): that failure
+    shape is `catalog error: Communication Error: error sending request
+    for url ...`. A genuine resolver defect, by contrast, always starts
+    `resolution failed: ` — confirmed live for both shapes this leg cares
+    about: "constraints for group 'X' are too tight" (cross-pkg-group
+    conflict) and "could not find package '...'" (missing pkg-path).
     """
+    if "resolution failed:" in stderr:
+        return LOCK_RESOLUTION_ERROR
+    return LOCK_TRANSIENT_ERROR
+
+
+def _attempt_lock_once(manifest_text, timeout):
     with tempfile.TemporaryDirectory(prefix="floxify-golden-lock-") as tmp:
         try:
             init = _run_flox_init(tmp)
         except subprocess.TimeoutExpired:
-            return False, "flox init timed out after 30s", 0.0
+            return LOCK_TRANSIENT_ERROR, "flox init timed out after 30s", 0.0
         if init.returncode != 0:
             return (
-                False,
+                LOCK_TRANSIENT_ERROR,
                 f"flox init failed: {(init.stderr or init.stdout).strip()[:500]}",
                 0.0,
             )
 
-        manifest_path = Path(tmp) / "candidate-manifest.toml"
+        # Written directly rather than via `flox edit -f <file>`: `edit`
+        # transactionally BUILDS the environment to validate the edit
+        # (`man flox-edit`: "Once the editor is closed the environment is
+        # built in order to validate the edit") -- exactly the
+        # network-heavy, cold-store-flaky realize step this leg must
+        # avoid (see `_attempt_lock`'s docstring for the CI evidence).
+        manifest_path = Path(tmp) / ".flox" / "env" / "manifest.toml"
+        # mkdir needed because mocked-init unit tests never run the real
+        # `flox init -b` that would have created these directories.
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
         manifest_path.write_text(manifest_text, encoding="utf-8")
 
         start = time.monotonic()
         try:
-            edit = _run_flox_edit(manifest_path, tmp, timeout=timeout)
+            listed = _run_flox_list_c(tmp, timeout=timeout)
         except subprocess.TimeoutExpired:
             elapsed = time.monotonic() - start
-            return False, f"flox edit -f timed out after {timeout}s", elapsed
+            return (
+                LOCK_TRANSIENT_ERROR,
+                f"flox list -c timed out after {timeout}s",
+                elapsed,
+            )
         elapsed = time.monotonic() - start
 
-        if edit.returncode != 0:
-            return False, (edit.stderr or edit.stdout).strip()[:1000], elapsed
-        return True, "", elapsed
+        if listed.returncode != 0:
+            stderr = (listed.stderr or listed.stdout).strip()[:1000]
+            return _classify_lock_failure(stderr), stderr, elapsed
+        return LOCK_OK, "", elapsed
+
+
+def _attempt_lock(manifest_text, timeout=60):
+    """Attempt a whole-manifest LOCK (resolve, don't realize) in a
+    throwaway environment. Returns (status, message, elapsed_seconds)
+    where status is one of LOCK_OK, LOCK_RESOLUTION_ERROR, or
+    LOCK_TRANSIENT_ERROR (see `_classify_lock_failure`).
+
+    Instrument: `flox list -c`, not `flox edit -f`. PR #56's first
+    version used `flox edit -f` on the (wrong) assumption that it was
+    resolve-only; it went RED in CI because `edit` transactionally builds
+    the environment to validate the edit (see `_attempt_lock_once`), so
+    it realizes -- fetches and builds -- the full closure on every
+    invocation. `flox list -c` is resolution-only by construction:
+    flox-rust-sdk's `CoreEnvironment::lock` (a catalog-API-only resolve
+    that produces `manifest.lock`) and `CoreEnvironment::build` (which
+    fetches/builds store paths) are architecturally separate methods --
+    `build`'s own doc comment reads "Does not lock the manifest. Call
+    [Self::lock] explicitly before building" -- and the CLI's `list`
+    command path (`List::handle`) only ever calls `Environment::lockfile`
+    (which locks via `ensure_locked`/`lock`), never `build`, regardless
+    of `-c`/`-n`/default list mode.
+
+    Confirmed empirically (2026-07-17): `flox list -c` run against all 8
+    golden manifests made zero net additions to `/nix/store` (identical
+    top-level directory count before and after, across both passing and
+    a deliberately cross-pkg-group-broken manifest) and completed in a
+    consistent ~0.5-1.5s locally regardless of outcome -- no order-of-
+    magnitude jump on failure the way a partial realize would produce.
+    `flox edit -f`, by contrast, was CI-observed at 8-34s per golden with
+    real store fetches (a fetch failure for a resolvable package, e.g.
+    supabase's nodejs_22, is exactly the false "cannot co-resolve"
+    finding this rewrite fixes).
+
+    `flox list -c` still calls the catalog API to resolve, so it is not
+    network-FREE, just realize-free -- it can still hit a catalog
+    communication error. A transient-classified failure gets one retry
+    (a catalog blip, not the manifest, likely caused it) before being
+    reported; a resolution-content error never retries, since the
+    manifest's content won't change between attempts.
+
+    A `flox init` failure or timeout (extremely rare — e.g. no disk space
+    in the throwaway dir) is always LOCK_TRANSIENT_ERROR, elapsed=0.0,
+    rather than raising — a harness-side problem still needs to surface
+    as "this golden's lock leg could not be verified," not crash the run.
+    """
+    status, message, elapsed = _attempt_lock_once(manifest_text, timeout)
+    if status == LOCK_TRANSIENT_ERROR:
+        status, message, elapsed = _attempt_lock_once(manifest_text, timeout)
+    return status, message, elapsed
 
 
 def _gold_ids():
@@ -225,12 +308,14 @@ class TestGoldenLint(unittest.TestCase):
             self.skipTest("flox not on PATH -- cannot attempt lock resolution")
 
         manifest_text = (GOLD_DIR / f"{fixture_id}.toml").read_text(encoding="utf-8")
-        ok, message, elapsed = _attempt_lock(manifest_text)
+        status, message, elapsed = _attempt_lock(manifest_text)
         print(
-            f"  [lock] {fixture_id}: {'OK' if ok else 'FAILED'} in {elapsed:.2f}s",
+            f"  [lock] {fixture_id}: {status} in {elapsed:.2f}s",
             flush=True,
         )
-        if not ok:
+        if status == LOCK_OK:
+            return
+        if status == LOCK_RESOLUTION_ERROR:
             self.fail(
                 f"{fixture_id}.toml FAILED whole-manifest lock resolution "
                 f"({elapsed:.2f}s) -- its packages resolve individually "
@@ -240,6 +325,14 @@ class TestGoldenLint(unittest.TestCase):
                 f"do NOT fix golden content in the same change that adds "
                 f"this check; report it instead. Resolver output:\n{message}"
             )
+        # LOCK_TRANSIENT_ERROR, survived a retry inside _attempt_lock.
+        self.fail(
+            f"{fixture_id}.toml's lock attempt hit an environment/catalog "
+            f"error, likely transient, on both tries ({elapsed:.2f}s) -- "
+            f"the resolver never reported 'resolution failed:', so this "
+            f"is NOT a co-resolution defect in the golden. Re-run the job "
+            f"before treating this as a finding. Raw output:\n{message}"
+        )
 
     def test_catalog_leg_ran_when_expected(self):
         """Distinguishes 'genuinely clean' from 'silently skipped.'"""
@@ -338,21 +431,21 @@ class TestLockResolutionLeg(unittest.TestCase):
 
     # --- _attempt_lock: mocked subprocess boundary --------------------
 
-    @patch("test_golden_lint._run_flox_edit")
+    @patch("test_golden_lint._run_flox_list_c")
     @patch("test_golden_lint._run_flox_init")
-    def test_attempt_lock_reports_success(self, mock_init, mock_edit):
+    def test_attempt_lock_reports_success(self, mock_init, mock_list):
         mock_init.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        mock_edit.return_value = MagicMock(
-            returncode=0, stdout="Environment successfully updated.", stderr="",
+        mock_list.return_value = MagicMock(
+            returncode=0, stdout="[install]\n", stderr="",
         )
-        ok, message, elapsed = _attempt_lock("[install]\n")
-        self.assertTrue(ok)
+        status, message, elapsed = _attempt_lock("[install]\n")
+        self.assertEqual(status, LOCK_OK)
         self.assertEqual(message, "")
         self.assertGreaterEqual(elapsed, 0.0)
 
-    @patch("test_golden_lint._run_flox_edit")
+    @patch("test_golden_lint._run_flox_list_c")
     @patch("test_golden_lint._run_flox_init")
-    def test_attempt_lock_surfaces_resolver_failure_message(self, mock_init, mock_edit):
+    def test_attempt_lock_surfaces_resolver_failure_message(self, mock_init, mock_list):
         # RED-first "fires" fixture: the exact failure class AI-457/AI-478
         # found only by hand -- packages that resolve individually but
         # cannot co-resolve together on one catalog page. Mocked here (a
@@ -360,25 +453,70 @@ class TestLockResolutionLeg(unittest.TestCase):
         # construct, which the unit-test tier must stay free of) so the
         # leg's fail-path is provably exercised without network.
         mock_init.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        mock_edit.return_value = MagicMock(
+        mock_list.return_value = MagicMock(
             returncode=1, stdout="",
             stderr=(
                 "✘ ERROR: resolution failed: constraints for group "
                 "'toplevel' are too tight"
             ),
         )
-        ok, message, elapsed = _attempt_lock(
+        status, message, elapsed = _attempt_lock(
             '[install]\na.pkg-path = "a"\nb.pkg-path = "b"\n'
         )
-        self.assertFalse(ok)
+        self.assertEqual(status, LOCK_RESOLUTION_ERROR)
         self.assertIn("constraints for group 'toplevel' are too tight", message)
         self.assertGreaterEqual(elapsed, 0.0)
+
+    @patch("test_golden_lint._run_flox_list_c")
+    @patch("test_golden_lint._run_flox_init")
+    def test_attempt_lock_classifies_catalog_error_as_transient_and_retries(
+        self, mock_init, mock_list
+    ):
+        # The failure class PR #56's CI run actually hit: a catalog/
+        # fetch-shaped error unrelated to the manifest's content
+        # (confirmed live 2026-07-17 by forcing an unreachable
+        # --floxhub-url). Both attempts fail identically here, so the
+        # retry is exhausted and the caller still sees LOCK_TRANSIENT_
+        # ERROR, never LOCK_RESOLUTION_ERROR -- this is the exact
+        # discrimination that must NOT fire the "cannot co-resolve, do
+        # NOT allowlist" verdict for a network blip.
+        mock_init.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_list.return_value = MagicMock(
+            returncode=1, stdout="",
+            stderr=(
+                "✘ ERROR: catalog error: Communication Error: error "
+                "sending request for url (https://.../api/v1/catalog/resolve)"
+            ),
+        )
+        status, message, elapsed = _attempt_lock("[install]\n")
+        self.assertEqual(status, LOCK_TRANSIENT_ERROR)
+        self.assertIn("Communication Error", message)
+        self.assertEqual(mock_list.call_count, 2, "transient failure must retry once")
+        self.assertGreaterEqual(elapsed, 0.0)
+
+    @patch("test_golden_lint._run_flox_list_c")
+    @patch("test_golden_lint._run_flox_init")
+    def test_attempt_lock_retry_recovers_from_transient_error(
+        self, mock_init, mock_list
+    ):
+        mock_init.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_list.side_effect = [
+            MagicMock(
+                returncode=1, stdout="",
+                stderr="✘ ERROR: catalog error: Communication Error: timeout",
+            ),
+            MagicMock(returncode=0, stdout="[install]\n", stderr=""),
+        ]
+        status, message, elapsed = _attempt_lock("[install]\n")
+        self.assertEqual(status, LOCK_OK)
+        self.assertEqual(message, "")
+        self.assertEqual(mock_list.call_count, 2)
 
     @patch("test_golden_lint._run_flox_init")
     def test_attempt_lock_handles_init_failure_gracefully(self, mock_init):
         mock_init.return_value = MagicMock(returncode=1, stdout="", stderr="disk full")
-        ok, message, elapsed = _attempt_lock("[install]\n")
-        self.assertFalse(ok)
+        status, message, elapsed = _attempt_lock("[install]\n")
+        self.assertEqual(status, LOCK_TRANSIENT_ERROR)
         self.assertIn("disk full", message)
         self.assertEqual(elapsed, 0.0)
 
@@ -386,21 +524,21 @@ class TestLockResolutionLeg(unittest.TestCase):
     def test_attempt_lock_handles_init_timeout(self, mock_init):
         # PR #56 review M1: _run_flox_init's own timeout must degrade to
         # a reported lock failure, not propagate uncaught and crash the
-        # test -- the same discipline _run_flox_edit's timeout already
+        # test -- the same discipline _run_flox_list_c's timeout already
         # got, now applied to init too.
         mock_init.side_effect = subprocess.TimeoutExpired(cmd="flox init", timeout=30)
-        ok, message, elapsed = _attempt_lock("[install]\n")
-        self.assertFalse(ok)
+        status, message, elapsed = _attempt_lock("[install]\n")
+        self.assertEqual(status, LOCK_TRANSIENT_ERROR)
         self.assertIn("timed out", message)
         self.assertEqual(elapsed, 0.0)
 
-    @patch("test_golden_lint._run_flox_edit")
+    @patch("test_golden_lint._run_flox_list_c")
     @patch("test_golden_lint._run_flox_init")
-    def test_attempt_lock_handles_edit_timeout(self, mock_init, mock_edit):
+    def test_attempt_lock_handles_list_timeout(self, mock_init, mock_list):
         mock_init.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        mock_edit.side_effect = subprocess.TimeoutExpired(cmd="flox edit -f", timeout=120)
-        ok, message, elapsed = _attempt_lock("[install]\n", timeout=120)
-        self.assertFalse(ok)
+        mock_list.side_effect = subprocess.TimeoutExpired(cmd="flox list -c", timeout=60)
+        status, message, elapsed = _attempt_lock("[install]\n", timeout=60)
+        self.assertEqual(status, LOCK_TRANSIENT_ERROR)
         self.assertIn("timed out", message)
 
     # --- TestGoldenLint._lock: skip conditions -------------------------
@@ -426,7 +564,7 @@ class TestLockResolutionLeg(unittest.TestCase):
         self, mock_attempt
     ):
         mock_attempt.return_value = (
-            False,
+            LOCK_RESOLUTION_ERROR,
             "ERROR: resolution failed: constraints for group 'toplevel' are too tight",
             0.42,
         )
@@ -439,8 +577,30 @@ class TestLockResolutionLeg(unittest.TestCase):
         self.assertIn("do NOT allowlist", message)
 
     @patch("test_golden_lint._attempt_lock")
+    def test_lock_fails_with_transient_framing_when_catalog_errors_persist(
+        self, mock_attempt
+    ):
+        # This is the exact bug PR #56's first version had in CI: a
+        # network/catalog blip must produce an honest "likely transient"
+        # message, never the "REAL finding, do NOT allowlist" verdict
+        # that a genuine cross-pkg-group defect gets.
+        mock_attempt.return_value = (
+            LOCK_TRANSIENT_ERROR,
+            "catalog error: Communication Error: error sending request",
+            1.1,
+        )
+        instance = self._instance()
+        with self.assertRaises(AssertionError) as ctx:
+            instance._lock(_GOLD_IDS[0], live_catalog=True, flox_available=True)
+        message = str(ctx.exception)
+        self.assertIn("transient", message)
+        self.assertIn("Communication Error", message)
+        self.assertNotIn("REAL finding", message)
+        self.assertNotIn("do NOT allowlist", message)
+
+    @patch("test_golden_lint._attempt_lock")
     def test_lock_passes_cleanly_when_resolution_succeeds(self, mock_attempt):
-        mock_attempt.return_value = (True, "", 0.5)
+        mock_attempt.return_value = (LOCK_OK, "", 0.5)
         instance = self._instance()
         # must not raise
         instance._lock(_GOLD_IDS[0], live_catalog=True, flox_available=True)

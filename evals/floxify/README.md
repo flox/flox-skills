@@ -131,19 +131,40 @@ Eval layers, same two-tier shape as `detect.py`'s:
   AI-478 only caught that class by hand, running `flox activate`
   themselves against a scratch directory. `test_golden_lint.py` now adds
   one more test per golden, `test_<fixture>_locks_cleanly`, that attempts
-  a real `flox edit -f` (resolve-only — writes `manifest.lock` but never
-  realizes the closure, so it costs roughly a second per golden rather
-  than a full activation) in a throwaway environment. Same skip
-  discipline as the catalog leg: advisory-skip when `flox` is absent or
+  a real `flox list -c` in a throwaway environment with the candidate
+  manifest written directly into it. `flox list -c` is resolution-only:
+  it locks (writes `manifest.lock` via a catalog-API-only resolve) but
+  never builds or fetches store paths — unlike `flox edit -f`, which
+  transactionally builds the environment to validate the edit (`man
+  flox-edit`) and was this leg's original, wrong instrument (see the
+  caveat below). Measured locally against all 8 goldens: 0.5-1.5s each,
+  zero net `/nix/store` writes. Same skip discipline as the catalog leg:
+  advisory-skip when `flox` is absent or
   `FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0` is set, never gating the flox-less
-  free-tests step. When it DOES run, a resolution failure is a real,
-  reportable finding on that golden — not something to allowlist or
-  silently work around by fixing golden content in the same change that
-  adds the check. `TestLockResolutionLeg` covers the skip/fail/pass
+  free-tests step. When it DOES run, a genuine resolver defect (`flox
+  list -c` stderr starting `resolution failed:`) is a real, reportable
+  finding on that golden — not something to allowlist or silently work
+  around by fixing golden content in the same change that adds the
+  check. A catalog-API communication error is a different, transient
+  failure class: it gets one retry and, if it persists, is reported with
+  an honest "likely transient" message rather than the resolution-defect
+  verdict — see `_classify_lock_failure` in `test_golden_lint.py`.
+  `TestLockResolutionLeg` covers the skip/fail/pass/retry/classification
   plumbing with mocked, no-network unit tests; the live behavior (does a
   real golden actually lock) is exercised by the per-golden tests above,
   which need the same `golden-lint` CI job's live flox install the
   catalog leg does.
+
+  **Instrument history:** the leg originally used `flox edit -f`, chosen
+  because it looked resolve-only in local testing (a warm nix store made
+  it fast). It went RED in CI (PR #56) — `flox edit -f`'s build-to-
+  validate step realized the closure on a cold runner, and a fetch
+  failure for one otherwise-fine package (supabase's `nodejs_22`)
+  surfaced as a false "cannot co-resolve" finding. `flox list -c`
+  replaced it once source-reading (flox-rust-sdk's `lock`/`build` are
+  architecturally separate methods) and empirical testing (no store
+  writes, consistent sub-2s timing on pass and fail) confirmed it never
+  realizes.
 
   **Caveat:** the LLM judge (in `run_floxify.py` and `tier2.py`) grades
   produced manifests against these same goldens. Until AI-457 lands, a
