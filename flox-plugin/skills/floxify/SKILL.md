@@ -868,12 +868,13 @@ on-activate = """
   the bare `php` pkg-path lags a minor. Pair Composer as `phpNNPackages.composer`
   (interpreter-scoped — there is no top-level `composer` package).
 - Extensions come from the `phpNN` build's FIXED default set — you do NOT install `ext-*`
-  as packages. Diff `composer.json` `require`'s `ext-*` against that set: core exts
-  (`json`) need nothing; default-set exts (bcmath, curl, intl, mbstring, openssl, pdo,
-  simplexml, tokenizer, xmlwriter, …) are already covered; an ext OUTSIDE the default set
-  (e.g. `xml`/expat) is NOT `[install]`-closable — it needs a `phpNN.withExtensions`
-  `[build]`. Flag it honestly (`composer install --ignore-platform-req=ext-xml`) rather
-  than pretend.
+  as packages. Enumerate that set empirically (`flox run -p phpNN -- php -m` — the
+  execute-don't-infer rule above) and diff `composer.json` `require`'s `ext-*` against
+  THAT output, never against a remembered or source-derived list — the default set is
+  broader than source-reading suggests (all 14 of firefly-iii's required ext-*, `xml`
+  included, are present in php85). Only an ext genuinely absent from `php -m` needs
+  action, and it is NOT `[install]`-closable — it needs a `phpNN.withExtensions`
+  `[build]`. Flag that honestly rather than pretend.
 - `phpNNExtensions.*` packages are a TRAP: they resolve in `flox show` but a standalone
   install does not load into the prebuilt interpreter. nixpkgs bakes ext→system-lib deps
   (gd→libpng, intl→icu) into the derivation — do NOT over-provision system libs for PHP.
