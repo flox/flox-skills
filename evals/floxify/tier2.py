@@ -200,13 +200,21 @@ def _load_verify_module(skill_dir):
     failure: a harness-side problem, not a manifest verdict (same
     treatment `_run_verify` gives an unloadable skill dir) — callers that
     depend on it fail closed, the same way a missing manifest already
-    fails every check that needs one.
+    fails every check that needs one. A `--skill-dir` checkout that loads
+    fine but predates the `matching_service_names` export (AI-468) is
+    treated the same way: the module loaded, but the call this harness
+    needs from it doesn't exist, which is exactly the "can't use this
+    checkout for this check" case the None return already models —
+    letting the first call site raise AttributeError instead would crash
+    the whole run before any results are written.
     """
     try:
         _detect_mod, verify_mod = _load_detect_and_verify(skill_dir)
-        return verify_mod
     except Exception:  # noqa: BLE001 - harness-side load failure, not a manifest verdict
         return None
+    if not hasattr(verify_mod, "matching_service_names"):
+        return None
+    return verify_mod
 
 
 def _parsed_manifest(verify_mod, manifest_text):
