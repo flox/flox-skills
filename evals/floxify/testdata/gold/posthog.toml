@@ -2,9 +2,14 @@ schema-version = "1.13.0"
 # Golden reference for posthog @ 55525a19f353
 
 # PostHog is a python(uv) + node(pnpm monorepo) app. Postgres and Redis are
-# wired as native Flox services; ClickHouse runs via PostHog's own configured
-# docker-compose service (see [hook]) because it needs server-side config files
-# and a Kafka/ZooKeeper backing that a bare package cannot reproduce.
+# dev-time services -- a developer needs them running locally to develop
+# against -- so they're wired as native Flox services, self-initializing,
+# no Docker required. ClickHouse (plus the Kafka/ZooKeeper it depends_on) is
+# runtime-oriented analytics infrastructure with bespoke server config and
+# service coupling a bare catalog package can't reproduce; it's deferred
+# WITH A MECHANISM to PostHog's own configured docker-compose stack (see
+# [hook]), never silently dropped. See posthog-notes.md's "Service
+# disposition" table (AI-470) for the full per-service reasoning.
 
 [install]
 # Each exact-pinned package below gets its own pkg-group: AI-457 found
@@ -29,6 +34,19 @@ nodejs.pkg-group = "nodejs-24"
 
 # uv — uv.lock present; pyproject.toml has [tool.uv] (the Python package manager)
 uv.pkg-path = "uv"
+
+# corepack — installed explicitly rather than relying on nodejs_24's
+# bundled copy, so the exact `packageManager` pin below resolves via a
+# known, verified corepack rather than whatever happens to ship inside
+# the nodejs derivation. Lower priority (4 < the manifest default of 5,
+# see options.priority docs) so corepack_24's own binary wins any PATH
+# collision with nodejs_24's bundled one. Idiom confirmed live in
+# PostHog's own upstream .flox/env/manifest.toml, adopted here (AI-470 —
+# see posthog-notes.md's upstream-adoption table).
+corepack.pkg-path = "corepack_24"
+corepack.version = "24.13.0"
+corepack.priority = 4
+corepack.pkg-group = "corepack-24"
 
 # PostgreSQL 15 server+client — docker-compose.base.yml `db` = postgres:15.12-alpine
 # Provides initdb/postgres/createdb/pg_isready for [services.postgres].
@@ -67,25 +85,25 @@ on-activate = '''
   export UV_PROJECT_ENVIRONMENT="$FLOX_ENV_CACHE/venv"
   uv sync --frozen || uv sync
 
-  # --- Node: corepack activates the pinned pnpm@10.29.3 into a writable
-  #     cache dir (the Nix nodejs store path is read-only). pnpm_10 has
-  #     dozens of 10.x versions in the catalog (nearest below the pin is
-  #     10.29.2), just not this exact patch -- corepack gets the
-  #     byte-exact packageManager pin instead of settling for the
-  #     nearest catalog version. ---
+  # --- Node: corepack_24 (installed above) activates the pinned pnpm@10.29.3
+  #     into a writable cache dir (the Nix nodejs store path is read-only). ---
   export COREPACK_HOME="$FLOX_ENV_CACHE/corepack"
   mkdir -p "$FLOX_ENV_CACHE/node-bin"
   corepack enable --install-directory "$FLOX_ENV_CACHE/node-bin" pnpm
   export PATH="$FLOX_ENV_CACHE/node-bin:$PATH"
   pnpm install --frozen-lockfile
 
-  # --- ClickHouse: PostHog's configured compose service (pulls kafka +
-  #     zookeeper via depends_on). Only when a Docker daemon is reachable. ---
+  # --- ClickHouse: deferred-with-mechanism (AI-470 service disposition) to
+  #     PostHog's own configured compose service (pulls kafka + zookeeper
+  #     via depends_on), only when a Docker daemon is reachable. COMPOSE_FILE
+  #     (not an inline `-f <file>`) keeps this the bare `docker-compose up`
+  #     invocation the harness's manifest-wired-compose check recognizes. ---
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    docker-compose -f docker-compose.dev.yml up -d clickhouse
+    export COMPOSE_FILE="docker-compose.dev.yml"
+    docker-compose up -d clickhouse
   else
     echo "[flox] Docker not reachable — ClickHouse not started." >&2
-    echo "[flox] Run: docker-compose -f docker-compose.dev.yml up -d clickhouse" >&2
+    echo "[flox] Run: COMPOSE_FILE=docker-compose.dev.yml docker-compose up -d clickhouse" >&2
   fi
 '''
 

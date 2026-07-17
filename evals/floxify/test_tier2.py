@@ -387,6 +387,107 @@ class TestMatchingServiceNames(unittest.TestCase):
         )
 
 
+class TestServiceExpectation(unittest.TestCase):
+    """AI-470: `_service_expectation` normalizes an `expected_services`
+    registry entry to (name, disposition) — accepting both the pre-AI-470
+    bare-string shape (implicit expect-wired) and the new
+    {"name", "disposition"} dict shape, so every fixture but posthog's
+    unmodified entries keep working without a schema migration."""
+
+    def test_bare_string_defaults_to_expect_wired(self):
+        self.assertEqual(
+            tier2._service_expectation("postgres"), ("postgres", "expect-wired")
+        )
+
+    def test_dict_with_explicit_disposition(self):
+        self.assertEqual(
+            tier2._service_expectation({"name": "clickhouse", "disposition": "deferred-ok"}),
+            ("clickhouse", "deferred-ok"),
+        )
+
+    def test_dict_without_disposition_defaults_to_expect_wired(self):
+        self.assertEqual(
+            tier2._service_expectation({"name": "postgres"}),
+            ("postgres", "expect-wired"),
+        )
+
+
+class TestComposeWired(unittest.TestCase):
+    """AI-470: `_compose_wired` is a thin wrapper around verify.py's own
+    `_manifest_wires_compose` (AI-466's carve-out) — no re-derivation of
+    what "genuinely invokes docker-compose" means."""
+
+    def test_manifest_that_wires_compose(self):
+        manifest = tier2._parsed_manifest(
+            _VERIFY_MOD,
+            '[install]\n'
+            'docker-compose.pkg-path = "docker-compose"\n'
+            '[hook]\n'
+            'on-activate = "docker-compose up -d clickhouse"\n',
+        )
+        self.assertTrue(tier2._compose_wired(_VERIFY_MOD, manifest))
+
+    def test_manifest_that_does_not_wire_compose(self):
+        manifest = tier2._parsed_manifest(_VERIFY_MOD, "[install]\n")
+        self.assertFalse(tier2._compose_wired(_VERIFY_MOD, manifest))
+
+    def test_none_manifest_dict_is_false_not_a_crash(self):
+        self.assertFalse(tier2._compose_wired(_VERIFY_MOD, None))
+
+    def test_none_verify_mod_is_false_not_a_crash(self):
+        self.assertFalse(tier2._compose_wired(None, {"hook": {}}))
+
+
+class TestServiceDispositionResults(unittest.TestCase):
+    """AI-470: `_service_disposition_results` is the honest wired/
+    deferred/missing record behind `has_service_<kind>` — independent of
+    whether that outcome satisfies the structural check."""
+
+    def _entry(self, expected_services):
+        return {"id": "x", "expected_services": expected_services}
+
+    def test_wired_service_is_recorded_wired(self):
+        entry = self._entry([{"name": "postgres", "disposition": "expect-wired"}])
+        manifest = '[services.postgres]\ncommand = "postgres"\n'
+        results = tier2._service_disposition_results(entry, manifest, _VERIFY_MOD)
+        self.assertEqual(results, {"postgres": "wired"})
+
+    def test_deferred_ok_with_mechanism_is_recorded_deferred(self):
+        entry = self._entry([{"name": "clickhouse", "disposition": "deferred-ok"}])
+        manifest = (
+            '[install]\n'
+            'docker-compose.pkg-path = "docker-compose"\n'
+            '[hook]\n'
+            'on-activate = "docker-compose up -d clickhouse"\n'
+        )
+        results = tier2._service_disposition_results(entry, manifest, _VERIFY_MOD)
+        self.assertEqual(results, {"clickhouse": "deferred"})
+
+    def test_deferred_ok_without_mechanism_is_recorded_missing(self):
+        entry = self._entry([{"name": "clickhouse", "disposition": "deferred-ok"}])
+        manifest = "[install]\n"
+        results = tier2._service_disposition_results(entry, manifest, _VERIFY_MOD)
+        self.assertEqual(results, {"clickhouse": "missing"})
+
+    def test_expect_wired_with_compose_but_not_wired_is_recorded_missing(self):
+        # A compose invocation does NOT count for expect-wired — only
+        # deferred-ok accepts a mechanism in place of direct wiring.
+        entry = self._entry([{"name": "postgres", "disposition": "expect-wired"}])
+        manifest = (
+            '[install]\n'
+            'docker-compose.pkg-path = "docker-compose"\n'
+            '[hook]\n'
+            'on-activate = "docker-compose up -d postgres"\n'
+        )
+        results = tier2._service_disposition_results(entry, manifest, _VERIFY_MOD)
+        self.assertEqual(results, {"postgres": "missing"})
+
+    def test_bare_string_entry_defaults_to_expect_wired(self):
+        entry = self._entry(["redis"])
+        results = tier2._service_disposition_results(entry, "[install]\n", _VERIFY_MOD)
+        self.assertEqual(results, {"redis": "missing"})
+
+
 class TestStructuralChecks(unittest.TestCase):
     def test_full_conformant_manifest(self):
         entry = {
@@ -490,6 +591,66 @@ class TestStructuralChecks(unittest.TestCase):
         checks = tier2._structural_checks(entry, manifest)
         self.assertFalse(checks["no_abs_paths"])
 
+    # --- disposition semantics (AI-470) ---------------------------------
+
+    def test_deferred_ok_wired_directly_passes(self):
+        entry = {
+            "id": "x", "expected_runtimes": [],
+            "expected_services": [{"name": "clickhouse", "disposition": "deferred-ok"}],
+        }
+        manifest = '[services.clickhouse]\ncommand = "clickhouse-server"\n'
+        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+        self.assertTrue(checks["has_service_clickhouse"], checks)
+
+    def test_deferred_ok_with_compose_mechanism_passes(self):
+        # The exact posthog shape: not wired natively, but the manifest
+        # genuinely invokes docker-compose from [hook] — deferred-ok must
+        # pass, not fail, when a real mechanism stands in for direct wiring.
+        entry = {
+            "id": "x", "expected_runtimes": [],
+            "expected_services": [{"name": "clickhouse", "disposition": "deferred-ok"}],
+        }
+        manifest = (
+            '[install]\n'
+            'docker-compose.pkg-path = "docker-compose"\n'
+            '[hook]\n'
+            'on-activate = "docker-compose up -d clickhouse"\n'
+        )
+        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+        self.assertTrue(checks["has_service_clickhouse"], checks)
+
+    def test_expect_wired_with_only_compose_mechanism_fails(self):
+        # The same compose mechanism does NOT satisfy expect-wired — only
+        # deferred-ok accepts a mechanism in place of direct wiring.
+        entry = {
+            "id": "x", "expected_runtimes": [],
+            "expected_services": [{"name": "postgres", "disposition": "expect-wired"}],
+        }
+        manifest = (
+            '[install]\n'
+            'docker-compose.pkg-path = "docker-compose"\n'
+            '[hook]\n'
+            'on-activate = "docker-compose up -d postgres"\n'
+        )
+        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+        self.assertFalse(checks["has_service_postgres"], checks)
+
+    def test_silently_dropped_service_fails_both_dispositions(self):
+        # No wiring, no mechanism -- must fail regardless of disposition.
+        # This is the exact failure the harness must never wave through
+        # by "helpfully" treating deferred-ok as always-optional.
+        manifest = "[install]\n"
+        for disposition in ("expect-wired", "deferred-ok"):
+            entry = {
+                "id": "x", "expected_runtimes": [],
+                "expected_services": [{"name": "redis", "disposition": disposition}],
+            }
+            checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+            self.assertFalse(
+                checks["has_service_redis"],
+                f"disposition={disposition!r} must not pass a silently-dropped service",
+            )
+
 
 class TestLoadRegistry(unittest.TestCase):
     def test_parses_jsonl_lines(self):
@@ -505,6 +666,53 @@ class TestLoadRegistry(unittest.TestCase):
             self.assertEqual([e["id"] for e in entries], ["a", "b"])
         finally:
             Path(path).unlink()
+
+
+class TestRegistrySchema(unittest.TestCase):
+    """AI-470: every `expected_services` entry in the real tier2.jsonl must
+    be a well-formed {"name", "disposition"} dict with a recognized
+    disposition — and every fixture but posthog must be behavior-
+    preserving (all expect-wired, the pre-AI-470 default)."""
+
+    @classmethod
+    def setUpClass(cls):
+        here = Path(tier2.__file__).resolve().parent
+        cls.entries = tier2._load_registry(here / "tier2.jsonl")
+
+    def test_every_expected_services_entry_is_a_well_formed_dict(self):
+        for entry in self.entries:
+            for service in entry.get("expected_services", []):
+                self.assertIsInstance(
+                    service, dict,
+                    f"{entry['id']}: expected_services entries must be dicts "
+                    f"post-AI-470, got {service!r}",
+                )
+                self.assertIn("name", service, entry["id"])
+                self.assertIn("disposition", service, entry["id"])
+                self.assertIn(
+                    service["disposition"], tier2.KNOWN_DISPOSITIONS,
+                    f"{entry['id']}: unrecognized disposition "
+                    f"{service['disposition']!r}",
+                )
+
+    def test_posthog_has_the_adjudicated_dispositions(self):
+        posthog = next(e for e in self.entries if e["id"] == "posthog")
+        by_name = {s["name"]: s["disposition"] for s in posthog["expected_services"]}
+        self.assertEqual(by_name.get("postgres"), "expect-wired")
+        self.assertEqual(by_name.get("redis"), "expect-wired")
+        self.assertEqual(by_name.get("clickhouse"), "deferred-ok")
+
+    def test_every_other_fixture_is_behavior_preserving_expect_wired(self):
+        for entry in self.entries:
+            if entry["id"] == "posthog":
+                continue
+            for service in entry.get("expected_services", []):
+                self.assertEqual(
+                    service["disposition"], "expect-wired",
+                    f"{entry['id']}.{service['name']}: only posthog's "
+                    f"clickhouse is deferred-ok per AI-470 — every other "
+                    f"fixture's expectations must stay behavior-preserving",
+                )
 
 
 def _run(hard_pass=True, score=5, correct=True, error=None, verify=None):
@@ -1226,6 +1434,99 @@ class TestProcessEntryUpstreamFloxStrip(unittest.TestCase):
         self.assertIsNone(result["upstream_manifest"])
         self.assertIn("symlink", result["upstream_flox_note"])
         self.assertEqual(result["manifest"], "[install]\nfrom_skill = true\n")
+
+
+class TestProcessEntryServiceDisposition(unittest.TestCase):
+    """AI-470 end-to-end: process_entry's has_service_<kind> and the new
+    service_observed field must agree with the disposition-aware
+    semantics through the real call path — real skill dir, unmocked
+    _structural_checks/_service_disposition_results/_probe_services — not
+    just at the unit level."""
+
+    def _entry(self, **overrides):
+        entry = {
+            "id": "posthog", "repo_url": "https://example.com/posthog",
+            "sha": "abc123", "expected_runtimes": [],
+            "expected_services": [
+                {"name": "postgres", "disposition": "expect-wired"},
+                {"name": "clickhouse", "disposition": "deferred-ok"},
+            ],
+        }
+        entry.update(overrides)
+        return entry
+
+    @staticmethod
+    def _clone_writes_manifest(manifest_text):
+        def _clone(url, sha, dest, timeout=900):
+            d = Path(dest)
+            (d / ".flox" / "env").mkdir(parents=True, exist_ok=True)
+            (d / ".flox" / "env" / "manifest.toml").write_text(manifest_text)
+            return None
+        return _clone
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_verify")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_deferred_ok_service_deferred_with_mechanism_passes_hard_check(
+        self, mock_clone, mock_agent, mock_verify, mock_judge
+    ):
+        # Mirrors the rebuilt posthog golden's shape: postgres wired
+        # directly, clickhouse deferred to a genuine docker-compose
+        # invocation.
+        manifest = (
+            '[install]\n'
+            'docker-compose.pkg-path = "docker-compose"\n'
+            '[services.postgres]\n'
+            'command = "postgres"\n'
+            '[hook]\n'
+            'on-activate = "docker-compose up -d clickhouse"\n'
+        )
+        mock_clone.side_effect = self._clone_writes_manifest("[install]\n")
+        mock_agent.side_effect = _agent_writes_manifest(manifest)
+        mock_verify.return_value = {
+            "violations": [], "catalog_checked": False, "catalog_unknown": [],
+        }
+        mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
+
+        result = tier2.process_entry(self._entry(), str(tier2.DEFAULT_SKILL_DIR))
+
+        self.assertTrue(result["hard_checks"]["has_service_postgres"], result)
+        self.assertTrue(result["hard_checks"]["has_service_clickhouse"], result)
+        self.assertEqual(
+            result["service_observed"],
+            {"postgres": "wired", "clickhouse": "deferred"},
+        )
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_verify")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_silently_dropped_deferred_ok_service_fails_hard_check(
+        self, mock_clone, mock_agent, mock_verify, mock_judge
+    ):
+        # postgres wired, clickhouse neither wired nor deferred with any
+        # mechanism -- deferred-ok must not wave this through.
+        manifest = (
+            '[services.postgres]\n'
+            'command = "postgres"\n'
+        )
+        mock_clone.side_effect = self._clone_writes_manifest("[install]\n")
+        mock_agent.side_effect = _agent_writes_manifest(manifest)
+        mock_verify.return_value = {
+            "violations": [], "catalog_checked": False, "catalog_unknown": [],
+        }
+        mock_judge.return_value = {"score": 2, "correct": False, "issues": []}
+
+        result = tier2.process_entry(self._entry(), str(tier2.DEFAULT_SKILL_DIR))
+
+        self.assertTrue(result["hard_checks"]["has_service_postgres"], result)
+        self.assertFalse(result["hard_checks"]["has_service_clickhouse"], result)
+        self.assertFalse(result["hard_pass"], result)
+        self.assertEqual(
+            result["service_observed"],
+            {"postgres": "wired", "clickhouse": "missing"},
+        )
 
 
 class TestJudgeTier2CatalogNote(unittest.TestCase):
