@@ -195,13 +195,25 @@ def _runtime(lang, version, source, raw=None):
             "raw": raw if raw is not None else version}
 
 
-def _add_clients(dep_names, source, acc):
-    """Map dependency names to service-client search hints."""
+def _add_clients(dep_names, source, acc, scope="runtime"):
+    """Map dependency names to service-client search hints.
+
+    `scope` records WHERE in the dependency manifest a name came from —
+    "runtime" (installed unconditionally: npm `dependencies`, a Gemfile
+    gem outside any `group do...end` block, Python's `[project.
+    dependencies]`) or "dev" (dev/test/optional-only: npm
+    `devDependencies`, a Gemfile gem inside a `:test`/`:development`
+    group, Python's `[project.optional-dependencies]` / PEP 735
+    `[dependency-groups]` / poetry's `[tool.poetry.group.*]`). verify.py
+    uses this to decide HARD vs ADVISORY severity for the leaf-datastore
+    invariant (AI-467) — a dev-only client is not evidence the app needs
+    a live service in the environment being set up.
+    """
     for name in dep_names:
         key = name.strip().lower()
         if key in SERVICE_CLIENTS:
             acc.append({"package": name, "search_terms": SERVICE_CLIENTS[key],
-                        "source": source})
+                        "source": source, "scope": scope})
 
 
 def _parse_toml(text):
@@ -223,6 +235,44 @@ def _dep_names_from_pep508(items):
         if m:
             out.append(m.group(1))
     return out
+
+
+# Gemfile `group :name, ... do ... end` names that signal the gems inside
+# are not installed in a production/runtime environment by default (the
+# common Rails/Bundler convention). A group with an unrecognized name
+# (`:production`, or a custom one) defaults to "runtime" -- erring toward
+# not missing a real dependency over erring toward hiding one.
+_GEMFILE_DEV_GROUP_NAMES = {"test", "development", "dev", "cucumber", "rspec"}
+
+
+def _gemfile_gems_by_scope(text):
+    """Returns (runtime_gems, dev_gems) -- gems inside a `group ... do
+    ... end` block naming a dev/test group are "dev"; everything else
+    (top-level gems, and gems inside a non-dev-named group like
+    `:production`) is "runtime". Simple `do`/`end` depth tracking, not a
+    full Ruby parser -- good enough for Gemfile's narrow DSL.
+    """
+    runtime_gems, dev_gems = [], []
+    group_is_dev_stack = []
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", 1)[0]
+        stripped = line.strip()
+        if not stripped:
+            continue
+        gm = re.match(r"^group\s+(.+?)\s+do\b", stripped)
+        if gm:
+            names = re.findall(r":(\w+)", gm.group(1))
+            group_is_dev_stack.append(
+                any(n.lower() in _GEMFILE_DEV_GROUP_NAMES for n in names)
+            )
+            continue
+        if re.match(r"^end\b", stripped) and group_is_dev_stack:
+            group_is_dev_stack.pop()
+            continue
+        m = re.match(r'^gem\s+["\']([^"\']+)["\']', stripped)
+        if m:
+            (dev_gems if any(group_is_dev_stack) else runtime_gems).append(m.group(1))
+    return runtime_gems, dev_gems
 
 
 def scan(target):
@@ -364,7 +414,30 @@ def scan(target):
             if rp:
                 runtimes.append(_runtime("python", str(rp), "pyproject.toml (requires-python)"))
                 ecosystems.add("python")
-            _add_clients(deps, "pyproject.toml", clients)
+            _add_clients(deps, "pyproject.toml", clients, scope="runtime")
+
+            # ---- dev/optional-scoped deps: PEP 621 optional-dependencies
+            # (extras, opt-in), PEP 735 [dependency-groups] (dev/test
+            # tooling), and poetry's [tool.poetry.group.*.dependencies] ----
+            dev_deps = []
+            optional = proj.get("optional-dependencies")
+            if isinstance(optional, dict):
+                for extra_deps in optional.values():
+                    if isinstance(extra_deps, list):
+                        dev_deps += _dep_names_from_pep508(extra_deps)
+            dep_groups = data.get("dependency-groups")
+            if isinstance(dep_groups, dict):
+                for group_deps in dep_groups.values():
+                    if isinstance(group_deps, list):
+                        dev_deps += _dep_names_from_pep508(
+                            [d for d in group_deps if isinstance(d, str)]
+                        )
+            poetry_groups = poetry.get("group") if isinstance(poetry.get("group"), dict) else {}
+            for group_data in poetry_groups.values():
+                group_deps = group_data.get("dependencies") if isinstance(group_data, dict) else None
+                if isinstance(group_deps, dict):
+                    dev_deps += [k for k in group_deps.keys() if k.lower() != "python"]
+            _add_clients(dev_deps, "pyproject.toml", clients, scope="dev")
             # package manager
             if "uv.lock" in root_files or "uv" in tool:
                 pkg_mgrs.append({"name": "uv", "version": None,
@@ -396,7 +469,10 @@ def scan(target):
                     mm = re.match(r"^([A-Za-z0-9._-]+)", s)
                     if mm:
                         names.append(mm.group(1))
-            _add_clients(names, reqf, clients)
+            # "-dev" in the filename is the project's own signal this file
+            # is not installed in a runtime environment by default.
+            scope = "dev" if reqf == "requirements-dev.txt" else "runtime"
+            _add_clients(names, reqf, clients, scope=scope)
             if "python" not in ecosystems and names:
                 ecosystems.add("python")
             mark(reqf)
@@ -421,8 +497,10 @@ def scan(target):
             nm, _, ver = pm.partition("@")
             pkg_mgrs.append({"name": nm, "version": ver, "source": "package.json (packageManager)"})
             ecosystems.add("node")
-        deps = list((pj.get("dependencies") or {}).keys()) + list((pj.get("devDependencies") or {}).keys())
-        _add_clients(deps, "package.json", clients)
+        deps = list((pj.get("dependencies") or {}).keys())
+        dev_deps = list((pj.get("devDependencies") or {}).keys())
+        _add_clients(deps, "package.json", clients, scope="runtime")
+        _add_clients(dev_deps, "package.json", clients, scope="dev")
         if pj.get("workspaces"):
             monorepo_markers.append("package.json workspaces")
         if pj.get("name"):
@@ -436,8 +514,9 @@ def scan(target):
         if m:
             runtimes.append(_runtime("ruby", m.group(1), "Gemfile"))
             ecosystems.add("ruby")
-        gems = re.findall(r'^\s*gem\s+["\']([^"\']+)["\']', text, re.M)
-        _add_clients(gems, "Gemfile", clients)
+        runtime_gems, dev_gems = _gemfile_gems_by_scope(text)
+        _add_clients(runtime_gems, "Gemfile", clients, scope="runtime")
+        _add_clients(dev_gems, "Gemfile", clients, scope="dev")
         ecosystems.add("ruby")
         mark("Gemfile")
     if "Gemfile.lock" in root_files:

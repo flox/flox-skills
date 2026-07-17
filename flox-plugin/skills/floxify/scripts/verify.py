@@ -228,8 +228,9 @@ _CONN_STRING_KIND = {
 }
 
 # detect.py compose `kind` values -> our display kind. Used ONLY as a
-# CORROBORATION signal for lockfile-derived client evidence (AI-466 I1)
-# -- a repo-level "this datastore genuinely exists" fact, independent of
+# CORROBORATION signal for client evidence (AI-466 I1, generalized to
+# every source by AI-467 — see check_leaf_datastore_services) -- a
+# repo-level "this datastore genuinely exists" fact, independent of
 # whether the manifest actually WIRES it (that separate question is
 # `_manifest_wires_compose`, which this table has no part in since #42's
 # Hole 1 fix removed the old escape-hatch use of this mapping).
@@ -243,8 +244,8 @@ COMPOSE_KIND_MAP = {
 
 def _vars_endpoint_kind_present(manifest, kind):
     """True if any [vars] value is a connection-string endpoint of this
-    kind — corroboration for lockfile-derived client evidence (AI-466
-    I1), independent of whether check_vars_endpoints finds it already
+    kind — corroboration for client evidence (AI-466 I1 / AI-467),
+    independent of whether check_vars_endpoints finds it already
     served."""
     for value in (manifest.get("vars", {}) or {}).values():
         if not isinstance(value, str):
@@ -257,7 +258,7 @@ def _vars_endpoint_kind_present(manifest, kind):
 
 def _compose_service_kind_present(detect, kind):
     """True if detect.py found a compose service of this kind in the repo
-    — corroboration for lockfile-derived client evidence (AI-466 I1)."""
+    — corroboration for client evidence (AI-466 I1 / AI-467)."""
     for svc in (detect or {}).get("services", []):
         if COMPOSE_KIND_MAP.get((svc.get("kind") or "").lower()) == kind:
             return True
@@ -348,31 +349,32 @@ def check_leaf_datastore_services(detect, manifest):
     `_manifest_wires_compose` — repo-side compose FILE presence alone
     does not count, AI-466 Hole 1).
 
-    Cargo.lock evidence is a SPECIAL CASE (AI-466 I1): unlike every other
-    client source here (pyproject.toml's `[project.dependencies]`,
-    package.json, Gemfile), which read a manifest the developer wrote
-    directly, Cargo.lock is the one source that reads the FULL resolved
-    dependency graph — dev-dependencies, build-dependencies, and
-    feature-unified workspace deps included, none of which Cargo.lock
-    itself distinguishes from what the built binary actually links.
-    Reproduced live: a legitimately postgres-free, sqlite-only manifest
-    whose Cargo.lock transitively carries `pq-sys` (e.g. a test-only
-    dependency, or a workspace member the app doesn't ship) HARD-failed
-    here before this fix. Uncorroborated lock-only evidence now
-    downgrades to ADVISORY; it still fires HARD when corroborated by an
-    independent same-kind signal (a [vars] endpoint, or a compose service
-    of that kind) — the lemmy incident's rep-3/4 manifests carried a
-    [vars] postgres URL alongside the Cargo.lock signal, so that coverage
-    is unchanged.
+    HARD requires BOTH: the client's detect.py-recorded `scope` is
+    "runtime" (not "dev" — a dev/test/optional-only dependency, e.g. npm
+    `devDependencies`, a Gemfile `group :test do...end` gem, Python's
+    `[project.optional-dependencies]` / PEP 735 `[dependency-groups]` /
+    poetry's `[tool.poetry.group.*]`), AND an independent same-kind
+    signal corroborates it — a [vars] connection-string endpoint, or a
+    compose service of that kind in detect facts. Either condition
+    failing downgrades to ADVISORY (AI-466 I1 established this for
+    Cargo.lock specifically; AI-467 generalizes it to every source).
 
-    package.json and Gemfile share a narrower version of this risk
-    (package.json merges `devDependencies` into the same client-detection
-    pool as `dependencies`; a Gemfile `group :test do ... end` gem is not
-    distinguished from a top-level one) but neither reads a full
-    TRANSITIVE graph the way Cargo.lock does — extending corroboration to
-    them would be a larger, untested behavior change to already-reviewed
-    invariants (e.g. the node-postgres fixture's bare `pg` HARD-fire) and
-    is deliberately left out of this fix.
+    Originally (AI-461/#42) any client match fired HARD unconditionally.
+    AI-466 found Cargo.lock's evidence unreliable (it reads the full
+    resolved dependency graph, not a manifest the developer wrote) and
+    required corroboration for that source alone. AI-467 found the same
+    failure mode is not Cargo.lock-specific: reproduced live against
+    PostHog @ 55525a19f353, whose pyproject.toml declares `pymysql` and
+    `pymongo` in the MAIN `[project.dependencies]` list — genuinely
+    "runtime" by section placement — yet PostHog runs neither MariaDB nor
+    MongoDB locally (those clients back an OPTIONAL data-warehouse-export
+    feature connecting to a CUSTOMER's own external database, not
+    PostHog's own datastore). Section placement alone was never a
+    reliable proxy for "this app needs a live local service" — it only
+    proves the package installs by default, not what it is used for.
+    Requiring corroboration for EVERY source (not just Cargo.lock) closes
+    that gap, and it preserves the AI-449/lemmy incident coverage exactly
+    (those manifests carried a [vars] endpoint alongside the client).
     """
     violations = []
     for client in (detect or {}).get("service_clients", []):
@@ -385,26 +387,41 @@ def check_leaf_datastore_services(detect, manifest):
             if _manifest_wires_compose(manifest) or _service_covers(manifest, kind):
                 continue
 
-            if client.get("source") == "Cargo.lock" and not (
+            scope = client.get("scope", "runtime")
+            corroborated = (
                 _vars_endpoint_kind_present(manifest, kind)
                 or _compose_service_kind_present(detect, kind)
-            ):
+            )
+            source = client.get("source")
+            package = client.get("package")
+
+            if scope != "runtime":
                 violations.append(violation(
                     "leaf-datastore-not-served",
-                    f"client '{client.get('package')}' (Cargo.lock) implies "
-                    f"{kind}, but no [services.*] serves it — Cargo.lock "
-                    f"reads the full resolved dependency graph (dev/build/"
-                    f"workspace deps included), so this alone isn't proof "
-                    f"of a runtime need; confirm whether {kind} is actually "
-                    f"used before wiring it",
+                    f"client '{package}' ({source}) implies {kind}, but no "
+                    f"[services.*] serves it — detected in a dev/test/"
+                    f"optional-only dependency section, not proof of a "
+                    f"runtime need; confirm whether {kind} is actually used",
+                    severity=ADVISORY,
+                ))
+                continue
+
+            if not corroborated:
+                violations.append(violation(
+                    "leaf-datastore-not-served",
+                    f"client '{package}' ({source}) implies {kind}, but no "
+                    f"[services.*] serves it — no independent [vars] "
+                    f"endpoint or compose service corroborates it, so a "
+                    f"declared dependency alone isn't proof of a runtime "
+                    f"need; confirm whether {kind} is actually used",
                     severity=ADVISORY,
                 ))
                 continue
 
             violations.append(violation(
                 "leaf-datastore-not-served",
-                f"client '{client.get('package')}' ({client.get('source')}) "
-                f"implies {kind}, but no [services.*] serves it",
+                f"client '{package}' ({source}) implies {kind}, but no "
+                f"[services.*] serves it",
             ))
     return violations
 

@@ -247,6 +247,157 @@ def test_cargo_lock_missing_is_not_an_error():
     assert r["service_clients"] == [], r["service_clients"]
 
 
+def test_cargo_lock_clients_are_scope_runtime():
+    # No sections to distinguish in a lockfile -- always "runtime";
+    # verify.py's corroboration requirement (AI-466/AI-467) is the tool
+    # for this source, not provenance.
+    lock = '[[package]]\nname = "pq-sys"\nversion = "0.7.5"\n'
+    r = _scan_tmp({"Cargo.toml": '[package]\nname = "x"\n', "Cargo.lock": lock})
+    scopes = {c["scope"] for c in r["service_clients"]}
+    assert scopes == {"runtime"}, r["service_clients"]
+
+
+# --------------------------------------------------------------------------
+# AI-467: per-client provenance (runtime vs dev/test/optional) -- the
+# leaf-datastore invariant used to pool every dependency section together
+# (npm devDependencies, Gemfile `group :test`, Python optional-deps) as if
+# they were all equally trustworthy evidence of a runtime need. Reproduced
+# live against PostHog @ 55525a19f353's pyproject.toml before any code
+# changed: pymysql/pymongo sit in the MAIN [project.dependencies] list
+# (not optional-dependencies/dependency-groups), so provenance alone does
+# NOT explain that false positive -- confirming the fix has to be
+# verify.py's corroboration rule, not just this detect.py change. This
+# provenance tracking is still real and valuable on its own: it powers
+# corroboration's "dev-scoped evidence never counts" half.
+# --------------------------------------------------------------------------
+
+def test_npm_dev_dependencies_are_scope_dev():
+    pkg = '{"dependencies": {"pg": "^8"}, "devDependencies": {"pg-native": "^3"}}'
+    r = _scan_tmp({"package.json": pkg})
+    by_pkg = {c["package"]: c["scope"] for c in r["service_clients"]}
+    assert by_pkg == {"pg": "runtime", "pg-native": "dev"}, r["service_clients"]
+
+
+def test_gemfile_gems_inside_test_group_are_scope_dev():
+    text = (
+        "gem 'pg'\n"
+        "group :test do\n"
+        "  gem 'mysql2'\n"
+        "end\n"
+    )
+    r = _scan_tmp({"Gemfile": text})
+    by_pkg = {c["package"]: c["scope"] for c in r["service_clients"]}
+    assert by_pkg == {"pg": "runtime", "mysql2": "dev"}, r["service_clients"]
+
+
+def test_gemfile_gems_inside_production_named_group_stay_runtime():
+    # An unrecognized/non-dev group name (":production") must not be
+    # treated as dev -- erring toward not hiding a real dependency.
+    text = "group :production do\n  gem 'pg'\nend\n"
+    r = _scan_tmp({"Gemfile": text})
+    by_pkg = {c["package"]: c["scope"] for c in r["service_clients"]}
+    assert by_pkg == {"pg": "runtime"}, r["service_clients"]
+
+
+def test_gemfile_multi_name_group_with_one_dev_name_is_scope_dev():
+    text = "group :development, :test do\n  gem 'pg'\nend\n"
+    r = _scan_tmp({"Gemfile": text})
+    by_pkg = {c["package"]: c["scope"] for c in r["service_clients"]}
+    assert by_pkg == {"pg": "dev"}, r["service_clients"]
+
+
+def test_pyproject_optional_dependencies_are_scope_dev():
+    text = '''
+[project]
+name = "x"
+dependencies = ["psycopg2"]
+
+[project.optional-dependencies]
+mysql = ["pymysql"]
+'''
+    r = _scan_tmp({"pyproject.toml": text})
+    by_pkg = {c["package"]: c["scope"] for c in r["service_clients"]}
+    assert by_pkg == {"psycopg2": "runtime", "pymysql": "dev"}, r["service_clients"]
+
+
+def test_pyproject_dependency_groups_pep735_are_scope_dev():
+    # PostHog's own shape: PEP 735 [dependency-groups], NOT
+    # [project.optional-dependencies].
+    text = '''
+[project]
+name = "x"
+dependencies = ["psycopg2"]
+
+[dependency-groups]
+dev = ["pymysql"]
+'''
+    r = _scan_tmp({"pyproject.toml": text})
+    by_pkg = {c["package"]: c["scope"] for c in r["service_clients"]}
+    assert by_pkg == {"psycopg2": "runtime", "pymysql": "dev"}, r["service_clients"]
+
+
+def test_pyproject_poetry_group_dependencies_are_scope_dev():
+    text = '''
+[project]
+name = "x"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+psycopg2 = "*"
+
+[tool.poetry.group.dev.dependencies]
+pymysql = "*"
+'''
+    r = _scan_tmp({"pyproject.toml": text})
+    by_pkg = {c["package"]: c["scope"] for c in r["service_clients"]}
+    assert by_pkg == {"psycopg2": "runtime", "pymysql": "dev"}, r["service_clients"]
+
+
+def test_posthog_pyproject_shape_pymysql_pymongo_are_scope_runtime():
+    """The exact reproduction: pymysql/pymongo verified live to sit in
+    PostHog's MAIN [project.dependencies] (pyproject.toml lines 113-114
+    at SHA 55525a19f353), not [project.optional-dependencies] or
+    [dependency-groups]. This asserts detect.py reports them as
+    scope="runtime" -- correctly reflecting the file, and PROVING
+    section-provenance alone cannot suppress the false positive. verify.py
+    (AI-467's corroboration extension) is what closes the gap for this
+    specific shape -- see test_verify.py's posthog reproduction.
+    """
+    text = '''
+[project]
+name = "posthog"
+requires-python = "==3.13.13"
+dependencies = [
+    "psycopg2-binary==2.9.10",
+    "pymssql==2.3.5",
+    "pymysql==1.1.1",
+    "pymongo==4.13.2",
+    "redis==5.3.1",
+]
+
+[dependency-groups]
+dev = [
+    "types-pymysql==1.1.0.20240524",
+]
+'''
+    r = _scan_tmp({"pyproject.toml": text})
+    by_pkg = {c["package"]: c["scope"] for c in r["service_clients"]}
+    assert by_pkg["pymysql"] == "runtime", by_pkg
+    assert by_pkg["pymongo"] == "runtime", by_pkg
+
+
+def test_requirements_dev_txt_is_scope_dev():
+    r = _scan_tmp({"requirements-dev.txt": "pymysql==1.1.1\n"})
+    scopes = {c["scope"] for c in r["service_clients"]}
+    assert scopes == {"dev"}, r["service_clients"]
+
+
+def test_requirements_txt_is_scope_runtime():
+    r = _scan_tmp({"requirements.txt": "psycopg2==2.9.10\n"})
+    scopes = {c["scope"] for c in r["service_clients"]}
+    assert scopes == {"runtime"}, r["service_clients"]
+
+
 # --------------------------------------------------------------------------
 # invariant: the analyzer never asserts catalog names, only search hints
 # --------------------------------------------------------------------------

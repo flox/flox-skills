@@ -336,12 +336,100 @@ python3.pkg-path = "python313"
 # ---------------------------------------------------------------------------
 
 class TestLeafDatastoreServices(unittest.TestCase):
-    def test_fires_when_pg_client_has_no_service(self):
+    def test_uncorroborated_client_downgrades_to_advisory(self):
+        # AI-467 INTENTIONAL CHANGE from the original #42 behavior (this
+        # test used to assert HARD here): a package.json `dependencies`
+        # entry with NOTHING else in the manifest confirming a runtime
+        # postgres need now downgrades to ADVISORY, same as every other
+        # source after AI-467 generalized AI-466's Cargo.lock-specific
+        # corroboration rule. Reproduced live against PostHog @
+        # 55525a19f353: pymysql/pymongo sit in pyproject.toml's MAIN
+        # [project.dependencies] (unambiguously "runtime" by section
+        # placement) yet PostHog runs neither MariaDB nor MongoDB locally
+        # -- section placement alone was never reliable proof of a live
+        # local service need. See test_fires_hard_when_client_is_
+        # corroborated below for the case this invariant still catches.
         detect = {"service_clients": [
-            {"package": "pg", "search_terms": ["postgresql"], "source": "package.json"},
+            {"package": "pg", "search_terms": ["postgresql"], "source": "package.json",
+             "scope": "runtime"},
         ]}
         v = _violations(detect, "[install]\n")
         self.assertEqual(_rules(v), {"leaf-datastore-not-served"})
+        self.assertEqual(v[0]["severity"], "advisory")
+
+    def test_fires_hard_when_client_is_corroborated(self):
+        # The realistic, incident-motivating shape (AI-449/lemmy): a
+        # runtime-scoped client PLUS an independent [vars] endpoint of
+        # the same kind. This is what the invariant still catches.
+        detect = {"service_clients": [
+            {"package": "pg", "search_terms": ["postgresql"], "source": "package.json",
+             "scope": "runtime"},
+        ]}
+        manifest = '[vars]\nDATABASE_URL = "postgres://u:p@localhost:5432/app"\n'
+        v = _hard(_violations(detect, manifest))
+        rules = {x["rule"] for x in v}
+        self.assertIn("leaf-datastore-not-served", rules)
+
+    def test_dev_scoped_client_downgrades_to_advisory_even_when_corroborated(self):
+        # scope="dev" is disqualifying on its own: a devDependencies-only
+        # client is not evidence the DEV environment being set up needs a
+        # live service, even if some OTHER (main-scoped) signal happens
+        # to corroborate the same kind elsewhere in the manifest.
+        detect = {"service_clients": [
+            {"package": "pg-native", "search_terms": ["postgresql"], "source": "package.json",
+             "scope": "dev"},
+        ]}
+        manifest = '[vars]\nDATABASE_URL = "postgres://u:p@localhost:5432/app"\n'
+        v = _violations(detect, manifest)
+        leaf = [x for x in v if x["rule"] == "leaf-datastore-not-served"]
+        self.assertEqual(len(leaf), 1)
+        self.assertEqual(leaf[0]["severity"], "advisory")
+
+    def test_missing_scope_key_defaults_to_runtime(self):
+        # Backward compatibility: detect facts predating AI-467 (or a
+        # hand-built dict in another test) carry no "scope" key at all --
+        # must default to "runtime", not silently downgrade.
+        detect = {"service_clients": [
+            {"package": "pg", "search_terms": ["postgresql"], "source": "package.json"},
+        ]}
+        manifest = '[vars]\nDATABASE_URL = "postgres://u:p@localhost:5432/app"\n'
+        v = _hard(_violations(detect, manifest))
+        rules = {x["rule"] for x in v}
+        self.assertIn("leaf-datastore-not-served", rules)
+
+    # --- AI-467 forensic reproduction: PostHog @ 55525a19f353's
+    # pyproject.toml declares pymysql/pymongo in the MAIN
+    # [project.dependencies] list (verified live, see detect.py's
+    # test_posthog_pyproject_shape_pymysql_pymongo_are_scope_runtime) --
+    # section-provenance alone reports them as scope="runtime" correctly,
+    # but PostHog runs neither MariaDB nor MongoDB locally. Without
+    # corroboration, this used to HARD-fail the tier2 posthog eval in ALL
+    # FIVE reps, including against PostHog's own upstream manifest. ---
+
+    def test_posthog_shape_pymysql_pymongo_produce_no_hard_violation(self):
+        detect = {"service_clients": [
+            {"package": "pymysql", "search_terms": ["mariadb"], "source": "pyproject.toml",
+             "scope": "runtime"},
+            {"package": "pymongo", "search_terms": ["mongodb-ce"], "source": "pyproject.toml",
+             "scope": "runtime"},
+        ]}
+        # PostHog's own manifest: postgres + redis wired, no mariadb/mongodb
+        # [vars] endpoint or compose service anywhere -- the tier2 registry
+        # expects neither service for posthog.
+        manifest = '''
+[install]
+postgresql.pkg-path = "postgresql_15"
+redis.pkg-path = "redis"
+
+[services.postgres]
+command = "postgres"
+
+[services.redis]
+command = "redis-server"
+'''
+        v = _hard(_violations(detect, manifest))
+        rules = {x["rule"] for x in v}
+        self.assertNotIn("leaf-datastore-not-served", rules)
 
     def test_does_not_fire_when_service_wired(self):
         detect = {"service_clients": [
@@ -471,18 +559,21 @@ on-activate = """
         self.assertEqual(_rules(v), {"leaf-datastore-not-served"})
         self.assertEqual(v[0]["severity"], "hard")
 
-    def test_non_cargo_lock_source_still_hard_fires_uncorroborated(self):
-        # The corroboration requirement is scoped to Cargo.lock's specific
-        # transitive-graph noise -- a direct requirements.txt/package.json
-        # client with no corroboration still HARD-fires as before (no
-        # regression to the original AI-449/#42 behavior).
+    def test_non_cargo_lock_source_also_needs_corroboration_now(self):
+        # AI-467 SUPERSEDES this test's original AI-466 assertion (it used
+        # to require corroboration for Cargo.lock only, and HARD-fire
+        # every other source unconditionally). Renamed and inverted to
+        # reflect the generalized rule: an uncorroborated
+        # requirements.txt client downgrades to ADVISORY exactly like an
+        # uncorroborated Cargo.lock client does.
         detect = {"service_clients": [
-            {"package": "psycopg2", "search_terms": ["postgresql"], "source": "requirements.txt"},
+            {"package": "psycopg2", "search_terms": ["postgresql"], "source": "requirements.txt",
+             "scope": "runtime"},
         ]}
         manifest = '[install]\n'
         v = _violations(detect, manifest)
         self.assertEqual(_rules(v), {"leaf-datastore-not-served"})
-        self.assertEqual(v[0]["severity"], "hard")
+        self.assertEqual(v[0]["severity"], "advisory")
 
 
 # ---------------------------------------------------------------------------
@@ -1278,6 +1369,77 @@ class TestMainCLI(unittest.TestCase):
                 "verify.py", str(self.detect_path), str(self.manifest_path), "--no-catalog",
             ])
         mock_run.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# AI-467 forensic reproduction: the tier2 posthog x5 re-run HARD-fired
+# `leaf-datastore-not-served` for pymysql->mariadb and pymongo->mongodb in
+# ALL FIVE reps -- including against PostHog's own upstream hand-maintained
+# manifest -- while the tier2 registry expects neither service for
+# posthog. Runs the REAL detect.py against fixtures/posthog-shaped/ (a
+# pyproject.toml with the exact dependency list confirmed live against
+# PostHog @ 55525a19f353), the same integration boundary
+# TestAI466LemmyForensicReproduction proved Hole 1/2/3 at.
+# ---------------------------------------------------------------------------
+
+class TestAI467PosthogForensicReproduction(unittest.TestCase):
+    def _detect(self):
+        return detect.scan(str(HERE / "fixtures" / "posthog-shaped"))
+
+    def test_posthog_own_manifest_shape_produces_no_leaf_datastore_hard_violation(self):
+        # PostHog's actual needs: postgres + redis wired, nothing for
+        # mariadb/mongodb anywhere -- matching the tier2 registry's
+        # expected_services (postgres, redis, clickhouse; no mariadb/
+        # mongodb) and what verify.py HARD-fired incorrectly before this
+        # fix.
+        manifest = '''
+schema-version = "1.13.0"
+
+[install]
+python3.pkg-path = "python313"
+postgresql.pkg-path = "postgresql_15"
+redis.pkg-path = "redis"
+
+[services.postgres]
+command = "postgres"
+
+[services.redis]
+command = "redis-server"
+'''
+        detected = self._detect()
+        v = _hard(_violations(detected, manifest))
+        rules = {x["rule"] for x in v}
+        self.assertNotIn("leaf-datastore-not-served", rules)
+
+    def test_uncorroborated_mariadb_mongodb_evidence_is_advisory_not_silent(self):
+        # The downgrade must still be VISIBLE (as ADVISORY), not silently
+        # dropped -- confirm whether mariadb/mongodb is a runtime need is
+        # exactly the judgment call this leaves for a human/agent to make.
+        manifest = '''
+[install]
+postgresql.pkg-path = "postgresql_15"
+
+[services.postgres]
+command = "postgres"
+'''
+        detected = self._detect()
+        v = _violations(detected, manifest)
+        advisory_kinds = {
+            x["rule"] for x in v
+            if x["rule"] == "leaf-datastore-not-served" and x["severity"] == "advisory"
+        }
+        self.assertIn("leaf-datastore-not-served", advisory_kinds)
+
+    def test_if_posthog_did_wire_mariadb_it_would_still_hard_fire_when_corroborated(self):
+        # The invariant isn't neutered -- a genuine mariadb need (a [vars]
+        # endpoint) alongside the same pymysql evidence still HARD-fires.
+        manifest = (
+            '[vars]\nMARIADB_URL = "mysql://u:p@localhost:3306/app"\n'
+        )
+        detected = self._detect()
+        v = _hard(_violations(detected, manifest))
+        rules = {x["rule"] for x in v}
+        self.assertIn("leaf-datastore-not-served", rules)
 
 
 if __name__ == "__main__":
