@@ -1299,6 +1299,24 @@ openssl.pkg-path = "openssl"
 '''
         self.assertEqual(_hard(_violations(CRYPTOGRAPHY_DETECT, manifest)), [])
 
+    def test_fires_advisory_for_ruby_gemfile_shape_when_split(self):
+        # The Gemfile/Ruby cousin of test_fires_advisory_when_runtime_and_
+        # native_dep_split (Python/cryptography) -- same rule, different
+        # ecosystem+source. Inverse of test_does_not_fire_when_runtime_and_
+        # native_dep_share_a_group below: same packages, split into two
+        # groups instead of one, must fire.
+        manifest = '''
+[install]
+ruby.pkg-path = "ruby_4_0"
+ruby.pkg-group = "ruby-runtime"
+vips.pkg-path = "vips"
+vips.pkg-group = "native-libs"
+'''
+        v = _violations(RUBY_VIPS_DETECT, manifest)
+        fired = [x for x in v if x["rule"] == "native-group-split"]
+        self.assertEqual(len(fired), 1, v)
+        self.assertEqual(fired[0]["severity"], "advisory")
+
     def test_does_not_fire_when_runtime_and_native_dep_share_a_group(self):
         # Mastodon golden shape: ruby + vips share "runtime-and-native".
         manifest = '''
