@@ -198,7 +198,7 @@ jobs:
     # Golden-manifest lint (verify.py, no claude — AI-456 item 2). Unlike
     # floxify-evals/floxify-tier2 below, this spawns no `claude` agent and
     # costs zero Anthropic API spend (only `flox install` + `flox show`/
-    # `flox edit -f` calls, no closure realization), so it does NOT need
+    # `flox list -c` calls, no closure realization), so it does NOT need
     # their dispatch-only cost gate — it runs per-PR via the `changes`
     # filter, exactly as this workflow's header comment describes, PLUS
     # on manual dispatch and (if the schedule trigger is restored)
