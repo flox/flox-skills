@@ -585,16 +585,53 @@ One JSON object per line:
 | `sha` | Pinned commit (short SHA is fine — passed straight to `git checkout`) |
 | `ecosystem` | Primary language, informational |
 | `expected_runtimes` | `[{"name": ..., "pattern": ...}]` — `pattern` is matched as `` pkg-path = "<pattern>" `` |
-| `expected_services` | `["postgres", "redis", ...]` — substring-matched against `[services.*]` headers |
+| `expected_services` | `[{"name": ..., "disposition": ...}, ...]` — `name` matched via the shared name-or-command rule (AI-468); `disposition` is `expect-wired` or `deferred-ok` (AI-470, see below) |
 | `gold` | `{"runtimes": ..., "services": ..., "notes": ...}` — textual characterization for the judge |
 | `rubric` | Judge guidance specific to this repo |
+
+### Per-service disposition (AI-470)
+
+Each `expected_services` entry carries a `disposition`, answering: **does
+a developer need this service running locally to develop against?**
+(Bill's adjudication — the SDLC build/runtime split floxify may eventually
+need is a larger surface, tracked separately as AI-475.)
+
+- **`expect-wired`** (the default, and the only disposition every fixture
+  but posthog uses) — the structural check requires an actual
+  `[services.*]` match (via `matching_service_names`, AI-468). This is
+  exactly the pre-AI-470 behavior; every existing fixture's expectations
+  are unchanged.
+- **`deferred-ok`** (posthog's `clickhouse`) — passes the structural
+  check if the service is EITHER wired directly OR deferred WITH AN
+  EXPLICIT MECHANISM: the manifest's `[hook]` genuinely invokes
+  `docker-compose up`/`docker compose up` with `docker-compose` installed
+  (verify.py's own `_manifest_wires_compose`, AI-466's carve-out against
+  a repo merely *having* a compose file — reused here, not re-derived).
+  Silently dropping a `deferred-ok` service (no wiring, no mechanism)
+  still fails the check; `deferred-ok` widens what counts as satisfying
+  the expectation, it does not make the expectation optional.
+
+`has_service_<kind>` stays the result key regardless of disposition
+(baseline compat — dashboards and prior results keep working). The
+richer wired/deferred/missing breakdown behind it lands in each
+per-rep result's `service_observed` field. The AI-447 connectivity
+probe is unchanged and disposition-agnostic: it already only probes a
+kind it finds genuinely wired via the same shared matching rule, which
+is exactly "probe only when actually wired" regardless of what the
+registry expected.
+
+A bare string (`"postgres"`) is still accepted as shorthand for
+`{"name": "postgres", "disposition": "expect-wired"}` — this keeps any
+external tooling or ad-hoc registry edits from needing an immediate
+schema migration, though the committed `tier2.jsonl` uses the explicit
+dict form throughout.
 
 ### Current repos
 
 | id | sha | ecosystem | expected runtimes | expected services | status |
 |----|-----|-----------|-------------------|--------------------|--------|
 | `mastodon` | `52e9ec7814fc` | ruby | ruby_4_0, nodejs_24 | postgres, redis | **run** + golden |
-| `posthog` | `55525a19f353` | python | python3 (3.13), nodejs_24 | postgres, redis | golden, run pending |
+| `posthog` | `55525a19f353` | python | python3 (3.13), nodejs_24 | postgres, redis (expect-wired), clickhouse (deferred-ok) | **run** + golden |
 | `sentry` | `68d439d41d66` | python | python3 (3.13), nodejs | postgres, redis | golden, run pending |
 | `supabase` | `963182f58e91` | javascript | nodejs_22, deno | postgres | golden, run pending |
 | `gitea` | `11363e2f0cd6` | go | go, nodejs | — (embedded sqlite) | golden, run pending |

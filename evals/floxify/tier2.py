@@ -55,6 +55,21 @@ target resolution, so a `[services.db]` running postgres is recognized
 the same way the deterministic verify leg already recognizes it,
 instead of tier2's own narrower name-only match.
 
+`expected_services` registry entries carry a per-service disposition
+(AI-470): `expect-wired` (the default — every fixture but posthog) means
+the structural check requires an actual `[services.*]` match; `deferred-
+ok` (posthog's clickhouse) also accepts the service being deferred WITH
+AN EXPLICIT MECHANISM — the manifest's `[hook]` genuinely invoking
+`docker-compose up`, reusing verify.py's own `_manifest_wires_compose`
+(AI-466's carve-out) rather than re-deriving it. Silently dropping a
+`deferred-ok` service (no wiring, no mechanism) still fails the check.
+`has_service_<kind>` stays the result key regardless of disposition
+(baseline compat); `service_observed` in the per-rep result records the
+honest wired/deferred/missing outcome behind it. The AI-447 probe is
+unchanged and disposition-agnostic — it already only probes a kind it
+finds genuinely wired, which is exactly "probe only when actually
+wired" regardless of what the registry expected.
+
 Usage:
     python3 tier2.py --only mastodon             # single repo
     python3 tier2.py                              # all registered repos
@@ -246,6 +261,67 @@ def _matching_service_names(verify_mod, manifest_dict, kind):
     return verify_mod.matching_service_names(manifest_dict, kind)
 
 
+# --- per-service disposition (AI-470) ---------------------------------------
+# Bill's adjudication: the test is "does a developer need this service
+# running locally to develop against?" Dev-time services (postgres, redis)
+# must be wired as Flox services (expect-wired, the pre-AI-470 default and
+# the only disposition every fixture but posthog uses). Runtime-oriented
+# infrastructure (posthog's clickhouse, plus the kafka/zookeeper it pulls in
+# transitively) may instead be deferred WITH AN EXPLICIT MECHANISM — never
+# silently dropped — which this tier recognizes via verify.py's own
+# manifest-wired-compose check (AI-466's carve-out), reused here rather than
+# re-derived, exactly like SERVICE_KIND_ALIASES/matching_service_names.
+
+_DEFAULT_DISPOSITION = "expect-wired"
+KNOWN_DISPOSITIONS = {"expect-wired", "deferred-ok"}
+
+
+def _service_expectation(service):
+    """Normalize one `expected_services` registry entry to (name, disposition).
+
+    Accepts either a bare string (implicit "expect-wired" — the shape
+    every fixture used before AI-470) or a {"name": ..., "disposition":
+    ...} dict. `disposition` defaults to "expect-wired" when the dict
+    omits it."""
+    if isinstance(service, str):
+        return service, _DEFAULT_DISPOSITION
+    return service["name"], service.get("disposition", _DEFAULT_DISPOSITION)
+
+
+def _compose_wired(verify_mod, manifest_dict):
+    """True if the manifest itself invokes `docker-compose up`/`docker
+    compose up` from [hook] with docker-compose installed — verify.py's
+    own `_manifest_wires_compose` (AI-466's carve-out against the repo
+    merely HAVING a compose file), reused rather than duplicated. A
+    manifest-wide signal, not per-service: it does not know WHICH
+    service(s) a compose invocation actually starts, the same accepted
+    scope limit `_manifest_wires_compose`'s own docstring documents."""
+    if verify_mod is None or manifest_dict is None:
+        return False
+    return bool(verify_mod._manifest_wires_compose(manifest_dict))
+
+
+def _service_disposition_results(entry, manifest_text, verify_mod):
+    """Per expected_services entry: "wired" (a matching [services.*] entry
+    exists, via `_matching_service_names`), "deferred" (disposition is
+    deferred-ok and the manifest wires compose per `_compose_wired`), or
+    "missing" (neither) — the honest record of what actually happened,
+    independent of whether that satisfies `has_service_<kind>`."""
+    manifest_dict = _parsed_manifest(verify_mod, manifest_text)
+    compose_wired = _compose_wired(verify_mod, manifest_dict)
+    results = {}
+    for service in entry.get("expected_services", []):
+        name, disposition = _service_expectation(service)
+        wired = bool(_matching_service_names(verify_mod, manifest_dict, name))
+        if wired:
+            results[name] = "wired"
+        elif disposition == "deferred-ok" and compose_wired:
+            results[name] = "deferred"
+        else:
+            results[name] = "missing"
+    return results
+
+
 def _structural_checks(entry, manifest_text, verify_mod=None):
     """Per-entry hard-checks derived from the registry's expected_runtimes/
     expected_services, rather than Tier 1's fixed CHECKS dict — each
@@ -258,6 +334,15 @@ def _structural_checks(entry, manifest_text, verify_mod=None):
     verify.py's own leaf-datastore invariant. `verify_mod=None` (skill
     dir failed to load) fails every `has_service_*` check closed, the
     same way a missing manifest already does.
+
+    Disposition-aware (AI-470): an `expect-wired` service (the default —
+    every pre-AI-470 fixture) must be actually wired; a `deferred-ok`
+    service (posthog's clickhouse) passes if EITHER wired OR deferred
+    with a mechanism (`_compose_wired`) — silently dropping it (neither)
+    still fails the check either way. The result key stays
+    `has_service_<kind>` regardless of disposition (baseline compat);
+    `process_entry` records the richer wired/deferred/missing distinction
+    separately via `_service_disposition_results`.
     """
     checks = {
         "manifest_created": manifest_text is not None,
@@ -272,10 +357,14 @@ def _structural_checks(entry, manifest_text, verify_mod=None):
             manifest_text, runtime["pattern"]
         )
     manifest_dict = _parsed_manifest(verify_mod, manifest_text)
+    compose_wired = _compose_wired(verify_mod, manifest_dict)
     for service in entry.get("expected_services", []):
-        checks[f"has_service_{service}"] = bool(
-            _matching_service_names(verify_mod, manifest_dict, service)
-        )
+        name, disposition = _service_expectation(service)
+        wired = bool(_matching_service_names(verify_mod, manifest_dict, name))
+        if disposition == "deferred-ok":
+            checks[f"has_service_{name}"] = wired or compose_wired
+        else:
+            checks[f"has_service_{name}"] = wired
     return checks
 
 
@@ -696,6 +785,24 @@ def process_entry(entry, skill_dir, activate=False, services=False,
         hard = _structural_checks(entry, manifest_text, verify_mod=verify_mod)
         hard_pass = all(hard.values())
 
+        # Honest wired/deferred/missing record per service (AI-470) —
+        # independent of whether that outcome satisfies has_service_<kind>
+        # (a deferred-ok service that's genuinely deferred still passes
+        # the structural check but is recorded as "deferred", not "wired").
+        service_observed = _service_disposition_results(
+            entry, manifest_text, verify_mod
+        )
+
+        # Flat kind-name list for the probe — expected_services entries
+        # are {"name", "disposition"} dicts (AI-470); _probe_services
+        # itself stays disposition-agnostic and unchanged: it already
+        # only probes a kind it finds wired (_matching_service_names),
+        # which is exactly "probe only when actually wired" regardless
+        # of what the registry expected.
+        expected_service_names = [
+            _service_expectation(s)[0] for s in entry.get("expected_services", [])
+        ]
+
         if activate:
             act_ok, act_skipped, act_notes = _check_activation(
                 tmp, timeout=activation_timeout
@@ -713,14 +820,14 @@ def process_entry(entry, skill_dir, activate=False, services=False,
         # service failure rather than the real (activation) one.
         if services and act_ok:
             svc_results = _probe_services(
-                tmp, entry.get("expected_services", []),
+                tmp, expected_service_names,
                 manifest_text=manifest_text, verify_mod=verify_mod,
             )
         elif services:
             svc_results = {
                 svc: {"ok": None, "skipped": True,
                       "notes": "activation did not succeed — service probe not attempted"}
-                for svc in entry.get("expected_services", [])
+                for svc in expected_service_names
             }
         else:
             svc_results = {}
@@ -776,6 +883,11 @@ def process_entry(entry, skill_dir, activate=False, services=False,
             "upstream_flox_note": upstream_flox_note,
             "hard_checks": hard,
             "hard_pass": hard_pass,
+            # Honest wired/deferred/missing record per expected service
+            # (AI-470) — has_service_<kind> in hard_checks stays a single
+            # boolean for baseline compat; this is the richer breakdown of
+            # WHY it's true or false for a deferred-ok kind.
+            "service_observed": service_observed,
             "activation": {"ok": act_ok, "skipped": act_skipped, "notes": act_notes},
             "services": svc_results,
             "verify": {
