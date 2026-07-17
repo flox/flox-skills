@@ -19,6 +19,12 @@ from unittest.mock import patch
 
 import tier2
 
+# Loaded once for the whole module: the real verify.py under the in-repo
+# skill dir, used wherever a test needs the actual `matching_service_names`/
+# `_service_covers` rule (AI-468) rather than re-deriving the alias table
+# in test code. Pure logic, no network — safe to load at import time.
+_VERIFY_MOD = tier2._load_verify_module(tier2.DEFAULT_SKILL_DIR)
+
 
 class TestRunGit(unittest.TestCase):
     """`_run_git` wraps subprocess.run into a (ok, error) tuple."""
@@ -126,21 +132,52 @@ class TestRuntimePinned(unittest.TestCase):
         self.assertFalse(tier2._runtime_pinned(None, "nodejs_24"))
 
 
-class TestServicePresent(unittest.TestCase):
-    def test_matches_postgres_section(self):
-        manifest = "[services.postgres]\ncommand = \"postgres\"\n"
-        self.assertTrue(tier2._service_present(manifest, "postgres"))
+class TestMatchingServiceNames(unittest.TestCase):
+    """AI-468: `_matching_service_names`/`_parsed_manifest` are the tier2-
+    side glue around verify.py's shared `matching_service_names` rule —
+    name OR command match against SERVICE_KIND_ALIASES, not name-only.
+    The alias table itself is exercised in verify.py's own test_verify.py;
+    this covers the glue (parsing + None-handling), using the real loaded
+    module rather than a stub, so no alias table is re-derived here."""
 
-    def test_matches_postgresql_variant(self):
-        manifest = "[services.postgresql]\ncommand = \"postgres\"\n"
-        self.assertTrue(tier2._service_present(manifest, "postgres"))
+    def test_name_match_still_works(self):
+        manifest = tier2._parsed_manifest(
+            _VERIFY_MOD, "[services.postgres]\ncommand = \"postgres\"\n"
+        )
+        self.assertEqual(
+            tier2._matching_service_names(_VERIFY_MOD, manifest, "postgres"),
+            ["postgres"],
+        )
 
-    def test_no_match_when_service_absent(self):
-        manifest = "[services.redis]\ncommand = \"redis-server\"\n"
-        self.assertFalse(tier2._service_present(manifest, "postgres"))
+    def test_unconventional_name_with_kind_matching_command_matches(self):
+        # The exact AI-468 shape: `[services.db]` running postgres, which
+        # tier2's old name-only regex reported as "not declared".
+        manifest = tier2._parsed_manifest(
+            _VERIFY_MOD, '[services.db]\ncommand = "postgres -D /data"\n'
+        )
+        self.assertEqual(
+            tier2._matching_service_names(_VERIFY_MOD, manifest, "postgres"),
+            ["db"],
+        )
 
-    def test_none_manifest_returns_false(self):
-        self.assertFalse(tier2._service_present(None, "postgres"))
+    def test_genuinely_absent_service_does_not_match(self):
+        manifest = tier2._parsed_manifest(
+            _VERIFY_MOD, "[services.redis]\ncommand = \"redis-server\"\n"
+        )
+        self.assertEqual(
+            tier2._matching_service_names(_VERIFY_MOD, manifest, "postgres"), []
+        )
+
+    def test_none_manifest_dict_returns_empty(self):
+        self.assertEqual(
+            tier2._matching_service_names(_VERIFY_MOD, None, "postgres"), []
+        )
+
+    def test_none_verify_mod_returns_empty_without_raising(self):
+        self.assertEqual(tier2._parsed_manifest(None, "[services.postgres]\n"), None)
+        self.assertEqual(
+            tier2._matching_service_names(None, {"services": {}}, "postgres"), []
+        )
 
 
 class TestStructuralChecks(unittest.TestCase):
@@ -163,7 +200,7 @@ class TestStructuralChecks(unittest.TestCase):
             "[services.redis]\n"
             'command = "redis-server"\n'
         )
-        checks = tier2._structural_checks(entry, manifest)
+        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
         self.assertTrue(checks["manifest_created"])
         self.assertTrue(checks["valid_toml"])
         self.assertTrue(checks["no_abs_paths"])
@@ -186,11 +223,43 @@ class TestStructuralChecks(unittest.TestCase):
             "[services.postgres]\n"
             'command = "postgres"\n'
         )
-        checks = tier2._structural_checks(entry, manifest)
+        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
         self.assertTrue(checks["pins_ruby"])
         self.assertTrue(checks["has_service_postgres"])
         self.assertFalse(checks["has_service_redis"])
         self.assertFalse(all(checks.values()))
+
+    def test_unconventionally_named_service_passes_the_structural_check(self):
+        # AI-468: has_service_<kind> means "a service of this kind exists",
+        # not "a service named this exists" — a [services.db] running
+        # postgres must now satisfy has_service_postgres.
+        entry = {
+            "id": "x",
+            "expected_runtimes": [],
+            "expected_services": ["postgres"],
+        }
+        manifest = (
+            "[install]\n"
+            'pg.pkg-path = "postgresql_16"\n'
+            "[services.db]\n"
+            'command = "postgres -D /data"\n'
+        )
+        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+        self.assertTrue(checks["has_service_postgres"], checks)
+
+    def test_genuinely_absent_service_fails_the_structural_check(self):
+        entry = {"id": "x", "expected_runtimes": [], "expected_services": ["postgres"]}
+        manifest = "[services.redis]\ncommand = \"redis-server\"\n"
+        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+        self.assertFalse(checks["has_service_postgres"], checks)
+
+    def test_no_verify_mod_fails_has_service_closed(self):
+        # A skill-dir load failure must not silently pass a service check
+        # it never actually evaluated.
+        entry = {"id": "x", "expected_runtimes": [], "expected_services": ["postgres"]}
+        manifest = "[services.postgres]\ncommand = \"postgres\"\n"
+        checks = tier2._structural_checks(entry, manifest, verify_mod=None)
+        self.assertFalse(checks["has_service_postgres"], checks)
 
     def test_no_manifest_fails_everything(self):
         entry = {
@@ -198,7 +267,7 @@ class TestStructuralChecks(unittest.TestCase):
             "expected_runtimes": [{"name": "ruby", "pattern": r"ruby(_[0-9_]+)?"}],
             "expected_services": ["postgres"],
         }
-        checks = tier2._structural_checks(entry, None)
+        checks = tier2._structural_checks(entry, None, verify_mod=_VERIFY_MOD)
         self.assertFalse(checks["manifest_created"])
         self.assertFalse(checks["valid_toml"])
         self.assertFalse(checks["no_abs_paths"])
@@ -334,7 +403,7 @@ class TestRegistryPatternDriftGuard(unittest.TestCase):
             if e["id"] == "mastodon"
         )
         manifest = (here / "testdata" / "mastodon-manifest.toml").read_text()
-        checks = tier2._structural_checks(entry, manifest)
+        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
         self.assertTrue(checks["pins_ruby_4_0"], checks)
         self.assertTrue(checks["pins_nodejs_24"], checks)
         self.assertTrue(checks["has_service_postgres"], checks)
@@ -460,10 +529,12 @@ class TestProbeServices(unittest.TestCase):
         service work". Probing an undeclared service answers neither.
         """
         manifest = '[install]\npg.pkg-path = "postgresql_16"\n[hook]\non-activate = "pg_ctl start"\n'
-        res = tier2._probe_services("/tmp/x", ["postgres"], manifest_text=manifest)
+        res = tier2._probe_services(
+            "/tmp/x", ["postgres"], manifest_text=manifest, verify_mod=_VERIFY_MOD,
+        )
         self.assertTrue(res["postgres"]["skipped"], res)
         self.assertIsNone(res["postgres"]["ok"], res)
-        self.assertIn("not declared", res["postgres"]["notes"])
+        self.assertIn("no [services.*] entry matches", res["postgres"]["notes"])
         mock_flox.assert_not_called()
 
     @patch("tier2.shutil.which", return_value="/usr/bin/flox")
@@ -471,9 +542,45 @@ class TestProbeServices(unittest.TestCase):
     def test_declared_service_is_probed(self, mock_flox, _which):
         mock_flox.return_value = (True, "__SERVICE_OK__")
         manifest = '[services.postgres]\ncommand = "postgres"\n'
-        res = tier2._probe_services("/tmp/x", ["postgres"], manifest_text=manifest)
+        res = tier2._probe_services(
+            "/tmp/x", ["postgres"], manifest_text=manifest, verify_mod=_VERIFY_MOD,
+        )
         self.assertTrue(res["postgres"]["ok"], res)
         mock_flox.assert_called()
+
+    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
+    @patch("tier2._run_flox")
+    def test_unconventionally_named_service_resolves_as_probe_target(
+        self, mock_flox, _which
+    ):
+        # AI-468: the exact rep-3 shape — a [services.db] entry running
+        # postgres, which the old name-only gate reported as "not
+        # declared" and skipped, so it was never probed.
+        mock_flox.return_value = (True, "__SERVICE_OK__")
+        manifest = '[services.db]\ncommand = "postgres -D /data"\n'
+        res = tier2._probe_services(
+            "/tmp/x", ["postgres"], manifest_text=manifest, verify_mod=_VERIFY_MOD,
+        )
+        self.assertTrue(res["postgres"]["ok"], res)
+        self.assertFalse(res["postgres"]["skipped"], res)
+        mock_flox.assert_called()
+
+    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
+    @patch("tier2._run_flox")
+    def test_multiple_matches_probes_first_and_notes_ambiguity(
+        self, mock_flox, _which
+    ):
+        mock_flox.return_value = (True, "__SERVICE_OK__")
+        manifest = (
+            '[services.postgres]\ncommand = "postgres"\n'
+            '[services.pg-replica]\ncommand = "postgres --replica"\n'
+        )
+        res = tier2._probe_services(
+            "/tmp/x", ["postgres"], manifest_text=manifest, verify_mod=_VERIFY_MOD,
+        )
+        self.assertTrue(res["postgres"]["ok"], res)
+        self.assertIn("multiple", res["postgres"]["notes"])
+        self.assertIn("postgres", res["postgres"]["notes"])
 
     @patch("tier2.shutil.which", return_value="/usr/bin/flox")
     @patch("tier2._run_flox")
@@ -640,6 +747,107 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
         rules = {v["rule"] for v in result["verify"]["violations"]}
         self.assertIn("vars-not-literal", rules)
         self.assertGreaterEqual(result["verify"]["hard_count"], 1)
+
+
+class TestProcessEntryServiceRuleAndManifestPersistence(unittest.TestCase):
+    """AI-468: 'serves postgres' must mean the same thing everywhere in a
+    single process_entry run — the structural has_service_<kind> check and
+    the AI-447 probe must both resolve a [services.db] running postgres —
+    and the full produced manifest must be recoverable from the result
+    dict, not just a 3000-char excerpt (the gap that blocked forensics on
+    the lemmy rep-3 residual twice)."""
+
+    def _entry(self, **overrides):
+        entry = {
+            "id": "x", "repo_url": "https://example.com/r", "sha": "abc123",
+            "expected_runtimes": [], "expected_services": ["postgres"],
+        }
+        entry.update(overrides)
+        return entry
+
+    @staticmethod
+    def _clone_writes_manifest(manifest_text):
+        def _clone(url, sha, dest, timeout=900):
+            d = Path(dest)
+            (d / ".flox" / "env").mkdir(parents=True, exist_ok=True)
+            (d / ".flox" / "env" / "manifest.toml").write_text(manifest_text)
+            return None
+        return _clone
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_verify")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_unconventionally_named_service_passes_structural_check_end_to_end(
+        self, mock_clone, mock_agent, mock_verify, mock_judge
+    ):
+        # Real skill dir (not mocked) so process_entry loads the real
+        # verify.py and exercises matching_service_names for real.
+        manifest = (
+            "[install]\n"
+            'pg.pkg-path = "postgresql_16"\n'
+            "[services.db]\n"
+            'command = "postgres -D /data"\n'
+        )
+        mock_clone.side_effect = self._clone_writes_manifest(manifest)
+        mock_agent.return_value = ("agent output", None)
+        mock_verify.return_value = {
+            "violations": [], "catalog_checked": False, "catalog_unknown": [],
+        }
+        mock_judge.return_value = {"score": 4, "correct": True, "issues": []}
+
+        result = tier2.process_entry(self._entry(), str(tier2.DEFAULT_SKILL_DIR))
+
+        self.assertTrue(result["hard_checks"]["has_service_postgres"], result)
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_verify")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_genuinely_absent_service_fails_structural_check_end_to_end(
+        self, mock_clone, mock_agent, mock_verify, mock_judge
+    ):
+        manifest = "[services.redis]\ncommand = \"redis-server\"\n"
+        mock_clone.side_effect = self._clone_writes_manifest(manifest)
+        mock_agent.return_value = ("agent output", None)
+        mock_verify.return_value = {
+            "violations": [], "catalog_checked": False, "catalog_unknown": [],
+        }
+        mock_judge.return_value = {"score": 1, "correct": False, "issues": []}
+
+        result = tier2.process_entry(self._entry(), str(tier2.DEFAULT_SKILL_DIR))
+
+        self.assertFalse(result["hard_checks"]["has_service_postgres"], result)
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_verify")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_full_manifest_persisted_in_result(
+        self, mock_clone, mock_agent, mock_verify, mock_judge
+    ):
+        # A manifest longer than the 3000-char excerpt cap, so this also
+        # proves "manifest" is NOT the same truncated value as
+        # "manifest_excerpt" — the exact gap that blocked forensics twice.
+        manifest = (
+            "[install]\n"
+            + "".join(f'pkg{i}.pkg-path = "pkg{i}"\n' for i in range(200))
+        )
+        self.assertGreater(len(manifest), 3000)
+        mock_clone.side_effect = self._clone_writes_manifest(manifest)
+        mock_agent.return_value = ("agent output", None)
+        mock_verify.return_value = {
+            "violations": [], "catalog_checked": False, "catalog_unknown": [],
+        }
+        mock_judge.return_value = {"score": 3, "correct": True, "issues": []}
+
+        result = tier2.process_entry(
+            self._entry(expected_services=[]), str(tier2.DEFAULT_SKILL_DIR),
+        )
+
+        self.assertEqual(result["manifest"], manifest)
+        self.assertEqual(result["manifest_excerpt"], manifest[:3000])
+        self.assertLess(len(result["manifest_excerpt"]), len(result["manifest"]))
 
 
 class TestJudgeTier2CatalogNote(unittest.TestCase):

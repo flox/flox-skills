@@ -309,16 +309,32 @@ def _manifest_wires_compose(manifest):
     return "docker-compose" in pkg_paths
 
 
-def _service_covers(manifest, kind):
+def matching_service_names(manifest, kind):
+    """Names of [services.*] entries whose own name OR command matches
+    `kind` via SERVICE_KIND_ALIASES — the single "does a service of this
+    kind exist" rule, backing `_service_covers`'s bool here and this
+    module's other two consumers (the eval harnesses' structural
+    `has_service_<kind>` check and the AI-447 probe's target resolution,
+    AI-468). A service can be declared under any name (`[services.db]`
+    running postgres) — matching on name alone, the way tier2.py's
+    structural check and probe used to, missed that shape and reported
+    "not declared" for a service that was both declared and reachable.
+    Public (no leading underscore) so external callers import it rather
+    than re-deriving the alias table."""
     aliases = SERVICE_KIND_ALIASES.get(kind, (kind,))
     services = manifest.get("services", {}) or {}
+    matches = []
     for name, descriptor in services.items():
         haystack = str(name).lower()
         if isinstance(descriptor, dict):
             haystack += " " + str(descriptor.get("command", "")).lower()
         if any(a in haystack for a in aliases):
-            return True
-    return False
+            matches.append(name)
+    return matches
+
+
+def _service_covers(manifest, kind):
+    return bool(matching_service_names(manifest, kind))
 
 
 def _truncate(value, limit=64):
