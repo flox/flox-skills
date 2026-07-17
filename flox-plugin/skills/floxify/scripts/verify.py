@@ -267,7 +267,7 @@ def _compose_service_kind_present(detect, kind):
 _DOCKER_COMPOSE_UP_RE = re.compile(r"\bdocker(?:-|\s+)compose\s+up\b")
 
 
-def _manifest_wires_compose(manifest):
+def manifest_wires_compose(manifest):
     """True only if the manifest ITSELF actually invokes docker-compose in
     its on-activate hook (`docker-compose up` / `docker compose up`) AND
     has docker-compose installed.
@@ -308,6 +308,13 @@ def _manifest_wires_compose(manifest):
     install = manifest.get("install", {}) or {}
     pkg_paths = {_pkg_path_str(d) for d in install.values() if isinstance(d, dict)}
     return "docker-compose" in pkg_paths
+
+
+# Back-compat alias — PR #51 review (AI-470): tier2.py now consumes this as
+# a public export directly, same public/private-alias shape
+# matching_service_names/_service_covers already uses below. Internal
+# callers in this module keep the underscore name.
+_manifest_wires_compose = manifest_wires_compose
 
 
 def matching_service_names(manifest, kind):

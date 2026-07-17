@@ -60,7 +60,7 @@ instead of tier2's own narrower name-only match.
 the structural check requires an actual `[services.*]` match; `deferred-
 ok` (posthog's clickhouse) also accepts the service being deferred WITH
 AN EXPLICIT MECHANISM — the manifest's `[hook]` genuinely invoking
-`docker-compose up`, reusing verify.py's own `_manifest_wires_compose`
+`docker-compose up`, reusing verify.py's own `manifest_wires_compose`
 (AI-466's carve-out) rather than re-deriving it. Silently dropping a
 `deferred-ok` service (no wiring, no mechanism) still fails the check.
 `has_service_<kind>` stays the result key regardless of disposition
@@ -213,13 +213,17 @@ def _runtime_pinned(manifest_text, pattern):
     return bool(re.search(r'pkg-path = "' + pattern + r'"', manifest_text))
 
 
+_REQUIRED_VERIFY_EXPORTS = ("matching_service_names", "manifest_wires_compose")
+
+
 def _load_verify_module(skill_dir):
     """Load verify.py from the skill dir under test (never raises) so the
     structural `has_service_<kind>` check and the AI-447 probe use the
     SAME kind-matching rule (`matching_service_names`/`_service_covers`,
-    AI-468) the deterministic verify leg and the live skill's Phase 3c
-    Step 4 already enforce, instead of tier2's own separate, narrower
-    name-only regex.
+    AI-468) and the same manifest-wired-compose rule (`manifest_wires_compose`,
+    AI-466/AI-470) the deterministic verify leg and the live skill's
+    Phase 3c Step 4 already enforce, instead of tier2's own separate,
+    narrower checks.
 
     Mirrors run_floxify.py's `_load_detect_and_verify` per-call reload
     discipline — never cached across reps, so `--skill-dir` keeps
@@ -228,18 +232,22 @@ def _load_verify_module(skill_dir):
     treatment `_run_verify` gives an unloadable skill dir) — callers that
     depend on it fail closed, the same way a missing manifest already
     fails every check that needs one. A `--skill-dir` checkout that loads
-    fine but predates the `matching_service_names` export (AI-468) is
-    treated the same way: the module loaded, but the call this harness
-    needs from it doesn't exist, which is exactly the "can't use this
-    checkout for this check" case the None return already models —
-    letting the first call site raise AttributeError instead would crash
-    the whole run before any results are written.
+    fine but predates one of `_REQUIRED_VERIFY_EXPORTS` is treated the
+    same way: the module loaded, but a call this harness needs from it
+    doesn't exist, which is exactly the "can't use this checkout for this
+    check" case the None return already models. PR #51 review found the
+    guard checking only `matching_service_names` left `_compose_wired`'s
+    dependency on `manifest_wires_compose` unguarded — an old checkout
+    with the former but not the latter passed the guard, then
+    AttributeError'd inside `_structural_checks` for every fixture,
+    crashing the whole run before any results are written. Both exports
+    are now required together.
     """
     try:
         _detect_mod, verify_mod = _load_detect_and_verify(skill_dir)
     except Exception:  # noqa: BLE001 - harness-side load failure, not a manifest verdict
         return None
-    if not hasattr(verify_mod, "matching_service_names"):
+    if not all(hasattr(verify_mod, name) for name in _REQUIRED_VERIFY_EXPORTS):
         return None
     return verify_mod
 
@@ -291,14 +299,15 @@ def _service_expectation(service):
 def _compose_wired(verify_mod, manifest_dict):
     """True if the manifest itself invokes `docker-compose up`/`docker
     compose up` from [hook] with docker-compose installed — verify.py's
-    own `_manifest_wires_compose` (AI-466's carve-out against the repo
-    merely HAVING a compose file), reused rather than duplicated. A
-    manifest-wide signal, not per-service: it does not know WHICH
-    service(s) a compose invocation actually starts, the same accepted
-    scope limit `_manifest_wires_compose`'s own docstring documents."""
+    own public `manifest_wires_compose` (AI-466's carve-out against the
+    repo merely HAVING a compose file, promoted to a public export by
+    AI-470/PR #51 review), reused rather than duplicated. A manifest-wide
+    signal, not per-service: it does not know WHICH service(s) a compose
+    invocation actually starts, the same accepted scope limit
+    `manifest_wires_compose`'s own docstring documents."""
     if verify_mod is None or manifest_dict is None:
         return False
-    return bool(verify_mod._manifest_wires_compose(manifest_dict))
+    return bool(verify_mod.manifest_wires_compose(manifest_dict))
 
 
 def _service_disposition_results(entry, manifest_text, verify_mod):
