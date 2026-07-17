@@ -264,7 +264,26 @@ def _compose_service_kind_present(detect, kind):
             return True
     return False
 
-_DOCKER_COMPOSE_UP_RE = re.compile(r"\bdocker(?:-|\s+)compose\s+up\b")
+# Global options that can appear BETWEEN `docker-compose`/`docker compose`
+# and its `up` subcommand (`docker-compose -f docker-compose.dev.yml up -d
+# clickhouse`, `docker-compose --env-file .env -p myproj up`) -- AI-476: the
+# bare "compose directly followed by up" match required exact adjacency, so
+# the common `-f <file>` form evaded detection entirely. The posthog golden
+# is a real instance of the workaround this bug forced: its hook exports
+# COMPOSE_FILE and calls the BARE `docker-compose up` specifically to stay
+# inside this check's old blind spot (see its [hook] comment) rather than
+# using the more direct `docker-compose -f <file> up` invocation it would
+# otherwise have written. Modeled on `_GIT_GLOBAL_OPT`'s space-vs-equals
+# lesson (AI-466 M1): `--file`/`--project-name`/`--env-file` accept both
+# `--opt value` and `--opt=value` in real docker-compose.
+_COMPOSE_GLOBAL_OPT = (
+    r"(?:-f\s+\S+|--file(?:=\S+|\s+\S+)|"
+    r"-p\s+\S+|--project-name(?:=\S+|\s+\S+)|"
+    r"--env-file(?:=\S+|\s+\S+))"
+)
+_DOCKER_COMPOSE_UP_RE = re.compile(
+    r"\bdocker(?:-|\s+)compose\s+(?:" + _COMPOSE_GLOBAL_OPT + r"\s+)*up\b"
+)
 
 
 def manifest_wires_compose(manifest):
@@ -615,6 +634,82 @@ def check_hook_no_mutation(manifest):
                 "hook-mutates-tree",
                 f"[hook] on-activate runs '{stmt}' — hooks run on every "
                 f"activation and must not mutate the tracked git tree",
+            ))
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# heuristic — network-fetching operations in on-activate (ADVISORY) — AI-450
+# ---------------------------------------------------------------------------
+
+# git verbs that fetch from a remote. Distinct concern from
+# _GIT_MUTATION_RE (that regex is about working-tree SAFETY; this one is
+# about NETWORK access on every activation) — `pull` and `submodule
+# update` genuinely do both and deliberately appear in both regexes; a
+# hook using either gets a HARD hook-mutates-tree violation AND an
+# ADVISORY hook-network-fetch note, which is accurate, not redundant: two
+# different risks, two different severities. Reuses _GIT_GLOBAL_OPT so
+# `git -C <path> clone ...` doesn't evade this the same way AI-466 Hole 3
+# found for the mutation check.
+_GIT_NETWORK_RE = re.compile(
+    r"\bgit\s+(?:" + _GIT_GLOBAL_OPT + r"\s+)*"
+    r"(?:clone|fetch|pull|submodule\s+update)\b"
+)
+
+# curl/wget as the LEADING command of a statement — anchored the same way
+# _ECHO_OR_PRINTF_RE is, so a mention as an argument to something else
+# ("--user-agent curl-compatible") isn't mistaken for an invocation.
+_CURL_WGET_RE = re.compile(r"^\s*(curl|wget)\b")
+
+
+def check_hook_network(manifest):
+    """ADVISORY: on-activate re-fetches something from the network on
+    EVERY activation via a raw `git clone`/`fetch`/`pull`/`submodule
+    update`, or a `curl`/`wget` download. Never HARD — hooks legitimately
+    do network access in accepted idioms.
+
+    Deliberately excludes ecosystem package-manager bootstraps (`uv
+    sync`, `npm`/`pnpm`/`yarn install`, `bundle install`, `composer
+    install`, `mix deps.get`, `corepack enable`) — every current golden's
+    hook does exactly one of these, and they're the accepted way a
+    manifest resolves its own dependencies on activation, not a
+    second-guessed network fetch. This check targets the LOWER-level
+    primitives underneath that: a raw git/curl/wget invocation usually
+    means the hook is reaching outside the ecosystem's own dependency
+    step to fetch something a package manager wouldn't (a sibling repo, a
+    vendored file, a remote asset) — worth a second look, not a proven
+    bug, since some repos genuinely need exactly that.
+
+    Comments and echo/printf text are excluded before matching, same
+    discipline as check_hook_no_mutation.
+    """
+    violations = []
+    hook = manifest.get("hook", {}) or {}
+    script = hook.get("on-activate")
+    if not isinstance(script, str):
+        return violations
+
+    seen = set()
+    for raw_line in script.splitlines():
+        line = _strip_comment(raw_line)
+        if not line.strip():
+            continue
+        for stmt in re.split(r"[;&|]+", line):
+            stmt = stmt.strip()
+            if not stmt or _ECHO_OR_PRINTF_RE.match(stmt):
+                continue
+            if not (_GIT_NETWORK_RE.search(stmt) or _CURL_WGET_RE.match(stmt)):
+                continue
+            if stmt in seen:
+                continue
+            seen.add(stmt)
+            violations.append(violation(
+                "hook-network-fetch",
+                f"[hook] on-activate runs '{stmt}' — this fetches over the "
+                f"network on every activation; confirm this is intentional "
+                f"(ecosystem package-manager installs are the accepted "
+                f"idiom for dependency fetching and are not flagged)",
+                severity=ADVISORY,
             ))
     return violations
 
@@ -1076,8 +1171,9 @@ def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
     `detect` may be None/{} — the detect-cross-check invariants (runtimes
     installed, leaf-datastore clients served, native-group coherence)
     degrade to no-ops when there are no facts to cross-check against; the
-    manifest-only invariants ([vars] literal, hook mutation, catalog
-    resolution, outputs heuristic, group fragmentation) always run.
+    manifest-only invariants ([vars] literal, hook mutation, hook network
+    fetch, catalog resolution, outputs heuristic, group fragmentation)
+    always run.
 
     `catalog_unknown` lists install entries the catalog leg could not
     establish per-system availability for (see check_catalog) — these are
@@ -1102,6 +1198,7 @@ def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
     violations += check_vars_endpoints(detect, manifest)
     violations += check_vars_literal(manifest)
     violations += check_hook_no_mutation(manifest)
+    violations += check_hook_network(manifest)
     catalog_violations, catalog_checked, catalog_unknown = check_catalog(
         manifest, flox_bin=flox_bin, live=check_catalog_live, timeout=catalog_timeout,
     )

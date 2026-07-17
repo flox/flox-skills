@@ -481,6 +481,128 @@ on-activate = """
 '''
         self.assertEqual(_violations(detect, manifest), [])
 
+    def test_manifest_hook_with_f_flag_satisfies_the_floor(self):
+        # AI-476: `-f <file>` between `docker-compose` and `up` (the common
+        # real-world form -- posthog's golden hook works around this exact
+        # gap today by using COMPOSE_FILE instead) must not evade detection.
+        detect = {
+            "service_clients": [
+                {"package": "psycopg2", "search_terms": ["postgresql"], "source": "requirements.txt"},
+            ],
+            "services": [{"name": "db", "kind": "postgres", "config_coupled": True}],
+        }
+        manifest = '''
+[install]
+docker-compose.pkg-path = "docker-compose"
+
+[hook]
+on-activate = """
+  docker-compose -f docker-compose.dev.yml up -d clickhouse
+"""
+'''
+        self.assertEqual(_violations(detect, manifest), [])
+
+    def test_manifest_hook_with_file_equals_flag_satisfies_the_floor(self):
+        # `--file=<file>` equals-form -- same space-vs-equals lesson as
+        # _GIT_GLOBAL_OPT (AI-466 M1).
+        detect = {
+            "service_clients": [
+                {"package": "psycopg2", "search_terms": ["postgresql"], "source": "requirements.txt"},
+            ],
+            "services": [{"name": "db", "kind": "postgres", "config_coupled": True}],
+        }
+        manifest = '''
+[install]
+docker-compose.pkg-path = "docker-compose"
+
+[hook]
+on-activate = """
+  docker-compose --file=docker-compose.dev.yml up -d
+"""
+'''
+        self.assertEqual(_violations(detect, manifest), [])
+
+    def test_manifest_hook_with_multiple_compose_opts_satisfies_the_floor(self):
+        # Multiple global opts before `up` (repeated -f, plus -p/--env-file).
+        detect = {
+            "service_clients": [
+                {"package": "psycopg2", "search_terms": ["postgresql"], "source": "requirements.txt"},
+            ],
+            "services": [{"name": "db", "kind": "postgres", "config_coupled": True}],
+        }
+        manifest = '''
+[install]
+docker-compose.pkg-path = "docker-compose"
+
+[hook]
+on-activate = """
+  docker-compose -f base.yml -f dev.yml -p myproj --env-file .env up -d
+"""
+'''
+        self.assertEqual(_violations(detect, manifest), [])
+
+    def test_manifest_hook_docker_compose_down_does_not_satisfy_the_floor(self):
+        # `down` is not `up` -- must still fire even with compose installed.
+        detect = {
+            "service_clients": [
+                {"package": "psycopg2", "search_terms": ["postgresql"], "source": "requirements.txt"},
+            ],
+            "services": [{"name": "db", "kind": "postgres", "config_coupled": True}],
+        }
+        manifest = '''
+[install]
+docker-compose.pkg-path = "docker-compose"
+
+[hook]
+on-activate = """
+  docker-compose down
+"""
+'''
+        v = _violations(detect, manifest)
+        self.assertEqual(_rules(v), {"leaf-datastore-not-served"})
+
+    def test_manifest_hook_docker_compose_f_build_does_not_satisfy_the_floor(self):
+        # `-f <file> build` -- a global opt is present but the subcommand
+        # is `build`, not `up`; must not be mistaken for wiring compose.
+        detect = {
+            "service_clients": [
+                {"package": "psycopg2", "search_terms": ["postgresql"], "source": "requirements.txt"},
+            ],
+            "services": [{"name": "db", "kind": "postgres", "config_coupled": True}],
+        }
+        manifest = '''
+[install]
+docker-compose.pkg-path = "docker-compose"
+
+[hook]
+on-activate = """
+  docker-compose -f docker-compose.dev.yml build
+"""
+'''
+        v = _violations(detect, manifest)
+        self.assertEqual(_rules(v), {"leaf-datastore-not-served"})
+
+    def test_manifest_hook_compose_f_mention_in_comment_does_not_satisfy_the_floor(self):
+        # A `-f`-form mention in a `#` comment is not an invocation --
+        # same discipline as the existing bare-form comment handling.
+        detect = {
+            "service_clients": [
+                {"package": "psycopg2", "search_terms": ["postgresql"], "source": "requirements.txt"},
+            ],
+            "services": [{"name": "db", "kind": "postgres", "config_coupled": True}],
+        }
+        manifest = '''
+[install]
+docker-compose.pkg-path = "docker-compose"
+
+[hook]
+on-activate = """
+  # run docker-compose -f docker-compose.dev.yml up -d clickhouse manually
+"""
+'''
+        v = _violations(detect, manifest)
+        self.assertEqual(_rules(v), {"leaf-datastore-not-served"})
+
     def test_docker_compose_up_without_the_package_installed_does_not_satisfy_the_floor(self):
         # The hook TEXT alone isn't enough either -- docker-compose must
         # actually be installed for the invocation to be real.
@@ -749,7 +871,10 @@ on-activate = """
 """
 '''
         v = _violations({}, manifest)
-        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+        # AI-450: `submodule update` is also a network fetch, so it
+        # co-fires the ADVISORY hook-network-fetch note alongside this
+        # HARD rule -- see TestHookNetwork.
+        self.assertEqual(_rules(_hard(v)), {"hook-mutates-tree"})
 
     def test_fires_on_git_checkout(self):
         manifest = '[hook]\non-activate = "git checkout main"\n'
@@ -836,7 +961,9 @@ on-activate = """
             '\'git -C "$FLOX_ENV_PROJECT" submodule update --init\'\n'
         )
         v = _violations({}, manifest)
-        self.assertEqual(_rules(v), {"hook-mutates-tree"})
+        # AI-450: co-fires the ADVISORY hook-network-fetch note too -- see
+        # the sibling test above.
+        self.assertEqual(_rules(_hard(v)), {"hook-mutates-tree"})
 
     def test_fires_on_git_dash_c_checkout(self):
         manifest = '[hook]\non-activate = "git -C /repo checkout main"\n'
@@ -925,6 +1052,127 @@ on-activate = """
   echo "lemmy env ready."
 """
 '''
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_when_no_hook_present(self):
+        self.assertEqual(_violations({}, "[install]\n"), [])
+
+
+# ---------------------------------------------------------------------------
+# heuristic — network-fetching operations in on-activate (ADVISORY) — AI-450
+# ---------------------------------------------------------------------------
+
+class TestHookNetwork(unittest.TestCase):
+    def test_fires_on_git_clone(self):
+        manifest = '[hook]\non-activate = "git clone https://example.com/x.git vendor/x"\n'
+        v = _violations({}, manifest)
+        fired = [x for x in v if x["rule"] == "hook-network-fetch"]
+        self.assertEqual(len(fired), 1, v)
+        self.assertEqual(fired[0]["severity"], "advisory")
+
+    def test_fires_on_git_fetch(self):
+        manifest = '[hook]\non-activate = "git fetch origin"\n'
+        v = _violations({}, manifest)
+        self.assertEqual({x["rule"] for x in v if x["severity"] == "advisory"},
+                          {"hook-network-fetch"})
+
+    def test_fires_on_curl(self):
+        manifest = '[hook]\non-activate = "curl -fsSL https://example.com/install.sh | sh"\n'
+        v = _violations({}, manifest)
+        self.assertIn("hook-network-fetch", {x["rule"] for x in v})
+
+    def test_fires_on_wget(self):
+        manifest = '[hook]\non-activate = "wget -O out.tar.gz https://example.com/a.tar.gz"\n'
+        v = _violations({}, manifest)
+        self.assertIn("hook-network-fetch", {x["rule"] for x in v})
+
+    def test_never_contributes_to_hard_violations(self):
+        manifest = '[hook]\non-activate = "git clone https://example.com/x.git"\n'
+        self.assertEqual(_hard(_violations({}, manifest)), [])
+
+    def test_fires_on_git_dash_c_clone(self):
+        # Reuses _GIT_GLOBAL_OPT -- a `-C <path>` between `git` and the
+        # verb must not evade this the same way AI-466 Hole 3 found for
+        # the mutation check.
+        manifest = (
+            '[hook]\non-activate = '
+            '"git -C /workspace clone https://example.com/x.git"\n'
+        )
+        v = _violations({}, manifest)
+        self.assertIn("hook-network-fetch", {x["rule"] for x in v})
+
+    def test_git_pull_fires_both_mutation_hard_and_network_advisory(self):
+        # Deliberate dual-classification: `pull` is both a tree mutation
+        # AND a network fetch -- two distinct, both-true concerns.
+        manifest = '[hook]\non-activate = "git pull"\n'
+        v = _violations({}, manifest)
+        rules = {x["rule"] for x in v}
+        self.assertEqual(rules, {"hook-mutates-tree", "hook-network-fetch"})
+
+    def test_does_not_fire_on_git_verb_inside_a_comment(self):
+        manifest = '''
+[hook]
+on-activate = """
+  # if you need a fresh clone: git clone https://example.com/x.git
+  uv sync
+"""
+'''
+        self.assertNotIn(
+            "hook-network-fetch",
+            {x["rule"] for x in _violations({}, manifest)},
+        )
+
+    def test_does_not_fire_on_curl_inside_echoed_text(self):
+        manifest = '''
+[hook]
+on-activate = """
+  echo "Tip: curl -fsSL https://example.com/install.sh | sh"
+"""
+'''
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_curl_mentioned_as_an_argument(self):
+        # "curl" appearing mid-statement (not as the leading command) must
+        # not be mistaken for an invocation.
+        manifest = '[hook]\non-activate = "some-tool --user-agent curl-compatible"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    # --- calibration bar: accepted bootstrap idioms across every current
+    # golden must never fire. ---
+
+    def test_does_not_fire_on_uv_sync(self):
+        manifest = '[hook]\non-activate = "uv sync --frozen || uv sync"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_npm_install(self):
+        manifest = '[hook]\non-activate = "npm install"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_pnpm_install(self):
+        manifest = '[hook]\non-activate = "pnpm install --frozen-lockfile"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_yarn_install(self):
+        manifest = '[hook]\non-activate = "yarn install"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_bundle_install(self):
+        manifest = '[hook]\non-activate = "bundle install"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_composer_install(self):
+        manifest = '[hook]\non-activate = "composer install --no-interaction"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_mix_deps_get(self):
+        manifest = '[hook]\non-activate = "mix deps.get"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_does_not_fire_on_corepack_enable(self):
+        manifest = (
+            '[hook]\non-activate = '
+            '"corepack enable --install-directory \\"$FLOX_ENV_CACHE/node-bin\\" pnpm"\n'
+        )
         self.assertEqual(_violations({}, manifest), [])
 
     def test_does_not_fire_when_no_hook_present(self):
