@@ -121,6 +121,51 @@ class TestRunVerify(unittest.TestCase):
         self.assertIn("error", result)
 
 
+class TestMissingFixtureErrorPath(unittest.TestCase):
+    """AI-463: run_floxify.py is Tier 1 only (local fixtures/<id>
+    checkouts); feeding it a tier2.jsonl entry (real-repo tasks, no
+    "tier" key at all) crashed with KeyError: 'tier' in the fixture-not-
+    found error path instead of reporting a clean error. Repro:
+    `python3 run_floxify.py --tasks tier2.jsonl --only lemmy`.
+    """
+
+    def test_missing_fixture_returns_error_dict_not_a_crash(self):
+        # A tier2.jsonl-shaped task (no "tier" key) must not raise.
+        task = {"id": "definitely-not-a-real-fixture-xyz", "ecosystem": "rust"}
+        result = run_floxify.process_task(task, run_floxify.DEFAULT_SKILL_DIR)
+        self.assertIn("error", result)
+        self.assertEqual(result["id"], task["id"])
+        self.assertEqual(result["tier"], "?")
+
+    def test_missing_fixture_error_hints_at_tier2(self):
+        # The clearer rejection: point at tier2.jsonl/tier2.py rather than
+        # a bare "fixture not found".
+        task = {"id": "lemmy", "ecosystem": "rust"}
+        result = run_floxify.process_task(task, run_floxify.DEFAULT_SKILL_DIR)
+        self.assertIn("tier2.jsonl", result["error"])
+        self.assertIn("tier2.py", result["error"])
+        self.assertIn("lemmy", result["error"])
+
+    def test_missing_fixture_with_tier_key_present_still_works(self):
+        # A Tier 1 task.jsonl-shaped entry (has "tier") but a typo'd/
+        # missing fixture id -- the original working case must stay intact.
+        task = {"id": "definitely-not-a-real-fixture-xyz", "tier": "should",
+                "ecosystem": "python"}
+        result = run_floxify.process_task(task, run_floxify.DEFAULT_SKILL_DIR)
+        self.assertIn("error", result)
+        self.assertEqual(result["tier"], "should")
+
+    def test_base_defaults_tier_to_placeholder_when_missing(self):
+        task = {"id": "x", "ecosystem": "python"}
+        base = run_floxify._base(task)
+        self.assertEqual(base, {"id": "x", "tier": "?", "ecosystem": "python"})
+
+    def test_base_preserves_real_tier_when_present(self):
+        task = {"id": "x", "tier": "should", "ecosystem": "python"}
+        base = run_floxify._base(task)
+        self.assertEqual(base["tier"], "should")
+
+
 class TestCatalogNote(unittest.TestCase):
     """AI-451/AI-461: the judge prompt must stop grading catalog facts from
     memory — verify_result decides which note it gets instead."""
