@@ -244,6 +244,12 @@ def _dep_names_from_pep508(items):
 # not missing a real dependency over erring toward hiding one.
 _GEMFILE_DEV_GROUP_NAMES = {"test", "development", "dev", "cucumber", "rspec"}
 
+# requirements.txt sibling filenames that signal a dev/test-only file by
+# their name alone (the pip-tools/pip ecosystem has no single convention).
+_REQUIREMENTS_DEV_NAMES = {
+    "requirements-dev.txt", "dev-requirements.txt", "requirements-test.txt",
+}
+
 
 def _gemfile_gems_by_scope(text):
     """Returns (runtime_gems, dev_gems) -- gems inside a `group ... do
@@ -262,8 +268,13 @@ def _gemfile_gems_by_scope(text):
         gm = re.match(r"^group\s+(.+?)\s+do\b", stripped)
         if gm:
             names = re.findall(r":(\w+)", gm.group(1))
+            # A gem declared under multiple group names (`group :production,
+            # :test do`) belongs to ALL of them simultaneously in Bundler --
+            # if ANY named group is non-dev (e.g. :production), the gem IS
+            # installed in that context, so it must NOT be marked dev-scoped.
+            # Only mark dev when EVERY named group is dev/test-only.
             group_is_dev_stack.append(
-                any(n.lower() in _GEMFILE_DEV_GROUP_NAMES for n in names)
+                bool(names) and all(n.lower() in _GEMFILE_DEV_GROUP_NAMES for n in names)
             )
             continue
         if re.match(r"^end\b", stripped) and group_is_dev_stack:
@@ -459,7 +470,10 @@ def scan(target):
             ecosystems.add("python")
         mark("Pipfile")
 
-    for reqf in ("requirements.txt", "requirements-dev.txt", "requirements/base.txt"):
+    for reqf in (
+        "requirements.txt", "requirements-dev.txt", "dev-requirements.txt",
+        "requirements-test.txt", "requirements/base.txt",
+    ):
         p = target / reqf
         if p.is_file():
             names = []
@@ -469,9 +483,9 @@ def scan(target):
                     mm = re.match(r"^([A-Za-z0-9._-]+)", s)
                     if mm:
                         names.append(mm.group(1))
-            # "-dev" in the filename is the project's own signal this file
-            # is not installed in a runtime environment by default.
-            scope = "dev" if reqf == "requirements-dev.txt" else "runtime"
+            # "dev"/"test" in the filename is the project's own signal this
+            # file is not installed in a runtime environment by default.
+            scope = "dev" if reqf in _REQUIREMENTS_DEV_NAMES else "runtime"
             _add_clients(names, reqf, clients, scope=scope)
             if "python" not in ecosystems and names:
                 ecosystems.add("python")
