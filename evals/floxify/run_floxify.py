@@ -579,8 +579,13 @@ def process_task(task, skill_dir, skip_activation=False,
                 "catalog_checked": verify_result.get("catalog_checked", False),
             },
             "judge": verdict,
-            # Keep excerpts short — full manifest/output in the results file
-            # would be too verbose for the summary view.
+            # Full text persisted alongside the excerpt (AI-468, aligning
+            # Tier 1 with Tier 2's own fix) — a truncated excerpt has
+            # blocked forensics on a failing Tier 2 rep twice; Tier 1
+            # fixtures are the same order of magnitude, so the same gap
+            # exists here even though it hasn't bitten yet. manifest_excerpt
+            # stays for anything that still displays a short preview.
+            "manifest": manifest_text or "",
             "manifest_excerpt": (manifest_text or "")[:3000],
             "agent_output_excerpt": (agent_out or "")[:800],
         }

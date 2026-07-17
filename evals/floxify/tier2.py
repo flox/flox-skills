@@ -34,7 +34,14 @@ Reuses `_run_claude_agent`, `_is_valid_toml`, `_check_activation`,
 `_run_judge`, `_stats`, `_skill_identity`, `DEFAULT_SKILL_DIR`, and the
 verify.py deterministic leg (`_run_verify`, `_hard_verify_violations`,
 `_advisory_verify_violations`, `_catalog_note`) from run_floxify.py
-rather than duplicating that machinery.
+rather than duplicating that machinery. Also reuses run_floxify's
+`_load_detect_and_verify` to load the SAME verify.py under test
+(`--skill-dir`-controlled) for `matching_service_names`/`_service_covers`
+— the shared "does a service of this kind exist" rule (AI-468) behind
+both the structural `has_service_<kind>` check and the AI-447 probe's
+target resolution, so a `[services.db]` running postgres is recognized
+the same way the deterministic verify leg already recognizes it,
+instead of tier2's own narrower name-only match.
 
 Usage:
     python3 tier2.py --only mastodon             # single repo
@@ -65,6 +72,7 @@ from run_floxify import (
     _check_activation,
     _hard_verify_violations,
     _is_valid_toml,
+    _load_detect_and_verify,
     _run_claude_agent,
     _run_judge,
     _run_verify,
@@ -178,25 +186,58 @@ def _runtime_pinned(manifest_text, pattern):
     return bool(re.search(r'pkg-path = "' + pattern + r'"', manifest_text))
 
 
-_SERVICE_HEADER = re.compile(r"^\[services\.[^\]]*\]", re.M)
+def _load_verify_module(skill_dir):
+    """Load verify.py from the skill dir under test (never raises) so the
+    structural `has_service_<kind>` check and the AI-447 probe use the
+    SAME kind-matching rule (`matching_service_names`/`_service_covers`,
+    AI-468) the deterministic verify leg and the live skill's Phase 3c
+    Step 4 already enforce, instead of tier2's own separate, narrower
+    name-only regex.
+
+    Mirrors run_floxify.py's `_load_detect_and_verify` per-call reload
+    discipline — never cached across reps, so `--skill-dir` keeps
+    controlling which checkout is under test. Returns None on a load
+    failure: a harness-side problem, not a manifest verdict (same
+    treatment `_run_verify` gives an unloadable skill dir) — callers that
+    depend on it fail closed, the same way a missing manifest already
+    fails every check that needs one.
+    """
+    try:
+        _detect_mod, verify_mod = _load_detect_and_verify(skill_dir)
+        return verify_mod
+    except Exception:  # noqa: BLE001 - harness-side load failure, not a manifest verdict
+        return None
 
 
-def _service_present(manifest_text, service_name):
-    """True if any [services.*] header contains `service_name` as a
-    substring (case-insensitive) — covers naming variants like postgres/
-    postgresql without requiring an exact section name."""
-    if manifest_text is None:
-        return False
-    return any(
-        service_name.lower() in header.lower()
-        for header in _SERVICE_HEADER.findall(manifest_text)
-    )
+def _parsed_manifest(verify_mod, manifest_text):
+    if verify_mod is None or manifest_text is None:
+        return None
+    manifest, _err = verify_mod.parse_manifest(manifest_text)
+    return manifest
 
 
-def _structural_checks(entry, manifest_text):
+def _matching_service_names(verify_mod, manifest_dict, kind):
+    """Names of [services.*] entries covering `kind`, via verify.py's
+    shared rule — empty when nothing matches, `verify_mod` failed to
+    load, or the manifest didn't parse. Never re-derives the alias table
+    itself; see `_load_verify_module`."""
+    if verify_mod is None or manifest_dict is None:
+        return []
+    return verify_mod.matching_service_names(manifest_dict, kind)
+
+
+def _structural_checks(entry, manifest_text, verify_mod=None):
     """Per-entry hard-checks derived from the registry's expected_runtimes/
     expected_services, rather than Tier 1's fixed CHECKS dict — each
     real-world repo pins different runtimes and wires different services.
+
+    `has_service_<kind>` means "a service of this kind exists" (name OR
+    command matches a kind alias, via `verify_mod`), not "a service named
+    this exists" (AI-468) — a `[services.db]` running postgres now
+    satisfies `has_service_postgres` the same way it already satisfies
+    verify.py's own leaf-datastore invariant. `verify_mod=None` (skill
+    dir failed to load) fails every `has_service_*` check closed, the
+    same way a missing manifest already does.
     """
     checks = {
         "manifest_created": manifest_text is not None,
@@ -210,8 +251,11 @@ def _structural_checks(entry, manifest_text):
         checks[f"pins_{runtime['name']}"] = _runtime_pinned(
             manifest_text, runtime["pattern"]
         )
+    manifest_dict = _parsed_manifest(verify_mod, manifest_text)
     for service in entry.get("expected_services", []):
-        checks[f"has_service_{service}"] = _service_present(manifest_text, service)
+        checks[f"has_service_{service}"] = bool(
+            _matching_service_names(verify_mod, manifest_dict, service)
+        )
     return checks
 
 
@@ -284,7 +328,7 @@ def _probe_script(probe, settle):
 
 
 def _probe_services(target_dir, expected_services, manifest_text=None,
-                    timeout=300, settle=30):
+                    verify_mod=None, timeout=300, settle=30):
     """Prove each *declared* service actually serves. -> {svc: {ok, skipped, notes}}
 
     Services can only be started from *inside* an activation (`flox services
@@ -293,12 +337,23 @@ def _probe_services(target_dir, expected_services, manifest_text=None,
     activation owns the service lifetime, so there is nothing to stop
     afterwards.
 
-    Only services the manifest actually declares are probed. Probing an
+    Only services the manifest actually declares are probed — resolved via
+    the aligned name-or-command rule (`_matching_service_names`, AI-468),
+    the same one the structural `has_service_<kind>` check uses, so a
+    `[services.db]` running postgres is found here too. Probing an
     undeclared service is a false-positive machine: lemmy shipped a manifest
     with no [services.*] whose [hook] started postgres to bootstrap the DB, a
     bare `pg_isready` answered, and the probe credited it — for an environment
     with no service at all. `has_service_*` owns "did you wire it"; this owns
-    "does the wired service work".
+    "does the wired service work". If several declared services match a kind,
+    the first (manifest declaration order) is probed and the ambiguity is
+    noted in the result rather than silently picked.
+
+    Declared-service gating only runs when BOTH `manifest_text` and
+    `verify_mod` are supplied (the real shape `process_entry` calls with).
+    Without either, gating is skipped entirely rather than guessed at —
+    same as the prior behavior when `manifest_text` alone was omitted,
+    which callers testing pure probe mechanics rely on.
 
     Advisory, like activation. Outcomes, deliberately distinct:
       ok=True             the declared service answered at the advertised address
@@ -315,18 +370,29 @@ def _probe_services(target_dir, expected_services, manifest_text=None,
             results[svc]["notes"] = "flox not in PATH"
         return results
 
+    manifest_dict = _parsed_manifest(verify_mod, manifest_text)
+
     for svc in expected_services:
-        if manifest_text is not None and not _service_present(manifest_text, svc):
+        matches = _matching_service_names(verify_mod, manifest_dict, svc)
+        if manifest_dict is not None and not matches:
             results[svc]["notes"] = (
-                f"[services.{svc}] not declared in the manifest — nothing to "
-                f"probe (see has_service_{svc}). A hook-started process is not "
-                f"a Flox-managed service."
+                f"no [services.*] entry matches kind '{svc}' by name or "
+                f"command (see has_service_{svc}) — nothing to probe. A "
+                f"hook-started process is not a Flox-managed service."
             )
             continue
 
+        note_prefix = ""
+        if len(matches) > 1:
+            note_prefix = (
+                f"multiple [services.*] entries match kind '{svc}' "
+                f"({', '.join(str(m) for m in matches)}) — probing "
+                f"'{matches[0]}'; "
+            )
+
         probe = _probe_command_for(svc)
         if not probe:
-            results[svc]["notes"] = (
+            results[svc]["notes"] = note_prefix + (
                 f"no connectivity probe for '{svc}' — not probeable, not failed"
             )
             continue
@@ -337,11 +403,11 @@ def _probe_services(target_dir, expected_services, manifest_text=None,
             timeout=timeout,
         )
         if SERVICE_OK in out:
-            results[svc].update(ok=True, skipped=False, notes="")
+            results[svc].update(ok=True, skipped=False, notes=note_prefix.rstrip())
         elif SERVICE_DEAD in out:
             results[svc].update(
                 ok=False, skipped=False,
-                notes=(
+                notes=note_prefix + (
                     f"service declared but never answered `{probe}` within "
                     f"{settle}s: {out.strip()[:200]}"
                 ),
@@ -351,7 +417,7 @@ def _probe_services(target_dir, expected_services, manifest_text=None,
             # problem, not a verdict on the service.
             results[svc].update(
                 ok=None, skipped=True,
-                notes=(
+                notes=note_prefix + (
                     f"could not be probed (flox error, not a service verdict): "
                     f"{out.strip()[:200]}"
                 ),
@@ -508,7 +574,15 @@ def process_entry(entry, skill_dir, activate=False, services=False,
             else None
         )
 
-        hard = _structural_checks(entry, manifest_text)
+        # Loaded once per rep and shared by the structural has_service_*
+        # check and the AI-447 probe below, so both resolve "does a
+        # service of this kind exist" through the same rule (AI-468).
+        # Separate from the deterministic verify leg's own load further
+        # down — mirrors run_floxify.py's documented per-call reload
+        # trade-off rather than threading one module handle through both.
+        verify_mod = _load_verify_module(skill_dir)
+
+        hard = _structural_checks(entry, manifest_text, verify_mod=verify_mod)
         hard_pass = all(hard.values())
 
         if activate:
@@ -529,7 +603,7 @@ def process_entry(entry, skill_dir, activate=False, services=False,
         if services and act_ok:
             svc_results = _probe_services(
                 tmp, entry.get("expected_services", []),
-                manifest_text=manifest_text,
+                manifest_text=manifest_text, verify_mod=verify_mod,
             )
         elif services:
             svc_results = {
@@ -593,6 +667,14 @@ def process_entry(entry, skill_dir, activate=False, services=False,
                 "catalog_checked": verify_result.get("catalog_checked", False),
             },
             "judge": verdict,
+            # Full text persisted alongside the excerpt (AI-468) — forensics
+            # on a failing/ambiguous rep has twice now needed the actual
+            # manifest and found only a 3000-char excerpt in the committed
+            # results (the lemmy rep-3 [services.*] naming this ticket
+            # exists to explain). manifest_excerpt stays for anything that
+            # still displays a short preview; manifests here are a few KB,
+            # not a size concern for the results JSON.
+            "manifest": manifest_text or "",
             "manifest_excerpt": (manifest_text or "")[:3000],
             "agent_output_excerpt": (agent_out or "")[:800],
         }
