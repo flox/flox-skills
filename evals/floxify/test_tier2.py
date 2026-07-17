@@ -144,21 +144,27 @@ class TestCaptureAndStripUpstreamFlox(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_no_flox_dir_returns_false_none_empty(self):
-        had, manifest, files = tier2._capture_and_strip_upstream_flox(self.tmpdir)
+        had, manifest, files, note = tier2._capture_and_strip_upstream_flox(
+            self.tmpdir
+        )
         self.assertFalse(had)
         self.assertIsNone(manifest)
         self.assertEqual(files, [])
+        self.assertEqual(note, "")
 
     def test_flox_dir_with_manifest_is_captured_and_stripped(self):
         flox_env = Path(self.tmpdir) / ".flox" / "env"
         flox_env.mkdir(parents=True)
         (flox_env / "manifest.toml").write_text('[install]\nfoo.pkg-path = "foo"\n')
 
-        had, manifest, files = tier2._capture_and_strip_upstream_flox(self.tmpdir)
+        had, manifest, files, note = tier2._capture_and_strip_upstream_flox(
+            self.tmpdir
+        )
 
         self.assertTrue(had)
         self.assertEqual(manifest, '[install]\nfoo.pkg-path = "foo"\n')
         self.assertIn("env/manifest.toml", files)
+        self.assertEqual(note, "")
         self.assertFalse((Path(self.tmpdir) / ".flox").exists())
 
     def test_flox_dir_without_manifest_captures_files_but_manifest_none(self):
@@ -166,11 +172,14 @@ class TestCaptureAndStripUpstreamFlox(unittest.TestCase):
         flox_dir.mkdir()
         (flox_dir / ".gitignore").write_text("cache/\n")
 
-        had, manifest, files = tier2._capture_and_strip_upstream_flox(self.tmpdir)
+        had, manifest, files, note = tier2._capture_and_strip_upstream_flox(
+            self.tmpdir
+        )
 
         self.assertTrue(had)
         self.assertIsNone(manifest)
         self.assertEqual(files, [".gitignore"])
+        self.assertEqual(note, "")
         self.assertFalse((Path(self.tmpdir) / ".flox").exists())
 
     def test_multiple_files_are_all_listed_sorted(self):
@@ -183,13 +192,73 @@ class TestCaptureAndStripUpstreamFlox(unittest.TestCase):
         (flox_env / "manifest.toml").write_text("[install]\n")
         (flox_env / "on-activate.sh").write_text("#!/usr/bin/env bash\n")
 
-        had, _manifest, files = tier2._capture_and_strip_upstream_flox(self.tmpdir)
+        had, _manifest, files, _note = tier2._capture_and_strip_upstream_flox(
+            self.tmpdir
+        )
 
         self.assertTrue(had)
         self.assertEqual(
             files,
             [".gitignore", "env.json", "env/manifest.toml", "env/on-activate.sh"],
         )
+
+    def test_symlinked_flox_dir_degrades_to_recorded_state_not_crash(self):
+        # PR #49 review I1: shutil.rmtree refuses to operate on a
+        # symlinked root, and nothing between process_entry and main's
+        # pool.map catches it — a symlinked .flox must never reach that
+        # path. The symlink target itself must survive: unlinking the
+        # symlink must not delete (or even read) whatever it points to.
+        target = Path(tempfile.mkdtemp(prefix="tier2-symlink-target-"))
+        try:
+            (target / "env").mkdir()
+            (target / "env" / "manifest.toml").write_text("SENSITIVE\n")
+            flox_link = Path(self.tmpdir) / ".flox"
+            flox_link.symlink_to(target, target_is_directory=True)
+
+            had, manifest, files, note = tier2._capture_and_strip_upstream_flox(
+                self.tmpdir
+            )
+
+            self.assertTrue(had)
+            self.assertIsNone(manifest)
+            self.assertEqual(files, [])
+            self.assertIn("symlink", note)
+            self.assertFalse(flox_link.exists())
+            # The symlink itself is gone, but its target was never
+            # touched — proves we unlinked, not rmtree'd-through.
+            self.assertTrue((target / "env" / "manifest.toml").exists())
+            self.assertEqual(
+                (target / "env" / "manifest.toml").read_text(), "SENSITIVE\n"
+            )
+        finally:
+            shutil.rmtree(target, ignore_errors=True)
+
+    def test_symlinked_manifest_yields_null_capture_with_note(self):
+        # PR #49 review I2: exists()/read_text() follow symlinks, so a
+        # symlinked manifest.toml would land arbitrary host-file content
+        # in upstream_manifest — a value that persists to the results
+        # JSON and uploads as a CI artifact. Must never be read through.
+        secret = Path(tempfile.mkdtemp(prefix="tier2-symlink-secret-"))
+        try:
+            secret_file = secret / "secret.toml"
+            secret_file.write_text("SENSITIVE\n")
+            flox_env = Path(self.tmpdir) / ".flox" / "env"
+            flox_env.mkdir(parents=True)
+            (flox_env / "manifest.toml").symlink_to(secret_file)
+
+            had, manifest, files, note = tier2._capture_and_strip_upstream_flox(
+                self.tmpdir
+            )
+
+            self.assertTrue(had)
+            self.assertIsNone(manifest)
+            self.assertNotIn("SENSITIVE", files)
+            self.assertIn("symlink", note)
+            # The rest of .flox/ is a real directory tree (only the leaf
+            # manifest is a symlink), so the strip itself still succeeds.
+            self.assertFalse((Path(self.tmpdir) / ".flox").exists())
+        finally:
+            shutil.rmtree(secret, ignore_errors=True)
 
 
 class TestRuntimePinned(unittest.TestCase):
@@ -1084,6 +1153,79 @@ class TestProcessEntryUpstreamFloxStrip(unittest.TestCase):
         self.assertFalse(result["had_upstream_flox"])
         self.assertIsNone(result["upstream_manifest"])
         self.assertEqual(result["upstream_flox_files"], [])
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_verify")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_symlinked_upstream_flox_does_not_abort_the_run(
+        self, mock_clone, mock_agent, mock_verify, mock_judge
+    ):
+        # PR #49 review I1, end-to-end: process_entry itself must not
+        # raise when the clone brings a symlinked .flox/ — the run must
+        # complete and return a normal per-rep result, not propagate an
+        # exception up through main's pool.map and abort the whole batch
+        # over one weird rep.
+        target = tempfile.mkdtemp(prefix="tier2-symlink-target-")
+        self.addCleanup(shutil.rmtree, target, ignore_errors=True)
+
+        def _clone(url, sha, dest, timeout=900):
+            Path(dest, ".flox").symlink_to(target, target_is_directory=True)
+            return None
+
+        mock_clone.side_effect = _clone
+        mock_agent.side_effect = _agent_writes_manifest(
+            "[install]\nfrom_skill = true\n"
+        )
+        mock_verify.return_value = {
+            "violations": [], "catalog_checked": False, "catalog_unknown": [],
+        }
+        mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
+
+        result = tier2.process_entry(self._entry(), "/fake/skill/dir")
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["had_upstream_flox"])
+        self.assertIsNone(result["upstream_manifest"])
+        self.assertIn("symlink", result["upstream_flox_note"])
+        self.assertEqual(result["manifest"], "[install]\nfrom_skill = true\n")
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_verify")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_symlinked_upstream_manifest_yields_null_capture_with_note(
+        self, mock_clone, mock_agent, mock_verify, mock_judge
+    ):
+        # PR #49 review I2, end-to-end: a symlinked manifest.toml inside
+        # a real .flox/env/ must not be read through.
+        secret = tempfile.mkdtemp(prefix="tier2-symlink-secret-")
+        self.addCleanup(shutil.rmtree, secret, ignore_errors=True)
+        secret_file = Path(secret) / "secret.toml"
+        secret_file.write_text("SENSITIVE\n")
+
+        def _clone(url, sha, dest, timeout=900):
+            flox_env = Path(dest) / ".flox" / "env"
+            flox_env.mkdir(parents=True)
+            (flox_env / "manifest.toml").symlink_to(secret_file)
+            return None
+
+        mock_clone.side_effect = _clone
+        mock_agent.side_effect = _agent_writes_manifest(
+            "[install]\nfrom_skill = true\n"
+        )
+        mock_verify.return_value = {
+            "violations": [], "catalog_checked": False, "catalog_unknown": [],
+        }
+        mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
+
+        result = tier2.process_entry(self._entry(), "/fake/skill/dir")
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["had_upstream_flox"])
+        self.assertIsNone(result["upstream_manifest"])
+        self.assertIn("symlink", result["upstream_flox_note"])
+        self.assertEqual(result["manifest"], "[install]\nfrom_skill = true\n")
 
 
 class TestJudgeTier2CatalogNote(unittest.TestCase):
