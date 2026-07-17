@@ -1,0 +1,49 @@
+{
+  "summary": {
+    "skill": "flox-plugin@bill/ai-449-service-guard",
+    "model": "claude-opus-4-8",
+    "n_repos": 1,
+    "n_errors": 0,
+    "n": 1,
+    "hard_pass_rate": 0.0,
+    "avg_judge_score": 1.0,
+    "judge_correct_rate": 0.0,
+    "activation_ok": 0,
+    "activation_skipped": 1
+  },
+  "results": [
+    {
+      "id": "plausible",
+      "repo_url": "https://github.com/plausible/analytics",
+      "sha": "d5af396464c2",
+      "hard_checks": {
+        "manifest_created": false,
+        "valid_toml": false,
+        "no_abs_paths": false,
+        "pins_elixir": false,
+        "pins_nodejs": false,
+        "has_service_postgres": false
+      },
+      "hard_pass": false,
+      "activation": {
+        "ok": null,
+        "skipped": true,
+        "notes": "[Errno 2] No such file or directory: '/tmp/floxify-tier2-plausible-rb58pfn7'"
+      },
+      "judge": {
+        "score": 1,
+        "correct": false,
+        "issues": [
+          "No manifest produced",
+          "No runtimes installed (elixir, nodejs_23, postgresql, gnumake all missing)",
+          "No [services.postgres] block",
+          "No MIX_HOME/HEX_HOME setup or mix deps.get hook",
+          "No npm install in assets/",
+          "ClickHouse-via-Docker not documented"
+        ]
+      },
+      "manifest_excerpt": "",
+      "agent_output_excerpt": "The target repository was deleted out from under the run \u2014 I didn't delete it, and the sibling fixtures are untouched, so something external removed it between my `mix ecto.create` call and the follow-up. **I can't print a completion report, because the manifest I wrote no longer exists.**\n\nHere's what I'd verified while it did exist, all of it against the live environment rather than assumed:\n\n**Resolved and confirmed running:**\n\n| Detected | Source | Resolved | Verified |\n|---|---|---|---|\n| Elixir 1.20.2-otp-28 | `.tool-versions` | `elixir_1_19` @ 1.19.5 | `Elixir 1.19.5 (compiled with Erlang/OTP 28)` |\n| Node 23.2.0 | `.tool-versions` | `nodejs_23` @ 23.10.0 | `v23.10.0` |\n| PostgreSQL 18 | CI `services:` | `postgresql_18` @ 18.4 | `accepting connections`, `plausible_dev` created |\n| C"
+    }
+  ]
+}
