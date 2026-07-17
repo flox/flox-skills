@@ -28,8 +28,9 @@ schema-version = "1.13.0"
 # not 7.x -- unpinning it resolves, but silently jumps the major version
 # away from what docker-compose (redis:7.2-alpine) and this golden are
 # verified against, an unacceptable behavior change disguised as an
-# economy win. Isolating redis alone (LAST rung, seam-justified: it has
-# no native-linkage coupling to python/node/postgres) is the most
+# economy win. Isolating redis alone (LAST rung — isolation permitted
+# because co-resolution demonstrably failed and redis has no
+# native-linkage coupling to python/node/postgres) is the most
 # economical shape that actually resolves -- 5 single-package groups down
 # to 1. Caveat per the escalation ladder's step-1 report rule: nodejs_24,
 # corepack_24, and postgresql_15 are no longer pinned to the exact
