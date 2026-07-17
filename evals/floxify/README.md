@@ -124,6 +124,27 @@ Eval layers, same two-tier shape as `detect.py`'s:
   FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_golden_lint -v  # no network
   ```
 
+  **Whole-manifest lock-resolution leg (AI-479).** Every check above is
+  PER-PACKAGE — none of them can see a manifest whose packages each
+  resolve individually but cannot co-resolve TOGETHER on any single
+  catalog page (`constraints for group 'X' are too tight`). AI-457 and
+  AI-478 only caught that class by hand, running `flox activate`
+  themselves against a scratch directory. `test_golden_lint.py` now adds
+  one more test per golden, `test_<fixture>_locks_cleanly`, that attempts
+  a real `flox edit -f` (resolve-only — writes `manifest.lock` but never
+  realizes the closure, so it costs roughly a second per golden rather
+  than a full activation) in a throwaway environment. Same skip
+  discipline as the catalog leg: advisory-skip when `flox` is absent or
+  `FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0` is set, never gating the flox-less
+  free-tests step. When it DOES run, a resolution failure is a real,
+  reportable finding on that golden — not something to allowlist or
+  silently work around by fixing golden content in the same change that
+  adds the check. `TestLockResolutionLeg` covers the skip/fail/pass
+  plumbing with mocked, no-network unit tests; the live behavior (does a
+  real golden actually lock) is exercised by the per-golden tests above,
+  which need the same `golden-lint` CI job's live flox install the
+  catalog leg does.
+
   **Caveat:** the LLM judge (in `run_floxify.py` and `tier2.py`) grades
   produced manifests against these same goldens. Until AI-457 lands, a
   defective golden could in principle nudge the judge to penalize a
