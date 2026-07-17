@@ -293,13 +293,20 @@ class TestLoadVerifyModule(unittest.TestCase):
     must degrade to None (fail closed) — the same as an unloadable skill
     dir — not raise AttributeError at the first call site and crash the
     whole run before any results are written. Reproduced by the reviewer
-    against a stub old verify.py."""
+    against a stub old verify.py.
+
+    AI-470/PR #51 review (I1+M1): the guard originally checked only
+    `matching_service_names`, leaving `manifest_wires_compose` (this
+    ticket's new dependency) unguarded — a checkout with the former but
+    not the latter passed the guard, then AttributeError'd inside
+    `_structural_checks`, crashing the run. Both exports are now
+    required together (`_REQUIRED_VERIFY_EXPORTS`)."""
 
     @patch("tier2._load_detect_and_verify")
     def test_module_missing_the_export_degrades_to_none(self, mock_load):
-        # Has parse_manifest (the older, pre-AI-468 function) but not the
-        # new matching_service_names — the exact shape of a checkout that
-        # predates this ticket.
+        # Has parse_manifest (the older, pre-AI-468 function) but neither
+        # of the two required exports — the exact shape of a checkout
+        # that predates both tickets.
         old_verify_mod = types.SimpleNamespace(
             parse_manifest=lambda text: ({}, None),
         )
@@ -307,10 +314,27 @@ class TestLoadVerifyModule(unittest.TestCase):
         self.assertIsNone(tier2._load_verify_module("/some/skill/dir"))
 
     @patch("tier2._load_detect_and_verify")
-    def test_module_with_the_export_loads_normally(self, mock_load):
+    def test_module_with_matching_service_names_but_not_compose_check_degrades_to_none(
+        self, mock_load
+    ):
+        # AI-470/PR #51 review's exact repro: a checkout between AI-466
+        # and AI-468/AI-470 in commit order — has the AI-468 export this
+        # harness already guarded, but not the newer AI-470 dependency.
+        # Must fail closed, not AttributeError three frames later inside
+        # _structural_checks.
+        partial_verify_mod = types.SimpleNamespace(
+            parse_manifest=lambda text: ({}, None),
+            matching_service_names=lambda manifest, kind: [],
+        )
+        mock_load.return_value = (None, partial_verify_mod)
+        self.assertIsNone(tier2._load_verify_module("/some/skill/dir"))
+
+    @patch("tier2._load_detect_and_verify")
+    def test_module_with_both_exports_loads_normally(self, mock_load):
         current_verify_mod = types.SimpleNamespace(
             parse_manifest=lambda text: ({}, None),
             matching_service_names=lambda manifest, kind: [],
+            manifest_wires_compose=lambda manifest: False,
         )
         mock_load.return_value = (None, current_verify_mod)
         self.assertIs(
@@ -320,6 +344,33 @@ class TestLoadVerifyModule(unittest.TestCase):
     @patch("tier2._load_detect_and_verify", side_effect=FileNotFoundError("boom"))
     def test_load_failure_returns_none(self, _mock_load):
         self.assertIsNone(tier2._load_verify_module("/nonexistent"))
+
+    def test_partial_module_flows_through_structural_checks_without_crashing(self):
+        # End-to-end through the same path PR #51 review reproduced the
+        # crash in: a module with matching_service_names but not
+        # manifest_wires_compose must degrade to None and let
+        # _structural_checks fail has_service_* closed, not raise, for a
+        # deferred-ok service that would otherwise call the missing method.
+        partial_verify_mod = types.SimpleNamespace(
+            parse_manifest=lambda text: ({"services": {}}, None),
+            matching_service_names=lambda manifest, kind: [],
+        )
+        with patch("tier2._load_detect_and_verify",
+                    return_value=(None, partial_verify_mod)):
+            verify_mod = tier2._load_verify_module("/some/skill/dir")
+        self.assertIsNone(verify_mod)
+        entry = {
+            "id": "x", "expected_runtimes": [],
+            "expected_services": [{"name": "clickhouse", "disposition": "deferred-ok"}],
+        }
+        manifest = (
+            '[install]\n'
+            'docker-compose.pkg-path = "docker-compose"\n'
+            '[hook]\n'
+            'on-activate = "docker-compose up -d clickhouse"\n'
+        )
+        checks = tier2._structural_checks(entry, manifest, verify_mod=verify_mod)
+        self.assertFalse(checks["has_service_clickhouse"], checks)
 
     def test_old_module_flows_through_structural_checks_without_crashing(self):
         # End-to-end through the same path PR #48 review reproduced the
@@ -414,8 +465,9 @@ class TestServiceExpectation(unittest.TestCase):
 
 class TestComposeWired(unittest.TestCase):
     """AI-470: `_compose_wired` is a thin wrapper around verify.py's own
-    `_manifest_wires_compose` (AI-466's carve-out) — no re-derivation of
-    what "genuinely invokes docker-compose" means."""
+    public `manifest_wires_compose` (AI-466's carve-out, promoted to a
+    public export by PR #51 review) — no re-derivation of what
+    "genuinely invokes docker-compose" means."""
 
     def test_manifest_that_wires_compose(self):
         manifest = tier2._parsed_manifest(
