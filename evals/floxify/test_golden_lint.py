@@ -144,13 +144,16 @@ def _attempt_lock(manifest_text, timeout=120):
     single catalog page, and AI-457/AI-478 could only catch that by
     running `flox activate` themselves.
 
-    A `flox init` failure (extremely rare — e.g. no disk space in the
-    throwaway dir) is reported as a lock failure too, elapsed=0.0, rather
-    than raising — a harness-side problem still needs to surface as
-    "this golden's lock leg could not be verified," not crash the run.
+    A `flox init` failure or timeout (extremely rare — e.g. no disk space
+    in the throwaway dir) is reported as a lock failure too, elapsed=0.0,
+    rather than raising — a harness-side problem still needs to surface
+    as "this golden's lock leg could not be verified," not crash the run.
     """
     with tempfile.TemporaryDirectory(prefix="floxify-golden-lock-") as tmp:
-        init = _run_flox_init(tmp)
+        try:
+            init = _run_flox_init(tmp)
+        except subprocess.TimeoutExpired:
+            return False, "flox init timed out after 30s", 0.0
         if init.returncode != 0:
             return (
                 False,
@@ -379,6 +382,18 @@ class TestLockResolutionLeg(unittest.TestCase):
         self.assertIn("disk full", message)
         self.assertEqual(elapsed, 0.0)
 
+    @patch("test_golden_lint._run_flox_init")
+    def test_attempt_lock_handles_init_timeout(self, mock_init):
+        # PR #56 review M1: _run_flox_init's own timeout must degrade to
+        # a reported lock failure, not propagate uncaught and crash the
+        # test -- the same discipline _run_flox_edit's timeout already
+        # got, now applied to init too.
+        mock_init.side_effect = subprocess.TimeoutExpired(cmd="flox init", timeout=30)
+        ok, message, elapsed = _attempt_lock("[install]\n")
+        self.assertFalse(ok)
+        self.assertIn("timed out", message)
+        self.assertEqual(elapsed, 0.0)
+
     @patch("test_golden_lint._run_flox_edit")
     @patch("test_golden_lint._run_flox_init")
     def test_attempt_lock_handles_edit_timeout(self, mock_init, mock_edit):
@@ -391,14 +406,18 @@ class TestLockResolutionLeg(unittest.TestCase):
     # --- TestGoldenLint._lock: skip conditions -------------------------
 
     def test_lock_skips_when_live_catalog_disabled(self):
+        # PR #56 review M2: _GOLD_IDS[0], not a hardcoded golden id -- these
+        # tests exercise _lock's own skip plumbing, not anything specific
+        # to one golden's content, and must not couple to a name that
+        # could be renamed or removed.
         instance = self._instance()
         with self.assertRaises(unittest.SkipTest):
-            instance._lock("mastodon", live_catalog=False)
+            instance._lock(_GOLD_IDS[0], live_catalog=False)
 
     def test_lock_skips_when_flox_absent(self):
         instance = self._instance()
         with self.assertRaises(unittest.SkipTest):
-            instance._lock("mastodon", live_catalog=True, flox_available=False)
+            instance._lock(_GOLD_IDS[0], live_catalog=True, flox_available=False)
 
     # --- TestGoldenLint._lock: fail/pass, mocked _attempt_lock ---------
 
@@ -413,7 +432,7 @@ class TestLockResolutionLeg(unittest.TestCase):
         )
         instance = self._instance()
         with self.assertRaises(AssertionError) as ctx:
-            instance._lock("mastodon", live_catalog=True, flox_available=True)
+            instance._lock(_GOLD_IDS[0], live_catalog=True, flox_available=True)
         message = str(ctx.exception)
         self.assertIn("constraints for group 'toplevel' are too tight", message)
         self.assertIn("REAL finding", message)
@@ -423,7 +442,8 @@ class TestLockResolutionLeg(unittest.TestCase):
     def test_lock_passes_cleanly_when_resolution_succeeds(self, mock_attempt):
         mock_attempt.return_value = (True, "", 0.5)
         instance = self._instance()
-        instance._lock("mastodon", live_catalog=True, flox_available=True)  # must not raise
+        # must not raise
+        instance._lock(_GOLD_IDS[0], live_catalog=True, flox_available=True)
 
 
 if __name__ == "__main__":
