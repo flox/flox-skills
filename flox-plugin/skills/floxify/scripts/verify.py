@@ -301,12 +301,18 @@ def manifest_wires_compose(manifest):
     manifests advertised a postgres endpoint with no [services.postgres]
     and no compose invocation, and both "passed."
 
-    Comments are stripped before matching (a mention of docker-compose in
-    a `#` note doesn't run it — same discipline as
-    check_hook_no_mutation). Does not parse WHICH services a named
-    invocation (`docker-compose up -d clickhouse kafka`) starts — a hook
-    that starts only unrelated services would still read as covering an
-    untouched leaf datastore; narrower than that is out of scope here.
+    Comments AND echo/printf text are stripped before matching (a mention
+    of docker-compose in a `#` note or an `echo "run docker-compose up"`
+    doesn't run it) — same discipline as check_hook_no_mutation and
+    check_hook_network. This function used to strip comments only; a
+    hook whose ENTIRE compose mention lived inside an `echo` (no real
+    invocation anywhere) still read as wiring compose, silently
+    satisfying the leaf-datastore floor with zero services actually
+    started — reproduced live (AI-476 M1). Does not parse WHICH services
+    a named invocation (`docker-compose up -d clickhouse kafka`) starts —
+    a hook that starts only unrelated services would still read as
+    covering an untouched leaf datastore; narrower than that is out of
+    scope here.
 
     Deliberate asymmetry: the regex accepts both the V1 (`docker-compose
     up`) and V2 (`docker compose up`) spellings, but the install check
@@ -321,8 +327,18 @@ def manifest_wires_compose(manifest):
     script = hook.get("on-activate")
     if not isinstance(script, str):
         return False
-    stripped = "\n".join(_strip_comment(line) for line in script.splitlines())
-    if not _DOCKER_COMPOSE_UP_RE.search(stripped):
+    wires_up = False
+    for raw_line in script.splitlines():
+        line = _strip_comment(raw_line)
+        if not line.strip():
+            continue
+        for stmt in re.split(r"[;&|]+", line):
+            stmt = stmt.strip()
+            if not stmt or _ECHO_OR_PRINTF_RE.match(stmt):
+                continue
+            if _DOCKER_COMPOSE_UP_RE.search(stmt):
+                wires_up = True
+    if not wires_up:
         return False
     install = manifest.get("install", {}) or {}
     pkg_paths = {_pkg_path_str(d) for d in install.values() if isinstance(d, dict)}
@@ -1105,20 +1121,23 @@ def check_native_group_coherence(detect, manifest):
 # (ADVISORY) — AI-464
 # ---------------------------------------------------------------------------
 
-# Derived from the current goldens: posthog is the most fragmented at 5
-# single-package groups (python313, nodejs-24, corepack-24, postgresql-15,
-# redis-72 — each isolated because its exact pin didn't co-resolve with the
-# others in toplevel, AI-457). Set at exactly that ceiling so today's
-# goldens don't trip this heuristic while it still catches a manifest that
-# fragments further than any current reference does.
+# Derived from the current goldens: plausible is the most fragmented at 2
+# single-package groups (elixir-1-19, postgresql-scoped — each isolated
+# because its pin didn't co-resolve with the rest in toplevel, AI-457).
+# Set at exactly that ceiling so today's goldens don't trip this heuristic
+# while it still catches a manifest that fragments further than any
+# current reference does.
 #
-# This value is COUPLED to posthog's specific shape, not an independent
-# judgment call — the AI-464 golden audit flagged posthog's 5-way split as
-# a candidate for collapse under the new escalation ladder (pin the
-# toolchain, unpin the rest, keep one group). If that follow-up reduces
-# posthog's single-package group count, tighten this ceiling to match
-# rather than leaving it at a stale high-water mark.
-MAX_SINGLE_PKG_GROUPS = 5
+# This value is COUPLED to the goldens' specific shapes, not an
+# independent judgment call, and has already moved once: originally 5
+# (posthog's shape at AI-464). AI-478 (2026-07-17) applied the pkg-group
+# economy escalation ladder to posthog and mastodon — posthog's exact
+# pins co-resolved once unpinned and consolidated, collapsing 5 single-
+# package groups to 1 (redis-72); mastodon's nodejs-24 folded into
+# runtime-and-native, collapsing 1 to 0. Plausible (2) is now the ceiling.
+# If a future follow-up reduces IT, tighten this again to match rather
+# than leaving it at a stale high-water mark.
+MAX_SINGLE_PKG_GROUPS = 2
 
 
 def check_group_fragmentation(manifest):

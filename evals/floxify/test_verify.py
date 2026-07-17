@@ -603,6 +603,51 @@ on-activate = """
         v = _violations(detect, manifest)
         self.assertEqual(_rules(v), {"leaf-datastore-not-served"})
 
+    def test_manifest_hook_compose_mention_only_inside_echo_does_not_satisfy_the_floor(self):
+        # AI-476 M1: an ENTIRE compose mention living inside `echo` (no
+        # real invocation anywhere in the hook) must not read as wiring
+        # compose -- reproduced live: this used to silently satisfy the
+        # leaf-datastore floor with zero services actually started.
+        detect = {
+            "service_clients": [
+                {"package": "psycopg2", "search_terms": ["postgresql"], "source": "requirements.txt"},
+            ],
+            "services": [{"name": "db", "kind": "postgres", "config_coupled": True}],
+        }
+        manifest = '''
+[install]
+docker-compose.pkg-path = "docker-compose"
+
+[hook]
+on-activate = """
+  echo "run docker-compose -f docker-compose.dev.yml up -d clickhouse manually"
+"""
+'''
+        v = _violations(detect, manifest)
+        self.assertEqual(_rules(v), {"leaf-datastore-not-served"})
+
+    def test_manifest_hook_real_compose_invocation_alongside_an_echo_still_satisfies_the_floor(self):
+        # The echo-stripping fix must not be so aggressive that a REAL
+        # invocation on a separate statement gets masked by an echo
+        # elsewhere in the same hook.
+        detect = {
+            "service_clients": [
+                {"package": "psycopg2", "search_terms": ["postgresql"], "source": "requirements.txt"},
+            ],
+            "services": [{"name": "db", "kind": "postgres", "config_coupled": True}],
+        }
+        manifest = '''
+[install]
+docker-compose.pkg-path = "docker-compose"
+
+[hook]
+on-activate = """
+  echo "bringing up clickhouse via docker-compose"
+  docker-compose -f docker-compose.dev.yml up -d clickhouse
+"""
+'''
+        self.assertEqual(_violations(detect, manifest), [])
+
     def test_docker_compose_up_without_the_package_installed_does_not_satisfy_the_floor(self):
         # The hook TEXT alone isn't enough either -- docker-compose must
         # actually be installed for the invocation to be real.
@@ -1105,6 +1150,25 @@ class TestHookNetwork(unittest.TestCase):
         # Deliberate dual-classification: `pull` is both a tree mutation
         # AND a network fetch -- two distinct, both-true concerns.
         manifest = '[hook]\non-activate = "git pull"\n'
+        v = _violations({}, manifest)
+        rules = {x["rule"] for x in v}
+        self.assertEqual(rules, {"hook-mutates-tree", "hook-network-fetch"})
+
+    def test_git_submodule_update_fires_both_mutation_hard_and_network_advisory(self):
+        # AI-476/AI-450 review M2: `submodule update` dual-fires the same
+        # way `pull` does above -- pinned separately since only pull's
+        # co-firing was asserted before this.
+        manifest = '[hook]\non-activate = "git submodule update --init"\n'
+        v = _violations({}, manifest)
+        rules = {x["rule"] for x in v}
+        self.assertEqual(rules, {"hook-mutates-tree", "hook-network-fetch"})
+
+    def test_git_dash_c_submodule_update_fires_both_mutation_hard_and_network_advisory(self):
+        # Same dual-fire through the `-C <path>` global-opt reuse form.
+        manifest = (
+            '[hook]\non-activate = '
+            '\'git -C "$FLOX_ENV_PROJECT" submodule update --init\'\n'
+        )
         v = _violations({}, manifest)
         rules = {x["rule"] for x in v}
         self.assertEqual(rules, {"hook-mutates-tree", "hook-network-fetch"})
@@ -1649,8 +1713,8 @@ class TestGroupFragmentation(unittest.TestCase):
         self.assertEqual(_hard(_violations({}, manifest)), [])
 
     def test_does_not_fire_at_the_threshold(self):
-        # posthog's current shape: exactly MAX_SINGLE_PKG_GROUPS (5) single-
-        # package groups must NOT trip this heuristic.
+        # plausible's current shape: exactly MAX_SINGLE_PKG_GROUPS (2)
+        # single-package groups must NOT trip this heuristic.
         manifest = _single_pkg_group_manifest(verify_mod.MAX_SINGLE_PKG_GROUPS)
         self.assertEqual(_violations({}, manifest), [])
 
