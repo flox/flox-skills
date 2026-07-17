@@ -11,6 +11,7 @@ mastodon` run, not here.
 Run: python3 -m unittest test_tier2 -v
 """
 import json
+import shutil
 import subprocess
 import tempfile
 import types
@@ -25,6 +26,27 @@ import tier2
 # `_service_covers` rule (AI-468) rather than re-deriving the alias table
 # in test code. Pure logic, no network — safe to load at import time.
 _VERIFY_MOD = tier2._load_verify_module(tier2.DEFAULT_SKILL_DIR)
+
+
+def _agent_writes_manifest(manifest_text):
+    """A `_run_claude_agent` stand-in: parses the target directory out of
+    the `/floxify <dir>` prompt and writes a manifest there, simulating
+    the skill's output.
+
+    Used as the agent mock's side_effect rather than writing the manifest
+    via the clone mock (as earlier tests did): `process_entry` now strips
+    any in-tree `.flox/` between the clone and the agent invocation
+    (AI-469), so a manifest planted during the clone step would be
+    deleted before the agent mock's return value is ever inspected.
+    Writing it here, after the strip point in the real call order,
+    matches what the harness actually does.
+    """
+    def _agent(prompt, skill_dir, timeout=1800):
+        target = Path(prompt.split("\n", 1)[0].removeprefix("/floxify ").strip())
+        (target / ".flox" / "env").mkdir(parents=True, exist_ok=True)
+        (target / ".flox" / "env" / "manifest.toml").write_text(manifest_text)
+        return "agent output", None
+    return _agent
 
 
 class TestRunGit(unittest.TestCase):
@@ -105,6 +127,69 @@ class TestCloneAtSha(unittest.TestCase):
         self.assertIn("direct failed", result)
         self.assertIn("partial failed", result)
         self.assertIn("full failed", result)
+
+
+class TestCaptureAndStripUpstreamFlox(unittest.TestCase):
+    """AI-469: a real repo can ship its own hand-maintained .flox/ at the
+    pinned SHA (PostHog does — a git-tracked, 207-line manifest.toml).
+    That's a real signal worth capturing for the golden-vs-upstream
+    review, but the conversion task must not see or be anchored by it:
+    one PostHog rep refused to overwrite the upstream manifest, so the
+    harness scored the UPSTREAM manifest instead of the skill's output."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="tier2-upstream-flox-test-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_no_flox_dir_returns_false_none_empty(self):
+        had, manifest, files = tier2._capture_and_strip_upstream_flox(self.tmpdir)
+        self.assertFalse(had)
+        self.assertIsNone(manifest)
+        self.assertEqual(files, [])
+
+    def test_flox_dir_with_manifest_is_captured_and_stripped(self):
+        flox_env = Path(self.tmpdir) / ".flox" / "env"
+        flox_env.mkdir(parents=True)
+        (flox_env / "manifest.toml").write_text('[install]\nfoo.pkg-path = "foo"\n')
+
+        had, manifest, files = tier2._capture_and_strip_upstream_flox(self.tmpdir)
+
+        self.assertTrue(had)
+        self.assertEqual(manifest, '[install]\nfoo.pkg-path = "foo"\n')
+        self.assertIn("env/manifest.toml", files)
+        self.assertFalse((Path(self.tmpdir) / ".flox").exists())
+
+    def test_flox_dir_without_manifest_captures_files_but_manifest_none(self):
+        flox_dir = Path(self.tmpdir) / ".flox"
+        flox_dir.mkdir()
+        (flox_dir / ".gitignore").write_text("cache/\n")
+
+        had, manifest, files = tier2._capture_and_strip_upstream_flox(self.tmpdir)
+
+        self.assertTrue(had)
+        self.assertIsNone(manifest)
+        self.assertEqual(files, [".gitignore"])
+        self.assertFalse((Path(self.tmpdir) / ".flox").exists())
+
+    def test_multiple_files_are_all_listed_sorted(self):
+        # Mirrors the real PostHog shape: .gitignore, env.json, and three
+        # files under env/ (manifest.toml, direnv-setup.sh, on-activate.sh).
+        flox_env = Path(self.tmpdir) / ".flox" / "env"
+        flox_env.mkdir(parents=True)
+        (Path(self.tmpdir) / ".flox" / ".gitignore").write_text("cache/\n")
+        (Path(self.tmpdir) / ".flox" / "env.json").write_text("{}\n")
+        (flox_env / "manifest.toml").write_text("[install]\n")
+        (flox_env / "on-activate.sh").write_text("#!/usr/bin/env bash\n")
+
+        had, _manifest, files = tier2._capture_and_strip_upstream_flox(self.tmpdir)
+
+        self.assertTrue(had)
+        self.assertEqual(
+            files,
+            [".gitignore", "env.json", "env/manifest.toml", "env/on-activate.sh"],
+        )
 
 
 class TestRuntimePinned(unittest.TestCase):
@@ -665,17 +750,6 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
         entry.update(overrides)
         return entry
 
-    @staticmethod
-    def _clone_writes_manifest(manifest_text):
-        """A `_clone_at_sha` stand-in: writes a manifest into `dest` (the
-        real tempdir `process_entry` created) and reports clone success."""
-        def _clone(url, sha, dest, timeout=900):
-            d = Path(dest)
-            (d / ".flox" / "env").mkdir(parents=True, exist_ok=True)
-            (d / ".flox" / "env" / "manifest.toml").write_text(manifest_text)
-            return None
-        return _clone
-
     @patch("tier2._judge_tier2")
     @patch("tier2._run_verify")
     @patch("tier2._run_claude_agent")
@@ -683,8 +757,8 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
     def test_verify_leg_result_recorded_in_output(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
-        mock_clone.side_effect = self._clone_writes_manifest("[install]\n")
-        mock_agent.return_value = ("agent output", None)
+        mock_clone.return_value = None
+        mock_agent.side_effect = _agent_writes_manifest("[install]\n")
         mock_verify.return_value = {
             "violations": [
                 {"rule": "vars-not-literal", "severity": "hard", "message": "m"},
@@ -711,8 +785,8 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
     def test_catalog_live_follows_activate_true(
         self, mock_check_act, mock_clone, mock_agent, mock_verify, mock_judge
     ):
-        mock_clone.side_effect = self._clone_writes_manifest("[install]\n")
-        mock_agent.return_value = ("agent output", None)
+        mock_clone.return_value = None
+        mock_agent.side_effect = _agent_writes_manifest("[install]\n")
         mock_verify.return_value = {
             "violations": [], "catalog_checked": True, "catalog_unknown": [],
         }
@@ -731,8 +805,8 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
     ):
         # --activate is opt-in and off by default; the catalog sub-leg
         # must not attempt a live check when the caller never opted in.
-        mock_clone.side_effect = self._clone_writes_manifest("[install]\n")
-        mock_agent.return_value = ("agent output", None)
+        mock_clone.return_value = None
+        mock_agent.side_effect = _agent_writes_manifest("[install]\n")
         mock_verify.return_value = {
             "violations": [], "catalog_checked": False, "catalog_unknown": [],
         }
@@ -749,8 +823,8 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
     def test_verify_result_fed_to_judge(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
-        mock_clone.side_effect = self._clone_writes_manifest("[install]\n")
-        mock_agent.return_value = ("agent output", None)
+        mock_clone.return_value = None
+        mock_agent.side_effect = _agent_writes_manifest("[install]\n")
         sentinel = {"violations": [], "catalog_checked": True, "catalog_unknown": []}
         mock_verify.return_value = sentinel
         mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
@@ -790,8 +864,8 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
         # False (activate defaults off), so this runs with no network,
         # mirroring test_run_floxify.py's own TestRunVerify discipline.
         manifest = '[vars]\nfoo = "$HOME/data"\n'
-        mock_clone.side_effect = self._clone_writes_manifest(manifest)
-        mock_agent.return_value = ("agent output", None)
+        mock_clone.return_value = None
+        mock_agent.side_effect = _agent_writes_manifest(manifest)
         mock_judge.return_value = {"score": 3, "correct": False, "issues": []}
 
         result = tier2.process_entry(self._entry(), str(tier2.DEFAULT_SKILL_DIR))
@@ -818,15 +892,6 @@ class TestProcessEntryServiceRuleAndManifestPersistence(unittest.TestCase):
         entry.update(overrides)
         return entry
 
-    @staticmethod
-    def _clone_writes_manifest(manifest_text):
-        def _clone(url, sha, dest, timeout=900):
-            d = Path(dest)
-            (d / ".flox" / "env").mkdir(parents=True, exist_ok=True)
-            (d / ".flox" / "env" / "manifest.toml").write_text(manifest_text)
-            return None
-        return _clone
-
     @patch("tier2._judge_tier2")
     @patch("tier2._run_verify")
     @patch("tier2._run_claude_agent")
@@ -842,8 +907,8 @@ class TestProcessEntryServiceRuleAndManifestPersistence(unittest.TestCase):
             "[services.db]\n"
             'command = "postgres -D /data"\n'
         )
-        mock_clone.side_effect = self._clone_writes_manifest(manifest)
-        mock_agent.return_value = ("agent output", None)
+        mock_clone.return_value = None
+        mock_agent.side_effect = _agent_writes_manifest(manifest)
         mock_verify.return_value = {
             "violations": [], "catalog_checked": False, "catalog_unknown": [],
         }
@@ -861,8 +926,8 @@ class TestProcessEntryServiceRuleAndManifestPersistence(unittest.TestCase):
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
         manifest = "[services.redis]\ncommand = \"redis-server\"\n"
-        mock_clone.side_effect = self._clone_writes_manifest(manifest)
-        mock_agent.return_value = ("agent output", None)
+        mock_clone.return_value = None
+        mock_agent.side_effect = _agent_writes_manifest(manifest)
         mock_verify.return_value = {
             "violations": [], "catalog_checked": False, "catalog_unknown": [],
         }
@@ -887,8 +952,8 @@ class TestProcessEntryServiceRuleAndManifestPersistence(unittest.TestCase):
             + "".join(f'pkg{i}.pkg-path = "pkg{i}"\n' for i in range(200))
         )
         self.assertGreater(len(manifest), 3000)
-        mock_clone.side_effect = self._clone_writes_manifest(manifest)
-        mock_agent.return_value = ("agent output", None)
+        mock_clone.return_value = None
+        mock_agent.side_effect = _agent_writes_manifest(manifest)
         mock_verify.return_value = {
             "violations": [], "catalog_checked": False, "catalog_unknown": [],
         }
@@ -901,6 +966,124 @@ class TestProcessEntryServiceRuleAndManifestPersistence(unittest.TestCase):
         self.assertEqual(result["manifest"], manifest)
         self.assertEqual(result["manifest_excerpt"], manifest[:3000])
         self.assertLess(len(result["manifest_excerpt"]), len(result["manifest"]))
+
+
+class TestProcessEntryUpstreamFloxStrip(unittest.TestCase):
+    """AI-469 end-to-end: process_entry must strip an in-tree .flox/
+    before the conversion task runs, but capture it as data first — the
+    audit found PostHog is the one registry entry that ships one at its
+    pinned SHA, and one un-stripped rep scored the UPSTREAM manifest
+    instead of anything the skill produced."""
+
+    def _entry(self, **overrides):
+        entry = {
+            "id": "x", "repo_url": "https://example.com/r", "sha": "abc123",
+            "expected_runtimes": [], "expected_services": [],
+        }
+        entry.update(overrides)
+        return entry
+
+    @staticmethod
+    def _clone_writes_upstream_flox(manifest_text, extra_files=None):
+        """A `_clone_at_sha` stand-in that plants an in-tree .flox/ — the
+        real shape a clone brings for a repo like PostHog. Distinct from
+        `_agent_writes_manifest`: this represents genuine upstream
+        content process_entry must strip, not the skill's own output."""
+        def _clone(url, sha, dest, timeout=900):
+            d = Path(dest)
+            flox_env = d / ".flox" / "env"
+            flox_env.mkdir(parents=True, exist_ok=True)
+            (flox_env / "manifest.toml").write_text(manifest_text)
+            for rel in extra_files or []:
+                p = d / ".flox" / rel
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text("")
+            return None
+        return _clone
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_verify")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_upstream_flox_stripped_before_agent_invocation(
+        self, mock_clone, mock_agent, mock_verify, mock_judge
+    ):
+        mock_clone.side_effect = self._clone_writes_upstream_flox(
+            "[install]\nupstream = true\n"
+        )
+        seen = {"flox_present_at_agent_call": None}
+
+        def _agent(prompt, skill_dir, timeout=1800):
+            target = Path(prompt.split("\n", 1)[0].removeprefix("/floxify ").strip())
+            seen["flox_present_at_agent_call"] = (target / ".flox").exists()
+            (target / ".flox" / "env").mkdir(parents=True, exist_ok=True)
+            (target / ".flox" / "env" / "manifest.toml").write_text(
+                "[install]\nfrom_skill = true\n"
+            )
+            return "agent output", None
+
+        mock_agent.side_effect = _agent
+        mock_verify.return_value = {
+            "violations": [], "catalog_checked": False, "catalog_unknown": [],
+        }
+        mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
+
+        result = tier2.process_entry(self._entry(), "/fake/skill/dir")
+
+        self.assertFalse(
+            seen["flox_present_at_agent_call"],
+            "the conversion task must not see the upstream .flox/",
+        )
+        self.assertTrue(result["had_upstream_flox"])
+        self.assertEqual(result["upstream_manifest"], "[install]\nupstream = true\n")
+        self.assertEqual(result["manifest"], "[install]\nfrom_skill = true\n")
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_verify")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_upstream_flox_files_list_captured(
+        self, mock_clone, mock_agent, mock_verify, mock_judge
+    ):
+        mock_clone.side_effect = self._clone_writes_upstream_flox(
+            "[install]\n", extra_files=[".gitignore", "env/on-activate.sh"],
+        )
+        mock_agent.side_effect = _agent_writes_manifest(
+            "[install]\nfrom_skill = true\n"
+        )
+        mock_verify.return_value = {
+            "violations": [], "catalog_checked": False, "catalog_unknown": [],
+        }
+        mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
+
+        result = tier2.process_entry(self._entry(), "/fake/skill/dir")
+
+        self.assertTrue(result["had_upstream_flox"])
+        self.assertIn(".gitignore", result["upstream_flox_files"])
+        self.assertIn("env/manifest.toml", result["upstream_flox_files"])
+        self.assertIn("env/on-activate.sh", result["upstream_flox_files"])
+
+    @patch("tier2._judge_tier2")
+    @patch("tier2._run_verify")
+    @patch("tier2._run_claude_agent")
+    @patch("tier2._clone_at_sha")
+    def test_no_upstream_flox_records_false_and_none(
+        self, mock_clone, mock_agent, mock_verify, mock_judge
+    ):
+        mock_clone.return_value = None  # clean clone, no in-tree .flox
+        mock_agent.side_effect = _agent_writes_manifest(
+            "[install]\nfrom_skill = true\n"
+        )
+        mock_verify.return_value = {
+            "violations": [], "catalog_checked": False, "catalog_unknown": [],
+        }
+        mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
+
+        result = tier2.process_entry(self._entry(), "/fake/skill/dir")
+
+        self.assertFalse(result["had_upstream_flox"])
+        self.assertIsNone(result["upstream_manifest"])
+        self.assertEqual(result["upstream_flox_files"], [])
 
 
 class TestJudgeTier2CatalogNote(unittest.TestCase):
