@@ -525,12 +525,12 @@ def process_task(task, skill_dir, skip_activation=False,
             "can and stop after writing it."
         )
 
-        print(f"  [{task['tier']}] {task['id']}: invoking skill ...", flush=True)
+        print(f"  [{task.get('tier', '?')}] {task_id}: invoking skill ...", flush=True)
         agent_out, agent_err = _run_claude_agent(prompt, skill_dir)
 
         if agent_err:
             print(
-                f"  [{task['tier']}] {task['id']}: agent error: {agent_err}", flush=True
+                f"  [{task.get('tier', '?')}] {task_id}: agent error: {agent_err}", flush=True
             )
             return {**_base(task), "error": agent_err}
 
@@ -572,7 +572,7 @@ def process_task(task, skill_dir, skip_activation=False,
         act_str = "skipped" if act_skipped else ("ok" if act_ok else "FAIL")
         verify_str = f"{len(verify_hard)}H/{len(verify_advisory)}A"
         print(
-            f"  [{task['tier']}] {task['id']}: "
+            f"  [{task.get('tier', '?')}] {task_id}: "
             f"hard={status}  judge={verdict['score']}/5  activate={act_str}  "
             f"verify={verify_str}",
             flush=True,
@@ -724,6 +724,44 @@ def _stats(results):
     }
 
 
+def _vacuous_run_message(results):
+    """AI-463 I1(a): a run where EVERY task errored (e.g. `--only lemmy
+    --tasks tier2.jsonl` — every id in that file is a real-repo entry with
+    no local fixtures/<id> directory) produces a results.json with
+    nothing in it worth reporting, yet exits 0 like a genuine measurement
+    run. Returns the hint to print before exiting nonzero, or None if at
+    least one task actually ran and got scored.
+
+    Every result dict carries either "error" (an early-return failure) or
+    "judge" (full happy-path completion) — never neither — so "no result
+    has judge" is exactly "every task errored," not an approximation of
+    it. A run where SOME tasks errored among others that scored fine
+    returns None here — that's the existing record-error-and-continue
+    discipline, not this failure mode.
+    """
+    if not results or any("judge" in r for r in results):
+        return None
+    errors = [(r["id"], r.get("error", "?")) for r in results]
+    return (
+        f"ERROR: 0 of {len(results)} task(s) actually ran (all errored) — "
+        f"nothing to report. If these are real-repo entries, they belong "
+        f"in tier2.jsonl and run via tier2.py, not this script. "
+        f"Errors: {errors}"
+    )
+
+
+def _gate_should_fail(binding, bad, errs):
+    """AI-463 I1(b): --gate must fail when `binding` (the scored should-
+    tier fixtures) is EMPTY, not just when some of them failed. "GATE
+    PASSED: all 0 should-tier fixtures pass hard-checks" is vacuous truth
+    — the same failure class as the golden-lint vacuous-pass PR #42
+    fixed (a check that can't find anything to check is not evidence of
+    correctness). A run whose should-tier subset genuinely ran and
+    passed still returns False here, same as before.
+    """
+    return bool(bad) or bool(errs) or not binding
+
+
 # --- main ---------------------------------------------------------------------
 
 def main():
@@ -871,6 +909,16 @@ def main():
     print("\n=== REGRESSION DIFF ===")
     print("\n".join(diff_lines))
 
+    # AI-463 I1(a): a run where EVERY task errored (results written above
+    # for visibility/debugging) has nothing to report — exit nonzero
+    # unconditionally, not just under --gate. A per-task rejection among
+    # a larger run (some scored, some errored) is unaffected — see
+    # _vacuous_run_message's docstring.
+    vacuous_message = _vacuous_run_message(results)
+    if vacuous_message:
+        print(f"\n{vacuous_message}", file=sys.stderr)
+        sys.exit(1)
+
     # Gate: hard-checks on should-tier tasks bind when --gate is set.
     # Judge score and activation are advisory — reported, never block.
     binding = [r for r in scored if r["tier"] == "should"]
@@ -879,16 +927,25 @@ def main():
 
     _write_step_summary(summary, results, binding, bad, errs, args.gate, diff_lines)
 
-    if args.gate and (bad or errs):
-        failed_ids = [r["id"] for r in bad]
-        failed_checks = {
-            r["id"]: [k for k, v in r["hard_checks"].items() if not v] for r in bad
-        }
-        print(
-            f"\nGATE FAILED: {len(bad)} should-tier fixture(s) failed hard-checks: "
-            f"{failed_checks}; errors: {[r['id'] for r in errs]}",
-            file=sys.stderr,
-        )
+    if args.gate and _gate_should_fail(binding, bad, errs):
+        if not binding:
+            # AI-463 I1(b): zero should-tier fixtures ran at all — a gate
+            # over nothing is not a pass. See _gate_should_fail.
+            print(
+                "\nGATE FAILED: 0 should-tier fixtures ran — a gate over "
+                "zero fixtures is vacuous truth, not a pass",
+                file=sys.stderr,
+            )
+        else:
+            failed_ids = [r["id"] for r in bad]
+            failed_checks = {
+                r["id"]: [k for k, v in r["hard_checks"].items() if not v] for r in bad
+            }
+            print(
+                f"\nGATE FAILED: {len(bad)} should-tier fixture(s) failed hard-checks: "
+                f"{failed_checks}; errors: {[r['id'] for r in errs]}",
+                file=sys.stderr,
+            )
         sys.exit(1)
     if args.gate:
         print(

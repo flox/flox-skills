@@ -8,7 +8,10 @@ subprocesses, so it is fast and safe to gate on.
     python3 -m unittest test_run_floxify -v
 """
 import subprocess
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import run_floxify
@@ -267,6 +270,114 @@ class TestStats(unittest.TestCase):
         results = [self._result(0), self._result(0)]
         stats = run_floxify._stats(results)
         self.assertEqual(stats["verify_hard_violation_rate"], 0.0)
+
+
+class TestVacuousRunMessage(unittest.TestCase):
+    """AI-463 I1(a): a run where every task errored (e.g. tier2.jsonl
+    entries fed to this Tier-1-only harness) must not exit 0 with an
+    empty-looking "measurement run" — see run_floxify.py's KeyError fix
+    above for the failure mode this generalizes past."""
+
+    def test_all_errored_returns_a_hint(self):
+        results = [
+            {"id": "lemmy", "tier": "?", "ecosystem": "rust",
+             "error": "no fixtures/lemmy directory ... tier2.py --only lemmy"},
+        ]
+        msg = run_floxify._vacuous_run_message(results)
+        self.assertIsNotNone(msg)
+        self.assertIn("tier2.py", msg)
+        self.assertIn("lemmy", msg)
+
+    def test_mixed_scored_and_errored_returns_none(self):
+        # A per-task rejection among a larger run keeps the existing
+        # record-error-and-continue discipline -- must NOT trigger this.
+        results = [
+            {"id": "ok-one", "tier": "should", "ecosystem": "node",
+             "judge": {"score": 5, "correct": True, "issues": []}},
+            {"id": "missing-one", "tier": "should", "ecosystem": "node",
+             "error": "no fixtures/missing-one directory"},
+        ]
+        self.assertIsNone(run_floxify._vacuous_run_message(results))
+
+    def test_all_scored_returns_none(self):
+        results = [
+            {"id": "ok-one", "tier": "should", "ecosystem": "node",
+             "judge": {"score": 5, "correct": True, "issues": []}},
+        ]
+        self.assertIsNone(run_floxify._vacuous_run_message(results))
+
+    def test_empty_results_returns_none(self):
+        # Defensive: main() already exits earlier via --only's own
+        # "no task with id" check before results could ever be empty in
+        # practice, but the helper itself must not misreport this shape.
+        self.assertIsNone(run_floxify._vacuous_run_message([]))
+
+
+class TestVacuousRunIntegration(unittest.TestCase):
+    """The exact reported repro, run as a real subprocess -- cheap and
+    fast because it fails at the fixture-existence check, before the
+    real `claude` agent is ever invoked."""
+
+    def test_repro_shape_exits_nonzero_with_the_hint(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_path = str(Path(tmpdir) / "repro-result.json")
+            proc = subprocess.run(
+                [sys.executable, "run_floxify.py", "--tasks", "tier2.jsonl",
+                 "--only", "lemmy", "--out", out_path],
+                cwd=str(run_floxify.HERE), capture_output=True, text=True, timeout=30,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("tier2.py", proc.stderr)
+            self.assertIn("lemmy", proc.stderr)
+
+
+class TestGateShouldFail(unittest.TestCase):
+    """AI-463 I1(b): --gate must fail when the should-tier binding set is
+    EMPTY, not just when something in it failed -- "GATE PASSED: all 0
+    should-tier fixtures pass hard-checks" is vacuous truth, the same
+    failure class the golden-lint vacuous-pass fix in PR #42 addressed."""
+
+    def _should_result(self, hard_pass=True):
+        return {"id": "x", "tier": "should", "hard_pass": hard_pass}
+
+    def test_fails_when_binding_is_empty(self):
+        # e.g. a run that only scored may/stretch-tier fixtures.
+        self.assertTrue(run_floxify._gate_should_fail(binding=[], bad=[], errs=[]))
+
+    def test_fails_when_a_should_tier_hard_check_failed(self):
+        binding = [self._should_result(hard_pass=False)]
+        self.assertTrue(run_floxify._gate_should_fail(binding, bad=binding, errs=[]))
+
+    def test_fails_when_a_should_tier_task_errored(self):
+        binding = [self._should_result()]
+        errs = [{"id": "y", "tier": "should", "error": "boom"}]
+        self.assertTrue(run_floxify._gate_should_fail(binding, bad=[], errs=errs))
+
+    def test_passes_when_binding_is_non_empty_and_clean(self):
+        binding = [self._should_result()]
+        self.assertFalse(run_floxify._gate_should_fail(binding, bad=[], errs=[]))
+
+    def test_larger_run_with_one_missing_fixture_still_gates_on_real_results(self):
+        # A missing fixture among several tasks (here, a non-should-tier
+        # one, isolating this from "a should-tier task itself errored")
+        # must not zero out the should-tier binding built from the tasks
+        # that DID score -- record-error-and-continue, not vacuous-fail.
+        results = [
+            {"id": "ok-one", "tier": "should", "ecosystem": "node",
+             "hard_pass": True, "judge": {"score": 5, "correct": True, "issues": []}},
+            {"id": "missing-one", "tier": "may", "ecosystem": "node",
+             "error": "no fixtures/missing-one directory"},
+        ]
+        # main()'s own construction (mirrored here, not re-derived by hand).
+        scored = [r for r in results if "judge" in r]
+        binding = [r for r in scored if r["tier"] == "should"]
+        bad = [r for r in binding if not r["hard_pass"]]
+        errs = [r for r in results if "error" in r and r.get("tier") == "should"]
+
+        self.assertEqual(len(binding), 1)
+        self.assertEqual(errs, [])  # the error was may-tier, not should-tier
+        self.assertFalse(run_floxify._gate_should_fail(binding, bad, errs))
+        self.assertIsNone(run_floxify._vacuous_run_message(results))
 
 
 if __name__ == "__main__":
