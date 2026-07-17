@@ -13,6 +13,7 @@ Run: python3 -m unittest test_tier2 -v
 import json
 import subprocess
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -130,6 +131,58 @@ class TestRuntimePinned(unittest.TestCase):
 
     def test_none_manifest_returns_false(self):
         self.assertFalse(tier2._runtime_pinned(None, "nodejs_24"))
+
+
+class TestLoadVerifyModule(unittest.TestCase):
+    """AI-468 fix pass (PR #48 review, I1): a --skill-dir checkout whose
+    verify.py loads fine but predates the matching_service_names export
+    must degrade to None (fail closed) — the same as an unloadable skill
+    dir — not raise AttributeError at the first call site and crash the
+    whole run before any results are written. Reproduced by the reviewer
+    against a stub old verify.py."""
+
+    @patch("tier2._load_detect_and_verify")
+    def test_module_missing_the_export_degrades_to_none(self, mock_load):
+        # Has parse_manifest (the older, pre-AI-468 function) but not the
+        # new matching_service_names — the exact shape of a checkout that
+        # predates this ticket.
+        old_verify_mod = types.SimpleNamespace(
+            parse_manifest=lambda text: ({}, None),
+        )
+        mock_load.return_value = (None, old_verify_mod)
+        self.assertIsNone(tier2._load_verify_module("/some/skill/dir"))
+
+    @patch("tier2._load_detect_and_verify")
+    def test_module_with_the_export_loads_normally(self, mock_load):
+        current_verify_mod = types.SimpleNamespace(
+            parse_manifest=lambda text: ({}, None),
+            matching_service_names=lambda manifest, kind: [],
+        )
+        mock_load.return_value = (None, current_verify_mod)
+        self.assertIs(
+            tier2._load_verify_module("/some/skill/dir"), current_verify_mod
+        )
+
+    @patch("tier2._load_detect_and_verify", side_effect=FileNotFoundError("boom"))
+    def test_load_failure_returns_none(self, _mock_load):
+        self.assertIsNone(tier2._load_verify_module("/nonexistent"))
+
+    def test_old_module_flows_through_structural_checks_without_crashing(self):
+        # End-to-end through the same path PR #48 review reproduced the
+        # crash in: an old-shaped verify_mod reaching _structural_checks
+        # must fail has_service_* closed, not raise.
+        old_verify_mod = types.SimpleNamespace(
+            parse_manifest=lambda text: ({"services": {"postgres": {}}}, None),
+        )
+        with patch("tier2._load_detect_and_verify",
+                    return_value=(None, old_verify_mod)):
+            verify_mod = tier2._load_verify_module("/some/skill/dir")
+        entry = {"id": "x", "expected_runtimes": [], "expected_services": ["postgres"]}
+        checks = tier2._structural_checks(
+            entry, "[services.postgres]\ncommand = \"postgres\"\n",
+            verify_mod=verify_mod,
+        )
+        self.assertFalse(checks["has_service_postgres"], checks)
 
 
 class TestMatchingServiceNames(unittest.TestCase):
