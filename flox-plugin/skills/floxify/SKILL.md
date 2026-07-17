@@ -426,7 +426,9 @@ asserting anything about a package:
    platform, verify the PINNED version's own parenthetical covers it —
    `verify.py`'s catalog check (Phase 3c Step 4) automates exactly this, but
    read it yourself here too rather than relying on it to catch a bad pin
-   after the fact.
+   after the fact. A per-system availability hold discovered here is one of
+   the two legitimate recorded-reason categories in "Version-pinning
+   discipline" below — record it the same way.
 3. **Query the versioned `pkg-path` directly — never infer a ceiling from the
    bare name.** `flox show <versioned>` (`flox show ruby_4_0`, `nodejs_24`,
    `go_1_23`, `python313`) is authoritative for a pinned runtime. The bare
@@ -693,6 +695,93 @@ Do not invent syntax.
 - `[hook] on-activate` runs as Bash; its output goes to stderr
 - `[profile]` scripts are sourced into the user's interactive shell — keep fast, use for venv activation
 - Services: each service is `[services.<name>]` with `command = "..."` on its own
+
+**Pkg-group economy — fewest groups possible is a first-order goal.** Every
+distinct `pkg-group` is a distinct catalog page, and every page downloads its
+own full transitive closure down to libc — an extra group is potential
+duplicated download cost, not just an organizational nicety. It also forfeits
+version coherence for compiled extensions: a runtime's C extensions compile
+against the headers on its OWN page and load libraries from it at runtime, so
+splitting a runtime from the native libraries its extensions link against
+risks a version mismatch between the two pages that the activation smoke test
+cannot catch (nothing there loads the extension and checks the symbols
+resolve).
+
+When pins cannot co-resolve in one group ("constraints for group 'X' are too
+tight" from `flox activate`), work the escalation ladder in order — do not
+jump straight to isolating a package:
+
+1. **FIRST — pin the toolchain, unpin the libraries.** Keep the top-level
+   runtime/toolchain pinned exactly (that's usually the one with a real
+   provenance source — `.nvmrc`, `rust-toolchain.toml`, `requires-python`) and
+   drop the exact `version` pin on the OTHER packages that must stay
+   compatible with it, letting them float within the same group. This is the
+   cheapest fix and preserves the single-group economy. **The final
+   user-facing report MUST carry a caveat naming the libraries left unpinned
+   for compatibility** (Phase 4 "Installs" or a dedicated report line) — an
+   unpin is a real trade-off the developer should see, not a silent
+   workaround.
+2. **SECOND — split along dependency seams.** If step 1 still doesn't
+   co-resolve, split by seam, not by package: a runtime and ALL of its
+   native build deps move together as one cluster into their own group,
+   never separated from each other. A second runtime with no native-linkage
+   coupling to that cluster (e.g. a Node frontend build alongside a Ruby
+   backend with C-extension gems) can get its own group without forfeiting
+   anything, since there's no ABI relationship to protect.
+3. **LAST — isolate a single package.** Only when co-resolution has
+   demonstrably failed even along a dependency seam AND the package has no
+   native-linkage coupling to anything else in the manifest (the diesel-cli
+   shape — a standalone tool built with its own feature flags, sharing no
+   native ABI surface with the rest of the manifest) does it get isolated
+   alone. This is the most expensive rung: it guarantees a dedicated closure
+   download for that one package.
+
+Every non-default `pkg-group` gets a comment recording the demonstrated
+failure that forced it, date-stamped — not "these might conflict," but "flox
+activate confirmed X" with the date the resolution was tested:
+
+```toml
+[install]
+# 2026-07-17: `flox activate` failed ("constraints for group 'toplevel' are
+# too tight") with ruby_4_0 + postgresql_14 + vips + icu + libidn all in
+# toplevel. Fix: keep them together in one group (ABI-coherent — ruby's
+# C-extension gems compile against these) rather than isolating ruby alone.
+ruby.pkg-path = "ruby_4_0"
+ruby.pkg-group = "runtime-and-native"
+postgresql.pkg-path = "postgresql_14"
+postgresql.pkg-group = "runtime-and-native"
+vips.pkg-path = "vips"
+vips.pkg-group = "runtime-and-native"
+```
+
+**Version-pinning discipline — pin only when necessary.** Pins keep an
+environment historical and reproducible, but continuous upgrade (the catalog
+moving forward under an unpinned package) is a core Flox benefit that an
+unnecessary pin forfeits. Default to unpinned; add a pin only when something
+in the repo, or the catalog itself, requires it.
+
+Gradation, from least to most consequential — treat each step up as needing
+more justification, not more syntax:
+- **`>=` floors** are cheap and safe — they express a minimum without
+  freezing the ceiling.
+- **`<=` ceilings** likely encode a deliberate compatibility decision someone
+  made — introduce them with care, and say what they're protecting against.
+- **Exact pins** (`version = "24.18.0"`) are the most consequential — doubly
+  careful, since they freeze the package to one catalog entry.
+
+**Every pin the skill writes carries its recorded reason** — the requirement
+is the recording, not pin abstinence. Legitimate reasons include:
+- A repo-derived pin: `rust-toolchain.toml`, `.nvmrc`/`.node-version`,
+  `packageManager` (see "Pinned package manager" above), `.python-version`,
+  `requires-python`.
+- A per-system availability hold — the catalog's newest build lacks a
+  platform the manifest targets, so an older version (or the whole package)
+  is scoped instead; see "Reading `flox show` correctly" item 2 for how to
+  check this and step 1 of the escalation ladder above for the group-level
+  version of the same trade-off.
+
+A pin with neither kind of reason recorded next to it is worth a second look
+before it ships — either find its provenance or drop it.
 
 **Platform-conditional packages** — when a dependency is only relevant on certain
 platforms, use the per-package `systems` field to scope it. Never skip it or bury it
@@ -1090,6 +1179,10 @@ What changed:  .flox/env/manifest.toml  created  ·  nothing else touched
   orchestrators (devservices, tilt, skaffold), list services and name the tool:
   `managed by devservices — run: devservices up`. Neutral tone in both cases — not a gap.
 - ✗ Only for things that genuinely need user action. Omit section entirely if empty.
+- ⚠ If the pkg-group economy escalation ladder's step 1 was used (a toolchain
+  kept pinned, other packages left unpinned so the group stays together),
+  name the unpinned libraries here — a caveat, not a silent workaround. Omit
+  if the ladder was never invoked (the common case).
 - Omit any section that has nothing in it (no empty ✗ section with placeholder text).
 - Exact counts: "47 packages" not "several packages"
 - "What changed" is mandatory every time — always the last line of the report box

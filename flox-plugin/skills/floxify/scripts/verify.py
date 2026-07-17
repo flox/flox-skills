@@ -882,6 +882,182 @@ def check_outputs_heuristic(detect, manifest):
 
 
 # ---------------------------------------------------------------------------
+# heuristic — a compiled-extension runtime split from its native build dep
+# (ADVISORY) — AI-464
+# ---------------------------------------------------------------------------
+
+# A package descriptor with no explicit pkg-group belongs to this group
+# (Flox's own default — see the flox skill's SKILL.md). Shared by both
+# AI-464 heuristics below.
+DEFAULT_PKG_GROUP = "toplevel"
+
+# detect.py's service_clients `source` file -> the RUNTIME_PKG_PATTERNS key
+# it feeds gems/packages for. Grounded directly in detect.py's own
+# _add_clients() call sites (Cargo.lock, pyproject.toml, requirements*.txt,
+# package.json, Gemfile) -- not a guess.
+_CLIENT_SOURCE_ECOSYSTEM = {
+    "Cargo.lock": "rust",
+    "pyproject.toml": "python",
+    "requirements.txt": "python",
+    "requirements-dev.txt": "python",
+    "dev-requirements.txt": "python",
+    "requirements-test.txt": "python",
+    "requirements/base.txt": "python",
+    "package.json": "node",
+    "Gemfile": "ruby",
+}
+
+# search_terms that denote a library a compiled extension LINKS AGAINST at
+# build time (headers/ABI coupling) -- as opposed to a pure runtime/network
+# client (postgresql, redis, mariadb, mongodb-ce, elasticsearch, ffmpeg),
+# which has no such coupling and is out of scope for this heuristic (that's
+# check_leaf_datastore_services' territory). Sourced from the compiled-
+# extension entries in detect.py's own SERVICE_CLIENTS table (psycopg2,
+# cryptography, cffi, lxml, xmlsec, pillow, sharp, ruby-vips, ...).
+NATIVE_LINK_TERMS = {
+    "pkg-config", "openssl", "libffi", "libxml2", "libxslt",
+    "libjpeg", "zlib", "vips", "cairo", "pango", "imagemagick",
+}
+
+
+def check_native_group_coherence(detect, manifest):
+    """ADVISORY: a runtime whose ecosystem has a detected compiled-extension
+    client (e.g. Python's psycopg2 needing pkg-config+openssl, Ruby's
+    ruby-vips needing vips) should share a pkg-group with that native build
+    dependency, not be split from it. A runtime's C extensions compile
+    against headers from its own installed page and load libraries at
+    runtime; splitting the two across pkg-groups risks each page resolving
+    to versions whose ABI doesn't actually match, which the activation
+    smoke test cannot catch (AI-464 — the mastodon golden's
+    "runtime-and-native" group is the pattern this rewards: ruby_4_0 shares
+    a group with postgresql/vips/icu/libidn rather than isolating alone).
+
+    Never HARD: the "same ecosystem, same native term" match is a heuristic,
+    not a proof the two are actually ABI-coupled at this specific version —
+    worth a second look, not asserted as a bug.
+
+    Requires BOTH the runtime and the native dep to already be present in
+    [install] (matched by RUNTIME_PKG_PATTERNS and exact pkg-path,
+    respectively) — a runtime or dep that isn't installed at all is a
+    coverage gap for check_runtimes_installed / a human to notice, not a
+    group-split this heuristic can speak to.
+    """
+    install = manifest.get("install", {}) or {}
+
+    def _runtime_entry(ecosystem):
+        pattern = RUNTIME_PKG_PATTERNS.get(ecosystem)
+        if not pattern:
+            return None, None
+        for install_id, descriptor in install.items():
+            if not isinstance(descriptor, dict):
+                continue
+            pkg_path = _pkg_path_str(descriptor)
+            if pkg_path and pattern.match(pkg_path):
+                return install_id, descriptor
+        return None, None
+
+    def _native_dep_entry(term):
+        for install_id, descriptor in install.items():
+            if not isinstance(descriptor, dict):
+                continue
+            if _pkg_path_str(descriptor) == term:
+                return install_id, descriptor
+        return None, None
+
+    violations = []
+    seen = set()
+    for client in (detect or {}).get("service_clients", []):
+        native_terms = set(client.get("search_terms", [])) & NATIVE_LINK_TERMS
+        if not native_terms:
+            continue
+        ecosystem = _CLIENT_SOURCE_ECOSYSTEM.get(client.get("source"))
+        if not ecosystem:
+            continue
+        runtime_id, runtime_descriptor = _runtime_entry(ecosystem)
+        if runtime_id is None:
+            continue
+        runtime_group = runtime_descriptor.get("pkg-group", DEFAULT_PKG_GROUP)
+
+        for term in sorted(native_terms):
+            dep_id, dep_descriptor = _native_dep_entry(term)
+            if dep_id is None:
+                continue
+            dep_group = dep_descriptor.get("pkg-group", DEFAULT_PKG_GROUP)
+            if dep_group == runtime_group:
+                continue
+            key = (runtime_id, dep_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            violations.append(violation(
+                "native-group-split",
+                f"{runtime_id}.pkg-path = \"{_pkg_path_str(runtime_descriptor)}\" "
+                f"({ecosystem} runtime) and {dep_id}.pkg-path = \"{term}\" "
+                f"(native build dep of {client.get('package')}, from "
+                f"{client.get('source')}) are in different pkg-groups "
+                f"({runtime_group} vs {dep_group}) — {ecosystem}'s compiled "
+                f"extensions link against headers/libs from their own "
+                f"installed page; splitting the runtime from its native "
+                f"build deps risks an ABI mismatch the activation smoke "
+                f"test can't catch",
+                severity=ADVISORY,
+            ))
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# heuristic — manifest fragmentation: too many single-package pkg-groups
+# (ADVISORY) — AI-464
+# ---------------------------------------------------------------------------
+
+# Derived from the current goldens: posthog is the most fragmented at 5
+# single-package groups (python313, nodejs-24, corepack-24, postgresql-15,
+# redis-72 — each isolated because its exact pin didn't co-resolve with the
+# others in toplevel, AI-457). Set at exactly that ceiling so today's
+# goldens don't trip this heuristic while it still catches a manifest that
+# fragments further than any current reference does.
+MAX_SINGLE_PKG_GROUPS = 5
+
+
+def check_group_fragmentation(manifest):
+    """ADVISORY: more single-package pkg-groups than MAX_SINGLE_PKG_GROUPS
+    signals the manifest reached for per-package isolation — the
+    escalation ladder's LAST resort (AI-464) — more often than the
+    pkg-group-economy goal prefers: every distinct group downloads its own
+    full catalog closure down to libc, on top of forfeiting the version
+    coherence a shared group gives compiled extensions. Never HARD — a
+    manifest can legitimately need this many isolated pins; this is a
+    nudge to re-examine (try pinning the toolchain and unpinning the
+    libraries that must track it, or splitting along dependency seams,
+    before isolating further), not a violation.
+    """
+    groups = {}
+    for install_id, descriptor in (manifest.get("install", {}) or {}).items():
+        if not isinstance(descriptor, dict):
+            continue
+        group = descriptor.get("pkg-group", DEFAULT_PKG_GROUP)
+        if group == DEFAULT_PKG_GROUP:
+            continue
+        groups.setdefault(group, []).append(install_id)
+
+    single_pkg_groups = sorted(g for g, ids in groups.items() if len(ids) == 1)
+    if len(single_pkg_groups) <= MAX_SINGLE_PKG_GROUPS:
+        return []
+
+    names = ", ".join(single_pkg_groups)
+    return [violation(
+        "group-fragmentation",
+        f"{len(single_pkg_groups)} single-package pkg-groups ({names}) "
+        f"exceed the economy threshold of {MAX_SINGLE_PKG_GROUPS} — each "
+        f"isolated group downloads its own full catalog closure; before "
+        f"adding another, try the escalation ladder's earlier rungs (pin "
+        f"the toolchain and unpin the libraries that must track it, or "
+        f"split along dependency seams) instead of isolating further",
+        severity=ADVISORY,
+    )]
+
+
+# ---------------------------------------------------------------------------
 # orchestration
 # ---------------------------------------------------------------------------
 
@@ -891,10 +1067,10 @@ def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
     "catalog_unknown": [...]}.
 
     `detect` may be None/{} — the detect-cross-check invariants (runtimes
-    installed, leaf-datastore clients served) degrade to no-ops when there
-    are no facts to cross-check against; the manifest-only invariants
-    ([vars] literal, hook mutation, catalog resolution, outputs heuristic)
-    always run.
+    installed, leaf-datastore clients served, native-group coherence)
+    degrade to no-ops when there are no facts to cross-check against; the
+    manifest-only invariants ([vars] literal, hook mutation, catalog
+    resolution, outputs heuristic, group fragmentation) always run.
 
     `catalog_unknown` lists install entries the catalog leg could not
     establish per-system availability for (see check_catalog) — these are
@@ -924,6 +1100,8 @@ def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
     )
     violations += catalog_violations
     violations += check_outputs_heuristic(detect, manifest)
+    violations += check_native_group_coherence(detect, manifest)
+    violations += check_group_fragmentation(manifest)
 
     return {
         "violations": violations,
