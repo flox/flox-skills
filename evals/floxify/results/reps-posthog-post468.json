@@ -1,0 +1,652 @@
+{
+  "summary": {
+    "skill": "flox-plugin@bill/ai-453-floxify-loses-the-primary-runtime-on-large-monorepos",
+    "model": "claude-opus-4-8",
+    "n_repos": 1,
+    "n_errors": 0,
+    "n": 5,
+    "hard_pass_rate": 0.0,
+    "avg_judge_score": 3.4,
+    "judge_correct_rate": 0.8,
+    "activation_ok": 5,
+    "activation_skipped": 0,
+    "verify_checked": 5,
+    "verify_clean": 0,
+    "verify_hard_violation_rate": 1.0
+  },
+  "results": [
+    {
+      "id": "posthog",
+      "repo_url": "https://github.com/PostHog/posthog",
+      "sha": "55525a19f353",
+      "reps": 5,
+      "runs": [
+        {
+          "id": "posthog",
+          "repo_url": "https://github.com/PostHog/posthog",
+          "sha": "55525a19f353",
+          "hard_checks": {
+            "manifest_created": true,
+            "valid_toml": true,
+            "no_abs_paths": true,
+            "pins_python3": false,
+            "pins_nodejs_24": true,
+            "has_service_postgres": false,
+            "has_service_redis": false,
+            "has_service_clickhouse": false
+          },
+          "hard_pass": false,
+          "activation": {
+            "ok": true,
+            "skipped": false,
+            "notes": ""
+          },
+          "services": {
+            "postgres": {
+              "ok": null,
+              "skipped": true,
+              "notes": "no [services.*] entry matches kind 'postgres' by name or command (see has_service_postgres) \u2014 nothing to probe. A hook-started process is not a Flox-managed service."
+            },
+            "redis": {
+              "ok": null,
+              "skipped": true,
+              "notes": "no [services.*] entry matches kind 'redis' by name or command (see has_service_redis) \u2014 nothing to probe. A hook-started process is not a Flox-managed service."
+            },
+            "clickhouse": {
+              "ok": null,
+              "skipped": true,
+              "notes": "no [services.*] entry matches kind 'clickhouse' by name or command (see has_service_clickhouse) \u2014 nothing to probe. A hook-started process is not a Flox-managed service."
+            }
+          },
+          "verify": {
+            "violations": [
+              {
+                "rule": "runtime-not-installed",
+                "severity": "hard",
+                "message": "detected runtime 'python' (from .github/workflows/auto-assign-reviewers.yml (setup-python), .github/workflows/build-hogql-parser-rs.yml (setup-python), .github/workflows/build-hogql-parser.yml (setup-python), .github/workflows/ci-backend.yml (setup-python), .github/workflows/ci-clickhouse-multinode-migrations.yml (setup-python), .github/workflows/ci-e2e-playwright.yml (setup-python), .github/workflows/ci-llm-gateway.yml (setup-python), .github/workflows/ci-mcp.yml (setup-python), .github/workflows/ci-proto.yml (setup-python), .github/workflows/ci-python.yml (setup-python), .github/workflows/ci-rust-flags-integration.yml (setup-python), .github/workflows/publish-hogli.yml (setup-python), pyproject.toml (requires-python)) has no matching [install] entry"
+              },
+              {
+                "rule": "leaf-datastore-not-served",
+                "severity": "hard",
+                "message": "client 'celery' (pyproject.toml) implies redis, but no [services.*] serves it"
+              },
+              {
+                "rule": "leaf-datastore-not-served",
+                "severity": "hard",
+                "message": "client 'psycopg2-binary' (pyproject.toml) implies postgres, but no [services.*] serves it"
+              },
+              {
+                "rule": "leaf-datastore-not-served",
+                "severity": "hard",
+                "message": "client 'psycopg' (pyproject.toml) implies postgres, but no [services.*] serves it"
+              },
+              {
+                "rule": "leaf-datastore-not-served",
+                "severity": "hard",
+                "message": "client 'pymysql' (pyproject.toml) implies mariadb, but no [services.*] serves it"
+              },
+              {
+                "rule": "leaf-datastore-not-served",
+                "severity": "hard",
+                "message": "client 'pymongo' (pyproject.toml) implies mongodb, but no [services.*] serves it"
+              },
+              {
+                "rule": "leaf-datastore-not-served",
+                "severity": "hard",
+                "message": "client 'redis' (pyproject.toml) implies redis, but no [services.*] serves it"
+              },
+              {
+                "rule": "vars-endpoint-not-served",
+                "severity": "hard",
+                "message": "[vars] FLAGS_REDIS_URL='redis://localhost:6379/1' advertises redis but no [services.redis] serves it"
+              },
+              {
+                "rule": "vars-not-literal",
+                "severity": "hard",
+                "message": "[vars] OPENSSL_ROOT_DIR contains '$FLOX_ENV' \u2014 [vars] are literal; move to [hook]"
+              },
+              {
+                "rule": "vars-not-literal",
+                "severity": "hard",
+                "message": "[vars] OPENSSL_LIB_DIR contains '$FLOX_ENV/lib' \u2014 [vars] are literal; move to [hook]"
+              },
+              {
+                "rule": "vars-not-literal",
+                "severity": "hard",
+                "message": "[vars] OPENSSL_INCLUDE_DIR contains '$FLOX_ENV/include' \u2014 [vars] are literal; move to [hook]"
+              },
+              {
+                "rule": "vars-not-literal",
+                "severity": "hard",
+                "message": "[vars] LDFLAGS contains '-L$FLOX_ENV/lib' \u2014 [vars] are literal; move to [hook]"
+              },
+              {
+                "rule": "vars-not-literal",
+                "severity": "hard",
+                "message": "[vars] CPPFLAGS contains '-I$FLOX_ENV/include' \u2014 [vars] are literal; move to [hook]"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] uv.pkg-path = \"uv\" (version 0.11.26) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "uv",
+                "install_id": "uv"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] rustc.pkg-path = \"rustc\" (version 1.96.1) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "rustc",
+                "install_id": "rustc"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] clippy.pkg-path = \"clippy\" (version 1.96.1) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "clippy",
+                "install_id": "clippy"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] rustfmt.pkg-path = \"rustfmt\" (version 1.96.1) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "rustfmt",
+                "install_id": "rustfmt"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] util-linux.pkg-path = \"util-linux\" (version 2.42.2) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "util-linux",
+                "install_id": "util-linux"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] protobuf.pkg-path = \"protobuf\" (version 35.1) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "protobuf",
+                "install_id": "protobuf"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] cmake.pkg-path = \"cmake\" is a native build input (from rust/Dockerfile) with no `outputs` declared \u2014 check `flox show cmake` for non-default outputs (e.g. `dev` headers) and add `cmake.outputs = [...]` if the build needs them"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] protobuf.pkg-path = \"protobuf\" is a native build input (from rust/Dockerfile) with no `outputs` declared \u2014 check `flox show protobuf` for non-default outputs (e.g. `dev` headers) and add `protobuf.outputs = [...]` if the build needs them"
+              }
+            ],
+            "hard_count": 19,
+            "advisory_count": 2,
+            "catalog_checked": true
+          },
+          "judge": {
+            "score": 1,
+            "correct": false,
+            "issues": [
+              "No Python pin at all \u2014 [install] has no python313/python3 entry; manifest defers the interpreter to `uv sync` at activation, so the primary runtime is unresolved (pyproject.toml requires-python == 3.13.13 was never honored)",
+              "Zero services wired \u2014 [services] contains only a commented-out `db.command` stub; postgres, redis, and clickhouse are all missing",
+              "Missing clickhouse entirely \u2014 PostHog's primary analytics store is neither a Flox service nor a docker-compose fallback in [hook]",
+              "postgresql_14 installed as a bare client-only convenience; docker-compose.base.yml pins postgres:15.12-alpine, and no [services.postgres] uses it",
+              "No redis package and no [services.redis] despite docker-compose redis7 = 7.2-alpine",
+              "Catalog check: 6 confirmed violations \u2014 uv, rustc, clippy, rustfmt, util-linux have no x86_64-darwin build, but options.systems declares all four systems, so the env cannot resolve on Intel macOS",
+              "Monorepo failure mode: installs a large pile of subpackage tooling (Rust toolchain, Go, emscripten, ffmpeg, watchman, sqlx-cli, protobuf) while the primary Python runtime goes unpinned",
+              "[hook] on-activate delegates entirely to an external `$FLOX_ENV_PROJECT/.flox/env/on-activate.sh`, so the manifest is not self-describing and the actual setup logic is unreviewable",
+              "Node pin is the one correct runtime (nodejs_24 @ 24.13.0 with corepack for pnpm), but its comment cites the Dockerfile rather than .nvmrc/engines.node and admits patch-version divergence"
+            ]
+          },
+          "manifest": "#\n# This is a Flox environment manifest.\n# Visit flox.dev/docs/concepts/manifest/\n# or see flox-edit(1), manifest.toml(5) for more information.\n#\n# Flox manifest version managed by Flox CLI\nschema-version = \"1.10.0\"\n\n# List packages you wish to install in your environment inside\n# the `[install]` section.\n[install]\n# Python - Python itself is installed on activation via `uv sync`\nuv = { pkg-path = \"uv\", pkg-group = \"uv\", version = \"^0.11.14\" }\nxmlsec = { pkg-path = \"xmlsec\", version = \"1.3.7\" }\nfreetds = { pkg-path = \"freetds\" } # For pymssql\n# Node\nnodejs = { pkg-path = \"nodejs_24\", pkg-group = \"nodejs\", version = \"24.13.0\" } # Same maj.min ver as in Dockerfile; diverges from patch ver\n# Set a lower priority on corepack so it takes precedence over nodejs (both bundle pnpm)\n# https://flox.dev/docs/man/manifest.toml/#catalog-descriptors\ncorepack = { pkg-path = \"corepack_24\", pkg-group = \"nodejs\", version = \"24.13.0\", priority = 4 } # Same maj.min as in Dockerfile; diverges from patch ver\nbrotli = { pkg-path = \"brotli\", pkg-group = \"nodejs\" }\nzstd = { pkg-path = \"zstd\", pkg-group = \"nodejs\" }\nopenssl = { pkg-path = \"openssl\", version = \"3.4.1\", pkg-group = \"openssl\", outputs = [\"bin\", \"man\", \"dev\", \"out\"] }\nnodemon = { pkg-path = \"nodemon\" }\n# Rust toolchain (based on https://flox.dev/docs/cookbook/languages/rust/)\ncargo = { pkg-path = \"cargo\", pkg-group = \"rust-toolchain\", version = \"1.91.1\" }\nrustc = { pkg-path = \"rustc\", pkg-group = \"rust-toolchain\" }\nclippy = { pkg-path = \"clippy\", pkg-group = \"rust-toolchain\" }\nrustfmt = { pkg-path = \"rustfmt\", pkg-group = \"rust-toolchain\" }\nrust-lib-src = { pkg-path = \"rustPlatform.rustLibSrc\", pkg-group = \"rust-toolchain\" }\nlibiconv = { pkg-path = \"libiconv\", systems = [\"aarch64-darwin\"], pkg-group = \"rust-toolchain\" }\nrust-analyzer = { pkg-path = \"rust-analyzer\", pkg-group = \"rust-analyzer\" } # rust-analyzer should be isolated in its own group, details in cookbook example\nlld = { pkg-path = \"lld\", systems = [\"aarch64-darwin\"] } # Faster linker for Rust dev builds on macOS\nsccache = { pkg-path = \"sccache\" } # Compilation cache for Rust (also used in CI)\n# Go\ngo = { pkg-path = \"go\", version = \"1.25.5\", pkg-group = \"go\" }\ngolangci-lint = { pkg-path = \"golangci-lint\", pkg-group = \"go\" }\nair = { pkg-path = \"air\" }\n# CLI tools\ngit-lfs = { pkg-path = \"git-lfs\" }\nripgrep = { pkg-path = \"ripgrep\" }\nmprocs = { pkg-path = \"mprocs\" }\nutil-linux = { pkg-path = \"util-linux\" } # flock\ncmake = { pkg-path = \"cmake\", version = \"3.31.5\", pkg-group = \"cmake\" }\nsqlx-cli = { pkg-path = \"sqlx-cli\", version = \"0.8.3\" } # sqlx\npostgresql = { pkg-path = \"postgresql_14\" } # psql\nffmpeg = { pkg-path = \"ffmpeg_5\", version = \"5.1.4\", pkg-group = \"ffmpeg\" }\nprotobuf = { pkg-path = \"protobuf\" } # protoc compiler for gRPC code generation\nninja.pkg-path = \"ninja\"\nemscripten = { pkg-path = \"emscripten\", pkg-group = \"emscripten\", version = \"4.0.23\" }\nlibpthread-stubs = { pkg-path = \"libpthread-stubs\", pkg-group = \"emscripten\" }\nwatchman = { pkg-path = \"watchman\" } # Fast file watching for Django/Celery autoreload (uses pywatchman)\n\n# Set environment variables in the `[vars]` section. These variables may not\n# reference one another, and are added to the environment without first\n# expanding them. They are available for use in the `[profile]` and `[hook]`\n# scripts.\n[vars]\nDEBUG = \"1\"\nPOSTHOG_SKIP_MIGRATION_CHECKS = \"1\"\nFLAGS_REDIS_URL = \"redis://localhost:6379/1\"\n# CH client default DB. Matches docker-compose convention \u2014 without it,\n# Django queries unqualified `events` / `log_entries` etc. resolve against\n# the literal `default` DB (where PostHog has no tables) and 500.\nCLICKHOUSE_DATABASE = \"posthog\"\n# HMAC secret the agent_stack preview-proxy shares with agent-ingress so\n# the JWT minted by Django on every non-live invoke can be verified by\n# ingress. Same value on both sides \u2192 live JWT round-trip. Dev only.\nAGENT_PREVIEW_SECRET = \"dev-agent-preview-secret-not-for-prod\"\nDIRENV_LOG_FORMAT = \"\" # Disable direnv activation logging (in case direnv is present)\nRUST_LOG = \"flox=error,flox_rust_sdk=error,flox_watchdog=error\" # Suppress Flox logs only (also set in .envrc for early activation)\nOPENSSL_ROOT_DIR = \"$FLOX_ENV\"\nOPENSSL_LIB_DIR = \"$FLOX_ENV/lib\"\nDOTENV_FILE = \".env\"\nOPENSSL_INCLUDE_DIR = \"$FLOX_ENV/include\"\nLDFLAGS=\"-L$FLOX_ENV/lib\"\nCPPFLAGS=\"-I$FLOX_ENV/include\"\nRUSTC_WRAPPER = \"sccache\"\n# UV_PROJECT_ENVIRONMENT is set in the [hook]/[profile] scripts, not here: [vars]\n# are added without expanding $FLOX_ENV_CACHE, so flox drops it on fresh activation.\n\n# The `hook.on-activate` script is run by the *bash* shell immediately upon\n# activating an environment, and will not be invoked if Flox detects that the\n# environment has previously been activated. Variables set by the script will\n# be inherited by `[profile]` scripts defined below. Note that any stdout\n# generated by the script will be redirected to stderr.\n[hook]\non-activate = '''\nsource \"$FLOX_ENV_PROJECT/.flox/env/on-activate.sh\"\n'''\n\n# Scripts defined in the `[profile]` section are *sourced* by *your shell* and\n# inherit environment variables set in the `[vars]` section and by `[hook]` scripts.\n# The `profile.common` script is sourced by all shells and special care should be\n# taken to ensure compatibility with all shells, after which exactly one of\n# `profile.{bash,fish,tcsh,zsh}` is sourced by the corresponding shell.\n[profile]\nbash = '''\n  if [ -f \"$HOME/.bash_profile\" ]; then\n    source \"$HOME/.bash_profile\"\n    # ensure even with your shell prefs in place we know this is a Flox.dev env\n    export PS1=\"\\033[47m(flox)\\033[0m $PS1\"\n  fi\n  unset GOROOT\n  export GOTOOLCHAIN=local\n  export GOPATH=\"$FLOX_ENV_CACHE/go\"\n  export GOCACHE=\"$FLOX_ENV_CACHE/go-build\"\n  export GOMODCACHE=\"$GOPATH/pkg/mod\"\n  # Ensure flox binaries (especially Node.js) take precedence over system binaries\n  export PATH=\"$FLOX_ENV/bin:$PATH\"\n  # uv venv path \u2014 set here, not in [vars] (which can't expand $FLOX_ENV_CACHE)\n  export UV_PROJECT_ENVIRONMENT=\"$FLOX_ENV_CACHE/venv\"\n  # Recreate venv if it was deleted (on-activate only runs on first activation)\n  if [ ! -f \"$UV_PROJECT_ENVIRONMENT/bin/activate\" ]; then\n    uv sync\n    ln -sf \"$FLOX_ENV_PROJECT/bin/hogli\" \"$UV_PROJECT_ENVIRONMENT/bin/hogli\"\n  elif [ ! -L \"$UV_PROJECT_ENVIRONMENT/bin/hogli\" ] || [ ! -e \"$UV_PROJECT_ENVIRONMENT/bin/hogli\" ]; then\n    ln -sf \"$FLOX_ENV_PROJECT/bin/hogli\" \"$UV_PROJECT_ENVIRONMENT/bin/hogli\"\n  fi\n  source $UV_PROJECT_ENVIRONMENT/bin/activate\n  # Source hogli bash completions\n  [ -f \"$FLOX_ENV_CACHE/completions/hogli.bash\" ] && source \"$FLOX_ENV_CACHE/completions/hogli.bash\"\n  # Load phw worktree helper\n  [ -f \"$FLOX_ENV_PROJECT/bin/phw\" ] && source \"$FLOX_ENV_PROJECT/bin/phw\" >/dev/null\n  # Route manually-run dependency installs (uv sync, pnpm install, ...) through the dev sandbox on macOS\n  [ -f \"$FLOX_ENV_PROJECT/bin/dev-sandbox-shims\" ] && source \"$FLOX_ENV_PROJECT/bin/dev-sandbox-shims\"\n'''\nzsh = '''\n  if [[ -f \"$HOME/.zshrc\" ]]; then\n    source \"$HOME/.zshrc\"\n    # ensure even with your shell prefs in place we know this is a Flox.dev env\n    export PS1=\"%K{white}%F{black}(flox)%k%f $PS1\"\n  fi\n  unset GOROOT\n  export GOTOOLCHAIN=local\n  export GOPATH=\"$FLOX_ENV_CACHE/go\"\n  export GOCACHE=\"$FLOX_ENV_CACHE/go-build\"\n  export GOMODCACHE=\"$GOPATH/pkg/mod\"\n  # Ensure flox binaries (especially Node.js) take precedence over system binaries\n  export PATH=\"$FLOX_ENV/bin:$PATH\"\n  # uv venv path \u2014 set here, not in [vars] (which can't expand $FLOX_ENV_CACHE)\n  export UV_PROJECT_ENVIRONMENT=\"$FLOX_ENV_CACHE/venv\"\n  # Recreate venv if it was deleted (on-activate only runs on first activation)\n  if [[ ! -f \"$UV_PROJECT_ENVIRONMENT/bin/activate\" ]]; then\n    uv sync\n    ln -sf \"$FLOX_ENV_PROJECT/bin/hogli\" \"$UV_PROJECT_ENVIRONMENT/bin/hogli\"\n  elif [[ ! -L \"$UV_PROJECT_ENVIRONMENT/bin/hogli\" ]] || [[ ! -e \"$UV_PROJECT_ENVIRONMENT/bin/hogli\" ]]; then\n    ln -sf \"$FLOX_ENV_PROJECT/bin/hogli\" \"$UV_PROJECT_ENVIRONMENT/bin/hogli\"\n  fi\n  source $UV_PROJECT_ENVIRONMENT/bin/activate\n  # Add hogli completions to zsh\n  [[ -f \"$FLOX_ENV_CACHE/completions/_hogli\" ]] && fpath=(\"$FLOX_ENV_CACHE/completions\" $fpath)\n  autoload -Uz compinit && compinit -i\n  # Load phw worktree helper\n  [[ -f \"$FLOX_ENV_PROJECT/bin/phw\" ]] && source \"$FLOX_ENV_PROJECT/bin/phw\" >/dev/null\n  # Route manually-run dependency installs (uv sync, pnpm install, ...) through the dev sandbox on macOS\n  [[ -f \"$FLOX_ENV_PROJECT/bin/dev-sandbox-shims\" ]] && source \"$FLOX_ENV_PROJECT/bin/dev-sandbox-shims\"\n'''\nfish = '''\n  set -e GOROOT\n  set -gx GOTOOLCHAIN local\n  set -gx GOPATH \"$FLOX_ENV_CACHE/go\"\n  set -gx GOCACHE \"$FLOX_ENV_CACHE/go-build\"\n  set -gx GOMODCACHE \"$GOPATH/pkg/mod\"\n  # Ensure flox binaries (especially Node.js) take precedence over system binaries\n  fish_add_path -g \"$FLOX_ENV/bin\"\n  # uv venv path \u2014 set here, not in [vars] (which can't expand $FLOX_ENV_CACHE)\n  set -gx UV_PROJECT_ENVIRONMENT \"$FLOX_ENV_CACHE/venv\"\n  # Recreate venv if it was deleted (on-activate only runs on first activation)\n  if not test -f \"$UV_PROJECT_ENVIRONMENT/bin/activate.fish\"\n    uv sync\n    ln -sf \"$FLOX_ENV_PROJECT/bin/hogli\" \"$UV_PROJECT_ENVIRONMENT/bin/hogli\"\n  else if not test -L \"$UV_PROJECT_ENVIRONMENT/bin/hogli\"; or not test -e \"$UV_PROJECT_ENVIRONMENT/bin/hogli\"\n    ln -sf \"$FLOX_ENV_PROJECT/bin/hogli\" \"$UV_PROJECT_ENVIRONMENT/bin/hogli\"\n  end\n  source $UV_PROJECT_ENVIRONMENT/bin/activate.fish\n'''\ntcsh = '''\n  unsetenv GOROOT\n  setenv GOTOOLCHAIN local\n  setenv GOPATH \"$FLOX_ENV_CACHE/go\"\n  setenv GOCACHE \"$FLOX_ENV_CACHE/go-build\"\n  setenv GOMODCACHE \"$GOPATH/pkg/mod\"\n  # Ensure flox binaries (especially Node.js) take precedence over system binaries\n  setenv PATH \"$FLOX_ENV/bin:$PATH\"\n  # uv venv path \u2014 set here, not in [vars] (which can't expand $FLOX_ENV_CACHE)\n  setenv UV_PROJECT_ENVIRONMENT \"$FLOX_ENV_CACHE/venv\"\n  # Recreate venv if it was deleted (on-activate only runs on first activation)\n  if ( ! -f \"$UV_PROJECT_ENVIRONMENT/bin/activate.csh\" ) then\n    uv sync\n    ln -sf \"$FLOX_ENV_PROJECT/bin/hogli\" \"$UV_PROJECT_ENVIRONMENT/bin/hogli\"\n  else if ( ! -l \"$UV_PROJECT_ENVIRONMENT/bin/hogli\" || ! -e \"$UV_PROJECT_ENVIRONMENT/bin/hogli\" ) then\n    ln -sf \"$FLOX_ENV_PROJECT/bin/hogli\" \"$UV_PROJECT_ENVIRONMENT/bin/hogli\"\n  endif\n  source $UV_PROJECT_ENVIRONMENT/bin/activate.csh\n'''\n\n# The `[services]` section of the manifest allows you to define services.\n# Services defined here use the packages provided by the `[install]` section\n# and any variables you've defined in the `[vars]` section or `hook.on-activate` script.\n[services]\n# db.command = \"postgres -D $FLOX_ENV_CACHE/postgres\"\n\n# Additional options can be set in the `[options]` section. Refer to\n# manifest.toml(5) for a list of available options.\n[options]\nsystems = [\"aarch64-darwin\", \"aarch64-linux\", \"x86_64-darwin\", \"x86_64-linux\"]\n",
+          "manifest_excerpt": "#\n# This is a Flox environment manifest.\n# Visit flox.dev/docs/concepts/manifest/\n# or see flox-edit(1), manifest.toml(5) for more information.\n#\n# Flox manifest version managed by Flox CLI\nschema-version = \"1.10.0\"\n\n# List packages you wish to install in your environment inside\n# the `[install]` section.\n[install]\n# Python - Python itself is installed on activation via `uv sync`\nuv = { pkg-path = \"uv\", pkg-group = \"uv\", version = \"^0.11.14\" }\nxmlsec = { pkg-path = \"xmlsec\", version = \"1.3.7\" }\nfreetds = { pkg-path = \"freetds\" } # For pymssql\n# Node\nnodejs = { pkg-path = \"nodejs_24\", pkg-group = \"nodejs\", version = \"24.13.0\" } # Same maj.min ver as in Dockerfile; diverges from patch ver\n# Set a lower priority on corepack so it takes precedence over nodejs (both bundle pnpm)\n# https://flox.dev/docs/man/manifest.toml/#catalog-descriptors\ncorepack = { pkg-path = \"corepack_24\", pkg-group = \"nodejs\", version = \"24.13.0\", priority = 4 } # Same maj.min as in Dockerfile; diverges from patch ver\nbrotli = { pkg-path = \"brotli\", pkg-group = \"nodejs\" }\nzstd = { pkg-path = \"zstd\", pkg-group = \"nodejs\" }\nopenssl = { pkg-path = \"openssl\", version = \"3.4.1\", pkg-group = \"openssl\", outputs = [\"bin\", \"man\", \"dev\", \"out\"] }\nnodemon = { pkg-path = \"nodemon\" }\n# Rust toolchain (based on https://flox.dev/docs/cookbook/languages/rust/)\ncargo = { pkg-path = \"cargo\", pkg-group = \"rust-toolchain\", version = \"1.91.1\" }\nrustc = { pkg-path = \"rustc\", pkg-group = \"rust-toolchain\" }\nclippy = { pkg-path = \"clippy\", pkg-group = \"rust-toolchain\" }\nrustfmt = { pkg-path = \"rustfmt\", pkg-group = \"rust-toolchain\" }\nrust-lib-src = { pkg-path = \"rustPlatform.rustLibSrc\", pkg-group = \"rust-toolchain\" }\nlibiconv = { pkg-path = \"libiconv\", systems = [\"aarch64-darwin\"], pkg-group = \"rust-toolchain\" }\nrust-analyzer = { pkg-path = \"rust-analyzer\", pkg-group = \"rust-analyzer\" } # rust-analyzer should be isolated in its own group, details in cookbook example\nlld = { pkg-path = \"lld\", systems = [\"aarch64-darwin\"] } # Faster linker for Rust dev builds on macOS\nsccache = { pkg-path = \"sccache\" } # Compilation cache for Rust (also used in CI)\n# Go\ngo = { pkg-path = \"go\", version = \"1.25.5\", pkg-group = \"go\" }\ngolangci-lint = { pkg-path = \"golangci-lint\", pkg-group = \"go\" }\nair = { pkg-path = \"air\" }\n# CLI tools\ngit-lfs = { pkg-path = \"git-lfs\" }\nripgrep = { pkg-path = \"ripgrep\" }\nmprocs = { pkg-path = \"mprocs\" }\nutil-linux = { pkg-path = \"util-linux\" } # flock\ncmake = { pkg-path = \"cmake\", version = \"3.31.5\", pkg-group = \"cmake\" }\nsqlx-cli = { pkg-path = \"sqlx-cli\", version = \"0.8.3\" } # sqlx\npostgresql = { pkg-path = \"postgresql_14\" } # psql\nffmpeg = { pkg-path = \"ffmpeg_5\", version = \"5.1.4\", pkg-group = \"ffmpeg\" }\nprotobuf = { pkg-path = \"protobuf\" } # protoc compiler for gRPC code generation\nninja.pkg-path = \"ninja\"\nemscripten = { pkg-path = \"emscripten\", pkg-group = \"emscripten\", version = \"4.0.23\" }\nlibpthread-stubs = { pkg-path = \"libpthread-stubs\", pkg-group = \"emscripten\" }\nwatchman = { p",
+          "agent_output_excerpt": "I stopped without writing a manifest. The posthog tier2 fixture is contaminated, and running floxify on it would have produced a meaningless score.\n\n**PostHog ships its own hand-maintained Flox environment upstream.** At the pinned SHA `55525a19f353`, `.flox/env/manifest.toml` is a git-tracked, 207-line, expertly-tuned file \u2014 `sccache` as `RUSTC_WRAPPER`, `corepack_24` at a lowered priority so it beats nodejs's bundled pnpm, emscripten, watchman, `ffmpeg_5`, a separate `on-activate.sh`, plus hogli/direnv/dev-sandbox integration. `tier2.py` clones each repo at its SHA and never strips `.flox/`, so the agent under test is handed the answer key before it scans a single file.\n\nTwo things follow, and the second is the one that matters:\n\n1. **The skill's own rule fires first.** `HAS_FLOX` \u2192 audi"
+        },
+        {
+          "id": "posthog",
+          "repo_url": "https://github.com/PostHog/posthog",
+          "sha": "55525a19f353",
+          "hard_checks": {
+            "manifest_created": true,
+            "valid_toml": true,
+            "no_abs_paths": true,
+            "pins_python3": true,
+            "pins_nodejs_24": true,
+            "has_service_postgres": true,
+            "has_service_redis": true,
+            "has_service_clickhouse": false
+          },
+          "hard_pass": false,
+          "activation": {
+            "ok": true,
+            "skipped": false,
+            "notes": ""
+          },
+          "services": {
+            "postgres": {
+              "ok": true,
+              "skipped": false,
+              "notes": ""
+            },
+            "redis": {
+              "ok": true,
+              "skipped": false,
+              "notes": ""
+            },
+            "clickhouse": {
+              "ok": null,
+              "skipped": true,
+              "notes": "no [services.*] entry matches kind 'clickhouse' by name or command (see has_service_clickhouse) \u2014 nothing to probe. A hook-started process is not a Flox-managed service."
+            }
+          },
+          "verify": {
+            "violations": [
+              {
+                "rule": "leaf-datastore-not-served",
+                "severity": "hard",
+                "message": "client 'pymysql' (pyproject.toml) implies mariadb, but no [services.*] serves it"
+              },
+              {
+                "rule": "leaf-datastore-not-served",
+                "severity": "hard",
+                "message": "client 'pymongo' (pyproject.toml) implies mongodb, but no [services.*] serves it"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] pkg-config.pkg-path = \"pkg-config\" is a native build input (from rust/Dockerfile) with no `outputs` declared \u2014 check `flox show pkg-config` for non-default outputs (e.g. `dev` headers) and add `pkg-config.outputs = [...]` if the build needs them"
+              }
+            ],
+            "hard_count": 2,
+            "advisory_count": 1,
+            "catalog_checked": true
+          },
+          "judge": {
+            "score": 4,
+            "correct": true,
+            "issues": [
+              "ClickHouse is not wired as a native [services.clickhouse] block \u2014 it is brought up via docker-compose in [hook] (with a docker-availability guard), matching the golden reference's rationale, but the rubric expected a Flox service",
+              "[profile] bash/zsh/fish unconditionally `source \"$FLOX_ENV_CACHE/venv/bin/activate\"` with no existence guard \u2014 every shell entry errors if `uv sync` failed or has not yet run (golden guards with `[ -f ... ] &&`)",
+              "`uv sync --frozen` has no `|| uv sync` fallback, so a stale lockfile hard-fails activation",
+              "Scope creep beyond the primary runtimes: Go 1.25, a full Rust toolchain, and five native C-extension build inputs are installed, widening resolution surface for subpackage tooling the rubric does not require",
+              "Kafka/Zookeeper are started alongside ClickHouse in the hook \u2014 dev-tooling extras that add startup cost without being required"
+            ]
+          },
+          "manifest": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n[install]\n# --- Python: the primary runtime. pyproject.toml pins requires-python == 3.13.13\n# exactly (\"Pin full version to control Python upgrades explicitly\"), and the\n# catalog carries that exact build on all four systems.\npython313.pkg-path = \"python313\"\npython313.version = \"python3-3.13.13\"\npython313.pkg-group = \"python\"\nuv.pkg-path = \"uv\"\nuv.pkg-group = \"uv\"\n\n# --- Node: .nvmrc v24.13.0, package.json engines.node \">=24 <25\".\n# pnpm 10.29.3 comes from corepack (bundled in nodejs_24) reading the\n# packageManager field \u2014 the catalog's pnpm_10 has 10.29.2, not .3.\nnodejs_24.pkg-path = \"nodejs_24\"\nnodejs_24.version = \"24.13.0\"\nnodejs_24.pkg-group = \"nodejs\"\n\n# --- Go: `go 1.25.5` in livestream/, tools/phrocs/, bin/hobby-installer/\ngo_1_25.pkg-path = \"go_1_25\"\ngo_1_25.version = \"1.25.5\"\ngo_1_25.pkg-group = \"go\"\n\n# --- Rust: the rust/ workspace (capture, feature-flags, property-defs-rs, ...)\ncargo.pkg-path = \"cargo\"\ncargo.pkg-group = \"rust-toolchain\"\nrustc.pkg-path = \"rustc\"\nrustc.pkg-group = \"rust-toolchain\"\nclippy.pkg-path = \"clippy\"\nclippy.pkg-group = \"rust-toolchain\"\nrustfmt.pkg-path = \"rustfmt\"\nrustfmt.pkg-group = \"rust-toolchain\"\n\n# --- Datastores, served as Flox services below.\n# postgres:15.12-alpine and redis:7.2-alpine per docker-compose.base.yml.\npostgresql_15.pkg-path = \"postgresql_15\"\npostgresql_15.version = \"15.12\"\npostgresql_15.pkg-group = \"postgres\"\nredis.pkg-path = \"redis\"\nredis.version = \"7.2.7\"\nredis.pkg-group = \"redis\"\n\n# --- Native build inputs for Python C extensions.\n# `out` is NOT a default output on openssl/libxml2/libxslt (only bin/man are),\n# so the shared libs these link against are absent unless listed explicitly.\npkg-config.pkg-path = \"pkg-config\"\nopenssl.pkg-path = \"openssl\"\nopenssl.outputs = [\"bin\", \"dev\", \"out\"]\nlibxml2.pkg-path = \"libxml2\"          # lxml==6.0.2, xmlsec\nlibxml2.outputs = [\"bin\", \"dev\", \"out\"]\nlibxslt.pkg-path = \"libxslt\"          # lxml==6.0.2, xmlsec\nlibxslt.outputs = [\"bin\", \"dev\", \"out\"]\nxmlsec.pkg-path = \"xmlsec\"            # xmlsec==1.3.17 (SAML)\nxmlsec.outputs = [\"out\", \"dev\"]\nfreetds.pkg-path = \"freetds\"          # pymssql==2.3.5\n\n# --- ClickHouse / Kafka / Zookeeper stay on docker-compose (see [hook]).\ndocker-compose.pkg-path = \"docker-compose\"\n\n[vars]\nDEBUG = \"1\"\n\n# Postgres \u2014 posthog/settings/data_stores.py defaults PGHOST to the compose\n# hostname \"db\"; point it at the Flox service instead.\nPGHOST = \"127.0.0.1\"\nPGPORT = \"5432\"\nPGUSER = \"posthog\"\nPGPASSWORD = \"posthog\"\nPGDATABASE = \"posthog\"\nDATABASE_URL = \"postgres://posthog:posthog@127.0.0.1:5432/posthog\"\n\n# Redis \u2014 settings default is \"redis://redis7/\" (the compose hostname).\nREDIS_URL = \"redis://127.0.0.1:6379/\"\nREDIS_PORT = \"6379\"\n\n# ClickHouse \u2014 served by docker-compose. CLICKHOUSE_DATABASE defaults to\n# \"default\", where PostHog has no tables; the compose stack uses \"posthog\".\nCLICKHOUSE_HOST = \"localhost\"\nCLICKHOUSE_DATABASE = \"posthog\"\nCLICKHOUSE_USER = \"default\"\nCLICKHOUSE_PASSWORD = \"\"\n\n[hook]\non-activate = '''\n  # --- Python (uv workspace; uv.lock present)\n  export UV_PROJECT_ENVIRONMENT=\"$FLOX_ENV_CACHE/venv\"\n  uv sync --frozen >&2\n\n  # --- Node / pnpm 10.29.3 via corepack, into a writable dir\n  # (the node prefix itself is read-only).\n  export COREPACK_HOME=\"$FLOX_ENV_CACHE/corepack\"\n  mkdir -p \"$FLOX_ENV_CACHE/node-bin\"\n  corepack enable --install-directory \"$FLOX_ENV_CACHE/node-bin\" pnpm >&2 2>/dev/null || true\n  export PATH=\"$FLOX_ENV_CACHE/node-bin:$PATH\"\n\n  # --- Go\n  export GOPATH=\"$FLOX_ENV_CACHE/go\"\n  export GOCACHE=\"$FLOX_ENV_CACHE/go-build\"\n  export GOMODCACHE=\"$GOPATH/pkg/mod\"\n  export GOTOOLCHAIN=local\n  mkdir -p \"$GOPATH\" \"$GOCACHE\" \"$GOMODCACHE\"\n\n  # --- Rust\n  export CARGO_HOME=\"$FLOX_ENV_CACHE/cargo\"\n  export CARGO_TARGET_DIR=\"$FLOX_ENV_CACHE/target\"\n  mkdir -p \"$CARGO_HOME\" \"$CARGO_TARGET_DIR\"\n\n  # --- Postgres cluster (first activation only)\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" \\\n      --username=\"$PGUSER\" \\\n      --auth=trust \\\n      --no-locale \\\n      --encoding=UTF8 >&2\n    pg_ctl -D \"$PGDATA\" -o \"-p $PGPORT -k /tmp\" -l \"$PGDATA/init.log\" start >&2\n    until pg_isready -h 127.0.0.1 -p \"$PGPORT\" -q; do sleep 0.2; done\n    createdb -h 127.0.0.1 -p \"$PGPORT\" -U \"$PGUSER\" \"$PGDATABASE\"\n    pg_ctl -D \"$PGDATA\" stop -m fast >&2\n  fi\n  mkdir -p \"$FLOX_ENV_CACHE/redis\"\n\n  # --- ClickHouse / Kafka / Zookeeper: these mount server config\n  # (docker/clickhouse/config.xml, users-dev.xml, user_defined_function.xml)\n  # and depend on one another, so they stay on docker-compose rather than\n  # becoming bare Flox services.\n  if command -v docker >/dev/null && docker info >/dev/null 2>&1; then\n    docker-compose -f docker-compose.dev.yml up -d clickhouse kafka zookeeper 2>&1 | tail -5 >&2\n  else\n    echo \"\u26a0  Docker not running \u2014 ClickHouse/Kafka unavailable. Start Docker, then: docker-compose -f docker-compose.dev.yml up -d clickhouse kafka zookeeper\" >&2\n  fi\n'''\n\n[profile]\ncommon = '''\n  export UV_PROJECT_ENVIRONMENT=\"$FLOX_ENV_CACHE/venv\"\n  export PATH=\"$FLOX_ENV_CACHE/node-bin:$PATH\"\n'''\nbash = '''\n  export GOPATH=\"$FLOX_ENV_CACHE/go\"\n  export CARGO_HOME=\"$FLOX_ENV_CACHE/cargo\"\n  export PATH=\"$GOPATH/bin:$CARGO_HOME/bin:$PATH\"\n  source \"$FLOX_ENV_CACHE/venv/bin/activate\"\n'''\nzsh = '''\n  export GOPATH=\"$FLOX_ENV_CACHE/go\"\n  export CARGO_HOME=\"$FLOX_ENV_CACHE/cargo\"\n  export PATH=\"$GOPATH/bin:$CARGO_HOME/bin:$PATH\"\n  source \"$FLOX_ENV_CACHE/venv/bin/activate\"\n'''\nfish = '''\n  set -gx GOPATH \"$FLOX_ENV_CACHE/go\"\n  set -gx CARGO_HOME \"$FLOX_ENV_CACHE/cargo\"\n  fish_add_path \"$GOPATH/bin\" \"$CARGO_HOME/bin\"\n  source \"$FLOX_ENV_CACHE/venv/bin/activate.fish\"\n'''\n\n[services.postgres]\ncommand = '''\n  exec postgres \\\n    -D \"$PGDATA\" \\\n    -p \"$PGPORT\" \\\n    -k /tmp \\\n    -c listen_addresses=\"$PGHOST\" \\\n    -c max_connections=1000 \\\n    -c idle_in_transaction_session_timeout=300000 \\\n    -c max_prepared_transactions=10\n'''\n\n[services.redis]\ncommand = '''\n  exec redis-server \\\n    --port \"$REDIS_PORT\" \\\n    --dir \"$FLOX_ENV_CACHE/redis\" \\\n    --maxmemory-policy allkeys-lru \\\n    --maxmemory 200mb \\\n    --save \"\" \\\n    --appendonly no\n'''\n\n[options]\n# x86_64-darwin (Intel Mac) is omitted deliberately: the catalog's current\n# builds of openssl, uv, cargo/rustc and docker-compose have dropped it, so\n# declaring it would break resolution on every other platform's behalf.\n# Apple Silicon and Linux are fully covered.\nsystems = [\"aarch64-darwin\", \"aarch64-linux\", \"x86_64-linux\"]\n",
+          "manifest_excerpt": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n[install]\n# --- Python: the primary runtime. pyproject.toml pins requires-python == 3.13.13\n# exactly (\"Pin full version to control Python upgrades explicitly\"), and the\n# catalog carries that exact build on all four systems.\npython313.pkg-path = \"python313\"\npython313.version = \"python3-3.13.13\"\npython313.pkg-group = \"python\"\nuv.pkg-path = \"uv\"\nuv.pkg-group = \"uv\"\n\n# --- Node: .nvmrc v24.13.0, package.json engines.node \">=24 <25\".\n# pnpm 10.29.3 comes from corepack (bundled in nodejs_24) reading the\n# packageManager field \u2014 the catalog's pnpm_10 has 10.29.2, not .3.\nnodejs_24.pkg-path = \"nodejs_24\"\nnodejs_24.version = \"24.13.0\"\nnodejs_24.pkg-group = \"nodejs\"\n\n# --- Go: `go 1.25.5` in livestream/, tools/phrocs/, bin/hobby-installer/\ngo_1_25.pkg-path = \"go_1_25\"\ngo_1_25.version = \"1.25.5\"\ngo_1_25.pkg-group = \"go\"\n\n# --- Rust: the rust/ workspace (capture, feature-flags, property-defs-rs, ...)\ncargo.pkg-path = \"cargo\"\ncargo.pkg-group = \"rust-toolchain\"\nrustc.pkg-path = \"rustc\"\nrustc.pkg-group = \"rust-toolchain\"\nclippy.pkg-path = \"clippy\"\nclippy.pkg-group = \"rust-toolchain\"\nrustfmt.pkg-path = \"rustfmt\"\nrustfmt.pkg-group = \"rust-toolchain\"\n\n# --- Datastores, served as Flox services below.\n# postgres:15.12-alpine and redis:7.2-alpine per docker-compose.base.yml.\npostgresql_15.pkg-path = \"postgresql_15\"\npostgresql_15.version = \"15.12\"\npostgresql_15.pkg-group = \"postgres\"\nredis.pkg-path = \"redis\"\nredis.version = \"7.2.7\"\nredis.pkg-group = \"redis\"\n\n# --- Native build inputs for Python C extensions.\n# `out` is NOT a default output on openssl/libxml2/libxslt (only bin/man are),\n# so the shared libs these link against are absent unless listed explicitly.\npkg-config.pkg-path = \"pkg-config\"\nopenssl.pkg-path = \"openssl\"\nopenssl.outputs = [\"bin\", \"dev\", \"out\"]\nlibxml2.pkg-path = \"libxml2\"          # lxml==6.0.2, xmlsec\nlibxml2.outputs = [\"bin\", \"dev\", \"out\"]\nlibxslt.pkg-path = \"libxslt\"          # lxml==6.0.2, xmlsec\nlibxslt.outputs = [\"bin\", \"dev\", \"out\"]\nxmlsec.pkg-path = \"xmlsec\"            # xmlsec==1.3.17 (SAML)\nxmlsec.outputs = [\"out\", \"dev\"]\nfreetds.pkg-path = \"freetds\"          # pymssql==2.3.5\n\n# --- ClickHouse / Kafka / Zookeeper stay on docker-compose (see [hook]).\ndocker-compose.pkg-path = \"docker-compose\"\n\n[vars]\nDEBUG = \"1\"\n\n# Postgres \u2014 posthog/settings/data_stores.py defaults PGHOST to the compose\n# hostname \"db\"; point it at the Flox service instead.\nPGHOST = \"127.0.0.1\"\nPGPORT = \"5432\"\nPGUSER = \"posthog\"\nPGPASSWORD = \"posthog\"\nPGDATABASE = \"posthog\"\nDATABASE_URL = \"postgres://posthog:posthog@127.0.0.1:5432/posthog\"\n\n# Redis \u2014 settings default is \"redis://redis7/\" (the compose hostname).\nREDIS_URL = \"redis://127.0.0.1:6379/\"\nREDIS_PORT = \"6379\"\n\n# ClickHouse \u2014 served by docker-compose. CLICKHOUSE_DATABASE defaults to\n# \"default\", where PostHog has no tables; the compose stack uses \"posthog\".\nCLICKHOUSE_HOST = \"localhost\"\nCLICKHOUSE_DATABASE = \"posthog\"\nCLICKHOUSE_USER = \"default\"\nCLICKHOUSE_PASSW",
+          "agent_output_excerpt": "Containers cleaned up. All four verification steps pass.\n\n```\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502  posthog  is now Flox-enabled                                   \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n\u2713  Flox manages  (16 packages \u2014 pinned, same on every machine)\n   python 3.13.13    \u2190 pyproject.toml requires-python ==3.13.13\n   node 24.13.0      \u2190 .nvmrc (engines.node \">=24 <25\")\n   go 1.25.5         \u2190 go.mod \u00d7 3 (livestream, phrocs, hobby-installer)\n   cargo 1.95.0      \u2190 rust/ workspace\n   postgres 15.12    \u2190 docker-compose.base.yml (postgres:15.12-alpine)\n   redis 7.2.7       \u2190 docker-compose.base.yml (redis:7.2-alpine)\n   uv \u00b7 pkg-config \u00b7 openssl \u00b7 libxml2 \u00b7 libxslt \u00b7 xmlsec \u00b7 freetds \u00b7 docker-compose\n\n\u2713  Installs auto"
+        },
+        {
+          "id": "posthog",
+          "repo_url": "https://github.com/PostHog/posthog",
+          "sha": "55525a19f353",
+          "hard_checks": {
+            "manifest_created": true,
+            "valid_toml": true,
+            "no_abs_paths": true,
+            "pins_python3": true,
+            "pins_nodejs_24": true,
+            "has_service_postgres": true,
+            "has_service_redis": true,
+            "has_service_clickhouse": false
+          },
+          "hard_pass": false,
+          "activation": {
+            "ok": true,
+            "skipped": false,
+            "notes": ""
+          },
+          "services": {
+            "postgres": {
+              "ok": true,
+              "skipped": false,
+              "notes": ""
+            },
+            "redis": {
+              "ok": true,
+              "skipped": false,
+              "notes": ""
+            },
+            "clickhouse": {
+              "ok": null,
+              "skipped": true,
+              "notes": "no [services.*] entry matches kind 'clickhouse' by name or command (see has_service_clickhouse) \u2014 nothing to probe. A hook-started process is not a Flox-managed service."
+            }
+          },
+          "verify": {
+            "violations": [
+              {
+                "rule": "leaf-datastore-not-served",
+                "severity": "hard",
+                "message": "client 'pymysql' (pyproject.toml) implies mariadb, but no [services.*] serves it"
+              },
+              {
+                "rule": "leaf-datastore-not-served",
+                "severity": "hard",
+                "message": "client 'pymongo' (pyproject.toml) implies mongodb, but no [services.*] serves it"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] python313.pkg-path = \"python313\" (version python3-3.13.14) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "python313",
+                "install_id": "python313"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] pkg-config.pkg-path = \"pkg-config\" is a native build input (from rust/Dockerfile) with no `outputs` declared \u2014 check `flox show pkg-config` for non-default outputs (e.g. `dev` headers) and add `pkg-config.outputs = [...]` if the build needs them"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] cmake.pkg-path = \"cmake\" is a native build input (from rust/Dockerfile) with no `outputs` declared \u2014 check `flox show cmake` for non-default outputs (e.g. `dev` headers) and add `cmake.outputs = [...]` if the build needs them"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] gcc.pkg-path = \"gcc\" is a native build input (from services/llm-gateway/Dockerfile) with no `outputs` declared \u2014 check `flox show gcc` for non-default outputs (e.g. `dev` headers) and add `gcc.outputs = [...]` if the build needs them"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] gnumake.pkg-path = \"gnumake\" is a native build input (from services/llm-gateway/Dockerfile) with no `outputs` declared \u2014 check `flox show gnumake` for non-default outputs (e.g. `dev` headers) and add `gnumake.outputs = [...]` if the build needs them"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] protobuf.pkg-path = \"protobuf\" is a native build input (from rust/Dockerfile) with no `outputs` declared \u2014 check `flox show protobuf` for non-default outputs (e.g. `dev` headers) and add `protobuf.outputs = [...]` if the build needs them"
+              }
+            ],
+            "hard_count": 3,
+            "advisory_count": 5,
+            "catalog_checked": true
+          },
+          "judge": {
+            "score": 4,
+            "correct": true,
+            "issues": [
+              "Confirmed catalog violation: python313 has no x86_64-darwin build, but options.systems declares x86_64-darwin \u2014 env cannot resolve on Intel macOS (the golden reference excludes that system for this reason); the inline comment claiming 3.13.13 is 'all-4-platform' is contradicted by the live catalog",
+              "No [services.clickhouse] block \u2014 ClickHouse is delegated to docker-compose in [hook] rather than wired as a native Flox service (same tradeoff the golden reference makes, and justified in-comment by the config.xml/kafka/zookeeper dependencies, so only lightly penalized)",
+              "[profile] bash/zsh source \"$FLOX_ENV_CACHE/venv/bin/activate\" unguarded \u2014 errors on shell entry before the first uv sync completes (golden guards with [ -f ... ] &&)",
+              "Postgres cluster init happens in [hook] on-activate rather than inside [services.postgres], so activation does real DB bootstrap work even when services are never started"
+            ]
+          },
+          "manifest": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n## PostHog \u2014 Django/Celery backend + React frontend (pnpm workspaces), with Go\n## and Rust sub-services. Flox pins the language runtimes and the system\n## libraries the native Python wheels need; uv and pnpm install the actual\n## packages on activate. Postgres and Redis run as Flox services. ClickHouse,\n## Kafka and Zookeeper stay on docker-compose \u2014 see the note in [hook] below.\n##\n## Version pins are exact on purpose: for several of these packages only the\n## NEWEST catalog build has dropped x86_64-darwin, so pinning the version the\n## repo actually asks for is also what keeps Intel macOS resolving.\n\n[install]\n# --- Primary runtimes ---------------------------------------------------\n# pyproject.toml: requires-python = \"==3.13.13\" (also .github/workflows/ci-python.yml,\n# Dockerfile FROM python:3.13.13-slim-bookworm). 3.13.14 is catalog-latest but has\n# no x86_64-darwin build; 3.13.13 is both the repo's pin and all-4-platform.\npython313.pkg-path = \"python313\"\npython313.version = \"python3-3.13.13\"\npython313.pkg-group = \"python\"\n\n# uv.lock present -> uv sync owns the Python packages. Newest uv (0.11.26) is\n# aarch64-darwin/linux-only; 0.11.25 still builds on x86_64-darwin.\nuv.pkg-path = \"uv\"\nuv.version = \"0.11.25\"\nuv.pkg-group = \"python\"\n\n# .nvmrc: v24.13.0 (package.json engines.node \">=24 <25\", Dockerfile.node FROM node:24.13.0)\nnodejs_24.pkg-path = \"nodejs_24\"\nnodejs_24.version = \"24.13.0\"\nnodejs_24.pkg-group = \"nodejs\"\n\n# package.json packageManager = \"pnpm@10.29.3\". The catalog's own pnpm starts at\n# 11.x \u2014 too new for that pin \u2014 so corepack provisions the exact 10.29.3 instead.\n# Lower priority than nodejs because both packages ship pnpm/npm shims.\ncorepack_24.pkg-path = \"corepack_24\"\ncorepack_24.version = \"24.13.0\"\ncorepack_24.pkg-group = \"nodejs\"\ncorepack_24.priority = 4\n\n# --- Secondary runtimes (monorepo sub-services) -------------------------\n# livestream/, tools/phrocs/, bin/hobby-installer/ each carry a go.mod;\n# CI (.github/workflows/ci-livestream-tui.yml) pins setup-go 1.25.5.\ngo_1_25.pkg-path = \"go_1_25\"\ngo_1_25.version = \"1.25.5\"\ngo_1_25.pkg-group = \"go\"\n\n# rust/ workspace \u2014 rust/Dockerfile FROM rust:1.91-bookworm\ncargo.pkg-path = \"cargo\"\ncargo.version = \"1.91.1\"\ncargo.pkg-group = \"rust\"\nrustc.pkg-path = \"rustc\"\nrustc.version = \"1.91.1\"\nrustc.pkg-group = \"rust\"\n\n# --- Datastores (run as Flox services below) ----------------------------\n# docker-compose.base.yml db: postgres:15.12-alpine. Catalog's 15 line starts at\n# 15.15, so this resolves to 15.18 \u2014 same major, newer patch. Also supplies\n# psql and pg_config.\npostgresql_15.pkg-path = \"postgresql_15\"\n\n# docker-compose.base.yml redis7: redis:7.2-alpine. Held a major behind the\n# catalog default (8.x), so it needs its own group to resolve.\nredis.pkg-path = \"redis\"\nredis.version = \"7.2.7\"\nredis.pkg-group = \"redis\"\n\n# --- Starts the services Flox does not own (see [hook]) -----------------\n# Newest build (5.3.1) has no x86_64-darwin; 5.3.0 does.\ndocker-compose.pkg-path = \"docker-compose\"\ndocker-compose.version = \"5.3.0\"\ndocker-compose.pkg-group = \"docker-compose\"\n\n# --- System libraries for native Python wheels --------------------------\n# pyproject.toml xmlsec==1.3.17 builds against libxmlsec1; needs the dev headers.\nxmlsec.pkg-path = \"xmlsec\"\nxmlsec.outputs = [\"out\", \"dev\"]\n# pyproject.toml lxml==6.0.2. libxml2's `out` is NOT a default output, and it is\n# the one holding the shared library, so name both explicitly.\nlibxml2.pkg-path = \"libxml2\"\nlibxml2.outputs = [\"out\", \"dev\"]\nlibxslt.pkg-path = \"libxslt\"\nlibxslt.outputs = [\"out\", \"dev\"]\n# pyproject.toml pymssql==2.3.5\nfreetds.pkg-path = \"freetds\"\n# The prebuilt manylinux wheels link against the system C/C++ runtime, which a\n# Flox env does not inherit from the host. Verified by import, not by guesswork:\n# psycopg2-binary and pymssql need libz.so.1, grpcio needs libstdc++.so.6.\nzlib.pkg-path = \"zlib\"\n# libstdc++.so.6 lives in gcc-unwrapped's `lib` output, which is NOT installed\n# by default \u2014 naming it explicitly is the whole point of this entry.\ngcc-unwrapped.pkg-path = \"gcc-unwrapped\"\ngcc-unwrapped.outputs = [\"lib\"]\n\n# --- Build toolchain ----------------------------------------------------\n# rust/Dockerfile: apt-get install build-essential cmake libssl-dev pkg-config\n# protobuf-compiler. Corroborated by rust/Cargo.lock: openssl-sys (-> openssl),\n# prost-build/tonic-build (-> protoc), rdkafka-sys + librocksdb-sys (-> cmake).\npkg-config.pkg-path = \"pkg-config\"\ncmake.pkg-path = \"cmake\"\ngcc.pkg-path = \"gcc\"\ngnumake.pkg-path = \"gnumake\"\n# openssl and protobuf both lose x86_64-darwin on their newest build, so both are\n# pinned one back \u2014 and each gets its own group, since a pinned-back version can\n# no longer share a catalog page with the unpinned packages above.\nopenssl.pkg-path = \"openssl\"\nopenssl.version = \"3.6.2\"\nopenssl.outputs = [\"out\", \"dev\", \"bin\"]\nopenssl.pkg-group = \"openssl\"\nprotobuf.pkg-path = \"protobuf\"\nprotobuf.version = \"34.1\"\nprotobuf.pkg-group = \"protobuf\"\n\n[vars]\n# posthog/settings/data_stores.py defaults PGHOST to \"db\" and CLICKHOUSE_HOST to\n# \"clickhouse\" \u2014 the docker-compose service names. Point them at localhost so the\n# Flox services and the compose-published ports are what Django actually finds.\nDEBUG = \"1\"\nPGHOST = \"127.0.0.1\"\nPGPORT = \"5432\"\nPGUSER = \"posthog\"\nPGPASSWORD = \"posthog\"\nPGDATABASE = \"posthog\"\nDATABASE_URL = \"postgres://posthog:posthog@127.0.0.1:5432/posthog\"\nREDIS_URL = \"redis://127.0.0.1:6379/\"\nCLICKHOUSE_HOST = \"127.0.0.1\"\nCLICKHOUSE_DATABASE = \"posthog\"\nKAFKA_HOSTS = \"127.0.0.1:9092\"\nOBJECT_STORAGE_ENDPOINT = \"http://127.0.0.1:19000\"\nSKIP_SERVICE_VERSION_REQUIREMENTS = \"1\"\nUV_PYTHON_DOWNLOADS = \"never\"\n\n[hook]\non-activate = \"\"\"\n  # --- Python (uv owns the packages; Flox owns the interpreter) ---------\n  # UV_PYTHON_DOWNLOADS=never ([vars]) stops uv fetching its own interpreter,\n  # so the venv is built against the python313 pinned above.\n  export UV_PROJECT_ENVIRONMENT=\"$FLOX_ENV_CACHE/venv\"\n  export UV_PYTHON=\"$FLOX_ENV/bin/python3.13\"\n  if [ ! -d \"$UV_PROJECT_ENVIRONMENT\" ] || [ uv.lock -nt \"$UV_PROJECT_ENVIRONMENT\" ]; then\n    echo \"flox: syncing Python dependencies (first run takes a few minutes)...\" >&2\n    uv sync --frozen >&2\n  fi\n\n  # --- Node / pnpm ------------------------------------------------------\n  # corepack pins pnpm to package.json's packageManager field. It needs a\n  # writable install dir \u2014 the node prefix itself is read-only.\n  export COREPACK_HOME=\"$FLOX_ENV_CACHE/corepack\"\n  export PNPM_HOME=\"$FLOX_ENV_CACHE/pnpm\"\n  mkdir -p \"$FLOX_ENV_CACHE/node-bin\" \"$COREPACK_HOME\" \"$PNPM_HOME\"\n  corepack enable --install-directory \"$FLOX_ENV_CACHE/node-bin\" pnpm 2>/dev/null >&2 || true\n  export PATH=\"$FLOX_ENV_CACHE/node-bin:$PATH\"\n  if [ ! -d node_modules ] || [ pnpm-lock.yaml -nt node_modules ]; then\n    echo \"flox: installing pnpm workspaces...\" >&2\n    pnpm install --frozen-lockfile --silent >&2\n  fi\n\n  # --- Go (3 modules: livestream, tools/phrocs, bin/hobby-installer) ----\n  export GOPATH=\"$FLOX_ENV_CACHE/go\"\n  export GOCACHE=\"$FLOX_ENV_CACHE/go/cache\"\n  export GOMODCACHE=\"$FLOX_ENV_CACHE/go/pkg/mod\"\n  mkdir -p \"$GOPATH\" \"$GOCACHE\" \"$GOMODCACHE\"\n\n  # --- Rust (rust/ workspace) ------------------------------------------\n  export CARGO_HOME=\"$FLOX_ENV_CACHE/cargo\"\n  export CARGO_TARGET_DIR=\"$FLOX_ENV_CACHE/target\"\n  mkdir -p \"$CARGO_HOME\" \"$CARGO_TARGET_DIR\"\n\n  # --- Postgres cluster -------------------------------------------------\n  # Ports what docker-compose.base.yml's db service does: same user/db, plus the\n  # docker/postgres-init-scripts/ it mounts into docker-entrypoint-initdb.d\n  # (they create the cyclotron/persons/product/... databases PostHog needs).\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" \\\n      --username=\"$PGUSER\" \\\n      --auth=trust \\\n      --no-locale \\\n      --encoding=UTF8 >&2\n    pg_ctl -D \"$PGDATA\" -o \"-p $PGPORT -k /tmp\" -l \"$PGDATA/init.log\" start >&2\n    until pg_isready -h \"$PGHOST\" -p \"$PGPORT\" -q; do sleep 0.2; done\n    createdb -h \"$PGHOST\" -p \"$PGPORT\" -U \"$PGUSER\" \"$PGDATABASE\" >&2\n    for script in \"$FLOX_ENV_PROJECT\"/docker/postgres-init-scripts/*.sh; do\n      [ -f \"$script\" ] || continue\n      POSTGRES_USER=\"$PGUSER\" PRODUCTS_DIR=\"$FLOX_ENV_PROJECT/products\" \\\n        sh \"$script\" >&2 || echo \"flox: init script $(basename \"$script\") failed \u2014 continuing\" >&2\n    done\n    pg_ctl -D \"$PGDATA\" stop -m fast >&2\n  fi\n  mkdir -p \"$FLOX_ENV_CACHE/redis\"\n\n  # --- Services Flox does not own --------------------------------------\n  # PostHog's ClickHouse mounts docker/clickhouse/config.xml + config.d and\n  # depends_on kafka + zookeeper, so a bare catalog package cannot stand in for\n  # it. Leave those three (plus objectstorage) with the compose stack that\n  # already configures them.\n  if command -v docker >/dev/null && docker info >/dev/null 2>&1; then\n    docker-compose -f docker-compose.dev.yml up -d \\\n      clickhouse kafka zookeeper objectstorage 2>&1 | tail -5 >&2\n  else\n    echo \"flox: Docker not running \u2014 ClickHouse/Kafka/Zookeeper/object storage not started.\" >&2\n    echo \"      Start Docker Desktop, then: docker compose -f docker-compose.dev.yml up -d\" >&2\n  fi\n\"\"\"\n\n[profile]\nbash = \"\"\"\n  source \"$FLOX_ENV_CACHE/venv/bin/activate\"\n  export PATH=\"$FLOX_ENV_CACHE/node-bin:$FLOX_ENV_CACHE/go/bin:$FLOX_ENV_CACHE/cargo/bin:$PATH\"\n\"\"\"\nzsh = \"\"\"\n  source \"$FLOX_ENV_CACHE/venv/bin/activate\"\n  export PATH=\"$FLOX_ENV_CACHE/node-bin:$FLOX_ENV_CACHE/go/bin:$FLOX_ENV_CACHE/cargo/bin:$PATH\"\n\"\"\"\nfish = \"\"\"\n  source \"$FLOX_ENV_CACHE/venv/bin/activate.fish\"\n  fish_add_path \"$FLOX_ENV_CACHE/node-bin\" \"$FLOX_ENV_CACHE/go/bin\" \"$FLOX_ENV_CACHE/cargo/bin\"\n\"\"\"\n\n# docker-compose.base.yml db: postgres:15.12-alpine; the dev override publishes 5432\n# and raises max_connections for the idle transactions the Django dev server leaves open.\n[services.postgres]\ncommand = \"\"\"\n  exec postgres \\\n    -D \"$PGDATA\" \\\n    -p \"$PGPORT\" \\\n    -k /tmp \\\n    -c listen_addresses=\"$PGHOST\" \\\n    -c max_connections=1000 \\\n    -c idle_in_transaction_session_timeout=300000 \\\n    -c max_prepared_transactions=10\n\"\"\"\n\n# docker-compose.base.yml redis7: redis:7.2-alpine, same maxmemory policy.\n[services.redis]\ncommand = \"\"\"\n  exec redis-server \\\n    --port 6379 \\\n    --dir \"$FLOX_ENV_CACHE/redis\" \\\n    --maxmemory-policy allkeys-lru \\\n    --maxmemory 200mb \\\n    --save \"\" \\\n    --appendonly no\n\"\"\"\n\n[options]\nsystems = [\"aarch64-darwin\", \"aarch64-linux\", \"x86_64-darwin\", \"x86_64-linux\"]\n",
+          "manifest_excerpt": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n## PostHog \u2014 Django/Celery backend + React frontend (pnpm workspaces), with Go\n## and Rust sub-services. Flox pins the language runtimes and the system\n## libraries the native Python wheels need; uv and pnpm install the actual\n## packages on activate. Postgres and Redis run as Flox services. ClickHouse,\n## Kafka and Zookeeper stay on docker-compose \u2014 see the note in [hook] below.\n##\n## Version pins are exact on purpose: for several of these packages only the\n## NEWEST catalog build has dropped x86_64-darwin, so pinning the version the\n## repo actually asks for is also what keeps Intel macOS resolving.\n\n[install]\n# --- Primary runtimes ---------------------------------------------------\n# pyproject.toml: requires-python = \"==3.13.13\" (also .github/workflows/ci-python.yml,\n# Dockerfile FROM python:3.13.13-slim-bookworm). 3.13.14 is catalog-latest but has\n# no x86_64-darwin build; 3.13.13 is both the repo's pin and all-4-platform.\npython313.pkg-path = \"python313\"\npython313.version = \"python3-3.13.13\"\npython313.pkg-group = \"python\"\n\n# uv.lock present -> uv sync owns the Python packages. Newest uv (0.11.26) is\n# aarch64-darwin/linux-only; 0.11.25 still builds on x86_64-darwin.\nuv.pkg-path = \"uv\"\nuv.version = \"0.11.25\"\nuv.pkg-group = \"python\"\n\n# .nvmrc: v24.13.0 (package.json engines.node \">=24 <25\", Dockerfile.node FROM node:24.13.0)\nnodejs_24.pkg-path = \"nodejs_24\"\nnodejs_24.version = \"24.13.0\"\nnodejs_24.pkg-group = \"nodejs\"\n\n# package.json packageManager = \"pnpm@10.29.3\". The catalog's own pnpm starts at\n# 11.x \u2014 too new for that pin \u2014 so corepack provisions the exact 10.29.3 instead.\n# Lower priority than nodejs because both packages ship pnpm/npm shims.\ncorepack_24.pkg-path = \"corepack_24\"\ncorepack_24.version = \"24.13.0\"\ncorepack_24.pkg-group = \"nodejs\"\ncorepack_24.priority = 4\n\n# --- Secondary runtimes (monorepo sub-services) -------------------------\n# livestream/, tools/phrocs/, bin/hobby-installer/ each carry a go.mod;\n# CI (.github/workflows/ci-livestream-tui.yml) pins setup-go 1.25.5.\ngo_1_25.pkg-path = \"go_1_25\"\ngo_1_25.version = \"1.25.5\"\ngo_1_25.pkg-group = \"go\"\n\n# rust/ workspace \u2014 rust/Dockerfile FROM rust:1.91-bookworm\ncargo.pkg-path = \"cargo\"\ncargo.version = \"1.91.1\"\ncargo.pkg-group = \"rust\"\nrustc.pkg-path = \"rustc\"\nrustc.version = \"1.91.1\"\nrustc.pkg-group = \"rust\"\n\n# --- Datastores (run as Flox services below) ----------------------------\n# docker-compose.base.yml db: postgres:15.12-alpine. Catalog's 15 line starts at\n# 15.15, so this resolves to 15.18 \u2014 same major, newer patch. Also supplies\n# psql and pg_config.\npostgresql_15.pkg-path = \"postgresql_15\"\n\n# docker-compose.base.yml redis7: redis:7.2-alpine. Held a major behind the\n# catalog default (8.x), so it needs its own group to resolve.\nredis.pkg-path = \"redis\"\nredis.version = \"7.2.7\"\nredis.pkg-group = \"redis\"\n\n# --- Starts the services Flox does not own (see [hook]) -----------------\n# Newest build (5.3.1) has no x86_64-darwin; ",
+          "agent_output_excerpt": "```\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502  posthog  is now Flox-enabled                                   \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n\u2713  Flox manages  (22 packages \u2014 pinned, same on every machine)\n   python 3.13.13    \u2190 pyproject.toml requires-python \"==3.13.13\"\n   node 24.13.0      \u2190 .nvmrc (v24.13.0), engines.node \">=24 <25\"\n   pnpm 10.29.3      \u2190 packageManager field, via corepack\n   go 1.25.5         \u2190 CI setup-go (livestream/, tools/phrocs/, bin/hobby-installer/)\n   cargo/rustc 1.91  \u2190 rust/Dockerfile FROM rust:1.91-bookworm\n   postgresql 15.18  \u2190 docker-compose db: postgres:15.12-alpine\n   redis 7.2.7       \u2190 docker-compose redis7: redis:7.2-alpine\n   uv \u00b7 docker-compose \u00b7 xmlsec \u00b7 libxml2 \u00b7 libxslt \u00b7 freetds "
+        },
+        {
+          "id": "posthog",
+          "repo_url": "https://github.com/PostHog/posthog",
+          "sha": "55525a19f353",
+          "hard_checks": {
+            "manifest_created": true,
+            "valid_toml": true,
+            "no_abs_paths": true,
+            "pins_python3": true,
+            "pins_nodejs_24": true,
+            "has_service_postgres": true,
+            "has_service_redis": true,
+            "has_service_clickhouse": false
+          },
+          "hard_pass": false,
+          "activation": {
+            "ok": true,
+            "skipped": false,
+            "notes": ""
+          },
+          "services": {
+            "postgres": {
+              "ok": true,
+              "skipped": false,
+              "notes": ""
+            },
+            "redis": {
+              "ok": true,
+              "skipped": false,
+              "notes": ""
+            },
+            "clickhouse": {
+              "ok": null,
+              "skipped": true,
+              "notes": "no [services.*] entry matches kind 'clickhouse' by name or command (see has_service_clickhouse) \u2014 nothing to probe. A hook-started process is not a Flox-managed service."
+            }
+          },
+          "verify": {
+            "violations": [
+              {
+                "rule": "leaf-datastore-not-served",
+                "severity": "hard",
+                "message": "client 'pymysql' (pyproject.toml) implies mariadb, but no [services.*] serves it"
+              },
+              {
+                "rule": "leaf-datastore-not-served",
+                "severity": "hard",
+                "message": "client 'pymongo' (pyproject.toml) implies mongodb, but no [services.*] serves it"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] python3.pkg-path = \"python313\" (version python3-3.13.14) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "python313",
+                "install_id": "python3"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] uv.pkg-path = \"uv\" (version 0.11.26) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "uv",
+                "install_id": "uv"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] openssl.pkg-path = \"openssl\" (version 3.6.3) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "openssl",
+                "install_id": "openssl"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] protobuf.pkg-path = \"protobuf\" (version 35.1) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "protobuf",
+                "install_id": "protobuf"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] docker-compose.pkg-path = \"docker-compose\" (version 5.3.1) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "docker-compose",
+                "install_id": "docker-compose"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] gcc.pkg-path = \"gcc\" is a native build input (from services/llm-gateway/Dockerfile) with no `outputs` declared \u2014 check `flox show gcc` for non-default outputs (e.g. `dev` headers) and add `gcc.outputs = [...]` if the build needs them"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] pkg-config.pkg-path = \"pkg-config\" is a native build input (from rust/Dockerfile) with no `outputs` declared \u2014 check `flox show pkg-config` for non-default outputs (e.g. `dev` headers) and add `pkg-config.outputs = [...]` if the build needs them"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] cmake.pkg-path = \"cmake\" is a native build input (from rust/Dockerfile) with no `outputs` declared \u2014 check `flox show cmake` for non-default outputs (e.g. `dev` headers) and add `cmake.outputs = [...]` if the build needs them"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] protobuf.pkg-path = \"protobuf\" is a native build input (from rust/Dockerfile) with no `outputs` declared \u2014 check `flox show protobuf` for non-default outputs (e.g. `dev` headers) and add `protobuf.outputs = [...]` if the build needs them"
+              }
+            ],
+            "hard_count": 7,
+            "advisory_count": 4,
+            "catalog_checked": true
+          },
+          "judge": {
+            "score": 4,
+            "correct": true,
+            "issues": [
+              "options.systems declares x86_64-darwin, but verify.py confirms 5 installed packages (python313, uv, openssl, protobuf, docker-compose) have no x86_64-darwin build \u2014 the golden correctly excludes that system",
+              "[profile] bash/zsh/fish source the venv activate script unguarded; a shell entered before a successful `uv sync` will emit a source error",
+              "ClickHouse is handled via docker-compose in [hook] rather than a [services.*] block \u2014 matches the golden's rationale, but leaves the rubric's third service outside Flox service management",
+              "Postgres cluster init (initdb/createdb/init-scripts) lives in [hook] rather than in the service command, so `flox services start postgres` on a cold cache without a prior activate has no data directory",
+              "Extra runtimes (Go, Rust toolchain, build inputs) beyond the expected primary runtimes broaden the resolution surface \u2014 corroborated by the repo, but part of why x86_64-darwin fails"
+            ]
+          },
+          "manifest": "## Flox Environment Manifest -----------------------------------------\n##\n##   _Everything_ you need to know about the _manifest_ is here:\n##\n##   https://flox.dev/docs/reference/command-reference/manifest.toml/\n##\n## -------------------------------------------------------------------\n# Flox manifest version managed by Flox CLI\nschema-version = \"1.13.0\"\n# Generated by /floxify\n\n\n## Install Packages --------------------------------------------------\n[install]\n# --- Python 3.13.13 \u2014 pyproject.toml pins requires-python == \"3.13.13\" ---\npython3.pkg-path = \"python313\"\npython3.version = \"python3-3.13.13\"\npython3.pkg-group = \"python\"\nuv.pkg-path = \"uv\"\nuv.pkg-group = \"python\"\n\n# --- Node 24.13.0 \u2014 .nvmrc (v24.13.0); package.json engines.node \">=24 <25\" ---\n# pnpm is NOT installed from the catalog: package.json pins pnpm@10.29.3 and the\n# catalog floor is 11.x. The on-activate hook provisions the exact pin via corepack.\nnodejs.pkg-path = \"nodejs_24\"\nnodejs.version = \"24.13.0\"\nnodejs.pkg-group = \"nodejs\"\n\n# --- Go 1.25.5 \u2014 livestream/go.mod, tools/phrocs/go.mod, bin/hobby-installer/go.mod ---\ngo.pkg-path = \"go_1_25\"\ngo.version = \"1.25.5\"\ngo.pkg-group = \"go\"\n\n# --- Rust 1.91 \u2014 rust/Dockerfile (FROM rust:1.91-bookworm), 40-member workspace ---\ncargo.pkg-path = \"cargo\"\ncargo.version = \"1.91.1\"\ncargo.pkg-group = \"rust\"\nrustc.pkg-path = \"rustc\"\nrustc.version = \"1.91.1\"\nrustc.pkg-group = \"rust\"\nclippy.pkg-path = \"clippy\"\nclippy.version = \"1.91.1\"\nclippy.pkg-group = \"rust\"\nrustfmt.pkg-path = \"rustfmt\"\nrustfmt.version = \"1.91.1\"\nrustfmt.pkg-group = \"rust\"\n\n# --- Build inputs for the Rust workspace ---\n# Each is corroborated by a *-sys crate in rust/Cargo.lock AND by the builder\n# stage of rust/Dockerfile (line 35) \u2014 not by a runtime-stage apt line.\ngcc.pkg-path = \"gcc\"                    # linker + cc-built crates\npkg-config.pkg-path = \"pkg-config\"      # openssl-sys, rdkafka-sys probing\nopenssl.pkg-path = \"openssl\"            # openssl-sys\nopenssl.outputs = [\"out\", \"dev\"]        # `out` is not a default output\ncmake.pkg-path = \"cmake\"                # librocksdb-sys, aws-lc-sys\nprotobuf.pkg-path = \"protobuf\"          # prost-build / tonic-build compile .proto\nlibclang.pkg-path = \"libclang\"          # clang-sys / bindgen (librocksdb-sys)\nlibclang.outputs = [\"lib\", \"dev\"]       # `out` ships bin/cpp, which collides with gcc\n\n# --- Datastores served as Flox services (see [services] below) ---\npostgresql_15.pkg-path = \"postgresql_15\"  # docker-compose.base.yml: postgres:15.12-alpine\nredis.pkg-path = \"redis\"                  # docker-compose.base.yml: redis:7.2-alpine\n\n# --- ClickHouse / Kafka / object storage stay on docker-compose (see [hook]) ---\ndocker-compose.pkg-path = \"docker-compose\"\n\n\n## Environment Variables ---------------------------------------------\n# bin/start's precedence is: shell env > .env.local > .env.development >\n# .env.services \u2014 so these override .env.services' container hostnames (db,\n# redis7) with the loopback addresses the Flox services actually listen on.\n# That removes the /etc/hosts hack for postgres and redis specifically.\n[vars]\nCOMPOSE_PROJECT_NAME = \"posthog\"\n\n# Postgres \u2014 user/db/password match docker-compose.base.yml's postgres env\nPGHOST = \"127.0.0.1\"\nPGPORT = \"5432\"\nPGUSER = \"posthog\"\nPGPASSWORD = \"posthog\"\nPGDATABASE = \"posthog\"\nDATABASE_URL = \"postgres://posthog:posthog@127.0.0.1:5432/posthog\"\n\n# Redis\nREDIS_PORT = \"6379\"\nREDIS_URL = \"redis://127.0.0.1:6379/\"\n\n# ClickHouse \u2014 served by docker-compose, published on 8123\nCLICKHOUSE_HOST = \"127.0.0.1\"\n\n\n## Shell Hook --------------------------------------------------------\n[hook]\non-activate = \"\"\"\n  # ---- Rust ----\n  export CARGO_HOME=\"$FLOX_ENV_CACHE/cargo\"\n  export CARGO_TARGET_DIR=\"$FLOX_ENV_CACHE/target\"\n  export LIBCLANG_PATH=\"$FLOX_ENV/lib\"\n  mkdir -p \"$CARGO_HOME\" \"$CARGO_TARGET_DIR\"\n\n  # ---- Go ----\n  export GOPATH=\"$FLOX_ENV_CACHE/go\"\n  export GOCACHE=\"$FLOX_ENV_CACHE/go/cache\"\n  export GOMODCACHE=\"$FLOX_ENV_CACHE/go/pkg/mod\"\n  mkdir -p \"$GOPATH\" \"$GOCACHE\" \"$GOMODCACHE\"\n\n  # ---- Postgres cluster ----\n  # Reuses docker/postgres-init-scripts/*.sh verbatim \u2014 they are already\n  # idempotent and parameterised (POSTGRES_USER, PRODUCTS_DIR).\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  if [ ! -d \"$PGDATA\" ]; then\n    echo \"Initialising postgres cluster (first activate)...\" >&2\n    initdb -D \"$PGDATA\" --username=\"$PGUSER\" --auth=trust --no-locale --encoding=UTF8 >&2\n    pg_ctl -D \"$PGDATA\" -o \"-p $PGPORT -k /tmp\" -l \"$PGDATA/init.log\" start >&2\n    until pg_isready -h \"$PGHOST\" -p \"$PGPORT\" -q; do sleep 0.2; done\n    createdb -h \"$PGHOST\" -p \"$PGPORT\" -U \"$PGUSER\" \"$PGDATABASE\"\n    for script in \"$FLOX_ENV_PROJECT\"/docker/postgres-init-scripts/*.sh; do\n      [ -f \"$script\" ] || continue\n      POSTGRES_USER=\"$PGUSER\" PRODUCTS_DIR=\"$FLOX_ENV_PROJECT/products\" \\\n        bash \"$script\" >&2 || echo \"  note: $(basename \"$script\") did not complete\" >&2\n    done\n    pg_ctl -D \"$PGDATA\" stop -m fast >&2\n  fi\n\n  # ---- Redis ----\n  mkdir -p \"$FLOX_ENV_CACHE/redis\"\n\n  # ---- ClickHouse / Kafka / object storage via docker-compose ----\n  # docker-compose.dev.yml mounts six ClickHouse server config files\n  # (config.xml, config.d/*, users-dev.xml, user_defined_function.xml) that a\n  # bare catalog clickhouse-server would not pick up, and Kafka here is redpanda\n  # in dev-container mode. Both stay on compose; Flox starts them for you.\n  if command -v docker >/dev/null && docker info >/dev/null 2>&1; then\n    docker-compose -f \"$FLOX_ENV_PROJECT/docker-compose.dev.yml\" \\\n      up -d clickhouse kafka objectstorage 2>&1 | tail -5 >&2\n  else\n    echo \"\u26a0  Docker not running \u2014 clickhouse/kafka/objectstorage not started.\" >&2\n    echo \"   Start Docker Desktop, then re-activate.\" >&2\n  fi\n\n  # ---- Python deps (uv.lock) ----\n  export UV_PROJECT_ENVIRONMENT=\"$FLOX_ENV_CACHE/venv\"\n  echo \"Syncing Python dependencies (uv sync)...\" >&2\n  uv sync --frozen >&2\n\n  # ---- Node deps (pnpm-lock.yaml, pnpm@10.29.3 via corepack) ----\n  export COREPACK_HOME=\"$FLOX_ENV_CACHE/corepack\"\n  export COREPACK_ENABLE_DOWNLOAD_PROMPT=0\n  mkdir -p \"$FLOX_ENV_CACHE/node-bin\"\n  corepack enable --install-directory \"$FLOX_ENV_CACHE/node-bin\" pnpm >&2 2>/dev/null || true\n  export PATH=\"$FLOX_ENV_CACHE/node-bin:$PATH\"\n  echo \"Installing Node dependencies (pnpm install)...\" >&2\n  pnpm install --frozen-lockfile --silent >&2\n\"\"\"\n\n\n## Profile Scripts ---------------------------------------------------\n[profile]\nbash = '''\n  source \"$FLOX_ENV_CACHE/venv/bin/activate\"\n  export CARGO_HOME=\"$FLOX_ENV_CACHE/cargo\"\n  export GOPATH=\"$FLOX_ENV_CACHE/go\"\n  export PATH=\"$FLOX_ENV_CACHE/node-bin:$CARGO_HOME/bin:$GOPATH/bin:$PATH\"\n'''\nzsh = '''\n  source \"$FLOX_ENV_CACHE/venv/bin/activate\"\n  export CARGO_HOME=\"$FLOX_ENV_CACHE/cargo\"\n  export GOPATH=\"$FLOX_ENV_CACHE/go\"\n  export PATH=\"$FLOX_ENV_CACHE/node-bin:$CARGO_HOME/bin:$GOPATH/bin:$PATH\"\n'''\nfish = '''\n  source \"$FLOX_ENV_CACHE/venv/bin/activate.fish\"\n  set -x CARGO_HOME \"$FLOX_ENV_CACHE/cargo\"\n  set -x GOPATH \"$FLOX_ENV_CACHE/go\"\n  fish_add_path \"$FLOX_ENV_CACHE/node-bin\" \"$CARGO_HOME/bin\" \"$GOPATH/bin\"\n'''\n\n\n## Services ----------------------------------------------------------\n# Dev-only auth (--auth=trust) \u2014 not safe for shared machines.\n[services.postgres]\ncommand = \"\"\"\n  exec postgres \\\n    -D \"$PGDATA\" \\\n    -p \"$PGPORT\" \\\n    -k /tmp \\\n    -c listen_addresses=\"$PGHOST\" \\\n    -c max_connections=1000 \\\n    -c idle_in_transaction_session_timeout=300000 \\\n    -c max_prepared_transactions=10\n\"\"\"\n\n# No persistence \u2014 data resets on service stop; edit if you need durability.\n[services.redis]\ncommand = \"\"\"\n  exec redis-server \\\n    --port \"$REDIS_PORT\" \\\n    --dir \"$FLOX_ENV_CACHE/redis\" \\\n    --maxmemory-policy allkeys-lru \\\n    --maxmemory 200mb \\\n    --save \"\" \\\n    --appendonly no\n\"\"\"\n\n\n## Options -----------------------------------------------------------\n[options]\nsystems = [\"aarch64-darwin\", \"aarch64-linux\", \"x86_64-darwin\", \"x86_64-linux\"]\n",
+          "manifest_excerpt": "## Flox Environment Manifest -----------------------------------------\n##\n##   _Everything_ you need to know about the _manifest_ is here:\n##\n##   https://flox.dev/docs/reference/command-reference/manifest.toml/\n##\n## -------------------------------------------------------------------\n# Flox manifest version managed by Flox CLI\nschema-version = \"1.13.0\"\n# Generated by /floxify\n\n\n## Install Packages --------------------------------------------------\n[install]\n# --- Python 3.13.13 \u2014 pyproject.toml pins requires-python == \"3.13.13\" ---\npython3.pkg-path = \"python313\"\npython3.version = \"python3-3.13.13\"\npython3.pkg-group = \"python\"\nuv.pkg-path = \"uv\"\nuv.pkg-group = \"python\"\n\n# --- Node 24.13.0 \u2014 .nvmrc (v24.13.0); package.json engines.node \">=24 <25\" ---\n# pnpm is NOT installed from the catalog: package.json pins pnpm@10.29.3 and the\n# catalog floor is 11.x. The on-activate hook provisions the exact pin via corepack.\nnodejs.pkg-path = \"nodejs_24\"\nnodejs.version = \"24.13.0\"\nnodejs.pkg-group = \"nodejs\"\n\n# --- Go 1.25.5 \u2014 livestream/go.mod, tools/phrocs/go.mod, bin/hobby-installer/go.mod ---\ngo.pkg-path = \"go_1_25\"\ngo.version = \"1.25.5\"\ngo.pkg-group = \"go\"\n\n# --- Rust 1.91 \u2014 rust/Dockerfile (FROM rust:1.91-bookworm), 40-member workspace ---\ncargo.pkg-path = \"cargo\"\ncargo.version = \"1.91.1\"\ncargo.pkg-group = \"rust\"\nrustc.pkg-path = \"rustc\"\nrustc.version = \"1.91.1\"\nrustc.pkg-group = \"rust\"\nclippy.pkg-path = \"clippy\"\nclippy.version = \"1.91.1\"\nclippy.pkg-group = \"rust\"\nrustfmt.pkg-path = \"rustfmt\"\nrustfmt.version = \"1.91.1\"\nrustfmt.pkg-group = \"rust\"\n\n# --- Build inputs for the Rust workspace ---\n# Each is corroborated by a *-sys crate in rust/Cargo.lock AND by the builder\n# stage of rust/Dockerfile (line 35) \u2014 not by a runtime-stage apt line.\ngcc.pkg-path = \"gcc\"                    # linker + cc-built crates\npkg-config.pkg-path = \"pkg-config\"      # openssl-sys, rdkafka-sys probing\nopenssl.pkg-path = \"openssl\"            # openssl-sys\nopenssl.outputs = [\"out\", \"dev\"]        # `out` is not a default output\ncmake.pkg-path = \"cmake\"                # librocksdb-sys, aws-lc-sys\nprotobuf.pkg-path = \"protobuf\"          # prost-build / tonic-build compile .proto\nlibclang.pkg-path = \"libclang\"          # clang-sys / bindgen (librocksdb-sys)\nlibclang.outputs = [\"lib\", \"dev\"]       # `out` ships bin/cpp, which collides with gcc\n\n# --- Datastores served as Flox services (see [services] below) ---\npostgresql_15.pkg-path = \"postgresql_15\"  # docker-compose.base.yml: postgres:15.12-alpine\nredis.pkg-path = \"redis\"                  # docker-compose.base.yml: redis:7.2-alpine\n\n# --- ClickHouse / Kafka / object storage stay on docker-compose (see [hook]) ---\ndocker-compose.pkg-path = \"docker-compose\"\n\n\n## Environment Variables ---------------------------------------------\n# bin/start's precedence is: shell env > .env.local > .env.development >\n# .env.services \u2014 so these override .env.services' container hostnames (db,\n# redis7) with the loopback addresses the Flox services ac",
+          "agent_output_excerpt": "```\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502  posthog  is now Flox-enabled                                   \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n\u2713  Flox manages  (17 packages \u2014 pinned, same on every machine)\n   python 3.13.13    \u2190 pyproject.toml requires-python == \"3.13.13\"\n   node 24.13.0      \u2190 .nvmrc (engines.node \">=24 <25\")\n   go 1.25.5         \u2190 livestream/go.mod \u00b7 tools/phrocs \u00b7 bin/hobby-installer\n   cargo/rustc 1.91  \u2190 rust/Dockerfile (FROM rust:1.91-bookworm)\n   postgresql 15.18  \u2190 docker-compose.base.yml (project runs 15.12-alpine)\n   redis 8.8.0       \u2190 docker-compose.base.yml (project runs 7.2-alpine)\n   uv \u00b7 clippy \u00b7 rustfmt \u00b7 gcc \u00b7 pkg-config \u00b7 openssl \u00b7 cmake \u00b7 protobuf\n   libclang \u00b7 docker-compose\n\n\u2713  Installs"
+        },
+        {
+          "id": "posthog",
+          "repo_url": "https://github.com/PostHog/posthog",
+          "sha": "55525a19f353",
+          "hard_checks": {
+            "manifest_created": true,
+            "valid_toml": true,
+            "no_abs_paths": true,
+            "pins_python3": true,
+            "pins_nodejs_24": true,
+            "has_service_postgres": true,
+            "has_service_redis": true,
+            "has_service_clickhouse": false
+          },
+          "hard_pass": false,
+          "activation": {
+            "ok": true,
+            "skipped": false,
+            "notes": ""
+          },
+          "services": {
+            "postgres": {
+              "ok": true,
+              "skipped": false,
+              "notes": ""
+            },
+            "redis": {
+              "ok": true,
+              "skipped": false,
+              "notes": ""
+            },
+            "clickhouse": {
+              "ok": null,
+              "skipped": true,
+              "notes": "no [services.*] entry matches kind 'clickhouse' by name or command (see has_service_clickhouse) \u2014 nothing to probe. A hook-started process is not a Flox-managed service."
+            }
+          },
+          "verify": {
+            "violations": [
+              {
+                "rule": "leaf-datastore-not-served",
+                "severity": "hard",
+                "message": "client 'pymysql' (pyproject.toml) implies mariadb, but no [services.*] serves it"
+              },
+              {
+                "rule": "leaf-datastore-not-served",
+                "severity": "hard",
+                "message": "client 'pymongo' (pyproject.toml) implies mongodb, but no [services.*] serves it"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] python.pkg-path = \"python313\" (version python3-3.13.14) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "python313",
+                "install_id": "python"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] uv.pkg-path = \"uv\" (version 0.11.26) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "uv",
+                "install_id": "uv"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] clippy.pkg-path = \"clippy\" (version 1.96.1) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "clippy",
+                "install_id": "clippy"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] rustfmt.pkg-path = \"rustfmt\" (version 1.96.1) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "rustfmt",
+                "install_id": "rustfmt"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] protobuf.pkg-path = \"protobuf\" (version 35.1) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "protobuf",
+                "install_id": "protobuf"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] openssl.pkg-path = \"openssl\" (version 3.6.3) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "openssl",
+                "install_id": "openssl"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] docker-compose.pkg-path = \"docker-compose\" (version 5.3.1) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "docker-compose",
+                "install_id": "docker-compose"
+              },
+              {
+                "rule": "catalog-systems-mismatch",
+                "severity": "hard",
+                "message": "[install] jq.pkg-path = \"jq\" (version 1.8.2) has no build for x86_64-darwin, but options.systems declares it",
+                "pkg_path": "jq",
+                "install_id": "jq"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] pkg-config.pkg-path = \"pkg-config\" is a native build input (from rust/Dockerfile) with no `outputs` declared \u2014 check `flox show pkg-config` for non-default outputs (e.g. `dev` headers) and add `pkg-config.outputs = [...]` if the build needs them"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] gcc.pkg-path = \"gcc\" is a native build input (from services/llm-gateway/Dockerfile) with no `outputs` declared \u2014 check `flox show gcc` for non-default outputs (e.g. `dev` headers) and add `gcc.outputs = [...]` if the build needs them"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] cmake.pkg-path = \"cmake\" is a native build input (from rust/Dockerfile) with no `outputs` declared \u2014 check `flox show cmake` for non-default outputs (e.g. `dev` headers) and add `cmake.outputs = [...]` if the build needs them"
+              },
+              {
+                "rule": "outputs-heuristic",
+                "severity": "advisory",
+                "message": "[install] protobuf.pkg-path = \"protobuf\" is a native build input (from rust/Dockerfile) with no `outputs` declared \u2014 check `flox show protobuf` for non-default outputs (e.g. `dev` headers) and add `protobuf.outputs = [...]` if the build needs them"
+              }
+            ],
+            "hard_count": 10,
+            "advisory_count": 4,
+            "catalog_checked": true
+          },
+          "judge": {
+            "score": 4,
+            "correct": true,
+            "issues": [
+              "options.systems declares x86_64-darwin but the catalog check confirms python313@python3-3.13.13, uv, clippy, rustfmt, and protobuf have no x86_64-darwin build \u2014 the env cannot activate on Intel macOS (golden correctly drops that system)",
+              "No native [services.clickhouse] block; ClickHouse is started via docker-compose in the hook \u2014 matches the golden reference's rationale (needs mounted server config + Kafka/ZooKeeper), so not penalized as missing, but it is not a Flox service",
+              "Postgres cluster initdb and per-product createdb loop live in [hook] on-activate rather than the service command, so the service silently fails if the hook was skipped or PGDATA was cleared",
+              "Wide extra surface (Go, Rust toolchain, sccache, native build inputs) beyond the primary runtimes increases resolution fragility; several exact pins share a single pkg-group instead of being isolated per golden's AI-457 note",
+              "PGHOST = \"127.0.0.1\" while the service also opens a socket in /tmp \u2014 golden uses PGHOST=/tmp consistently",
+              "RUSTC_WRAPPER = \"sccache\" is set unconditionally in [vars], which breaks any cargo invocation if sccache fails to start"
+            ]
+          },
+          "manifest": "schema-version = \"1.10.0\"\n# Generated by /floxify\n\n[install]\n# \u2500\u2500 Python 3.13.13 \u2500\u2500 (\u2190 pyproject.toml requires-python \"==3.13.13\", uv.lock,\n#    .github/workflows/ci-backend.yml, Dockerfile FROM python:3.13.13-slim-bookworm)\n#    Exact pin exists in the catalog and carries all four systems.\npython.pkg-path = \"python313\"\npython.version = \"python3-3.13.13\"\npython.pkg-group = \"python\"\nuv.pkg-path = \"uv\"          # \u2190 uv.lock; pyproject [tool.uv] required-version \">=0.10.2\"\nuv.pkg-group = \"uv\"\n\n# \u2500\u2500 Node 24.13.0 \u2500\u2500 (\u2190 .nvmrc \"v24.13.0\"; package.json engines.node \">=24 <25\";\n#    Dockerfile FROM node:24.13.0-bookworm-slim)\nnodejs.pkg-path = \"nodejs_24\"\nnodejs.version = \"24.13.0\"\nnodejs.pkg-group = \"nodejs\"\n# package.json pins pnpm@10.29.3 exactly \u2014 provisioned by corepack in the hook rather\n# than the catalog `pnpm`, so the lockfile's pnpm version is honoured verbatim.\n# Lower priority than nodejs: both ship corepack shims and would otherwise conflict.\ncorepack.pkg-path = \"corepack_24\"\ncorepack.version = \"24.13.0\"\ncorepack.pkg-group = \"nodejs\"\ncorepack.priority = 4\n\n# \u2500\u2500 Go 1.25.5 \u2500\u2500 (\u2190 livestream/go.mod, tools/phrocs/go.mod, bin/hobby-installer/go.mod\n#    all \"go 1.25.5\"; livestream/Dockerfile FROM golang:1.25.5)\ngo.pkg-path = \"go\"\ngo.version = \"1.25.5\"\ngo.pkg-group = \"go\"\ngolangci-lint.pkg-path = \"golangci-lint\"\ngolangci-lint.pkg-group = \"go\"\n\n# \u2500\u2500 Rust 1.91 \u2500\u2500 (\u2190 rust/Dockerfile + rust/Dockerfile.sqlx-migrate FROM rust:1.91-bookworm)\n#    No rust-toolchain.toml in the repo; the Dockerfile is the only pin.\ncargo.pkg-path = \"cargo\"\ncargo.version = \"1.91.1\"\ncargo.pkg-group = \"rust\"\nrustc.pkg-path = \"rustc\"\nrustc.version = \"1.91.1\"\nrustc.pkg-group = \"rust\"\nclippy.pkg-path = \"clippy\"\nclippy.pkg-group = \"rust\"\nrustfmt.pkg-path = \"rustfmt\"\nrustfmt.pkg-group = \"rust\"\nrust-lib-src.pkg-path = \"rustPlatform.rustLibSrc\"   # std sources for rust-analyzer\nrust-lib-src.pkg-group = \"rust\"\nsccache.pkg-path = \"sccache\"                        # \u2190 used as RUSTC_WRAPPER in CI\n\n# \u2500\u2500 Native build inputs \u2500\u2500\n# `out`/`dev` are NOT default outputs on several of these \u2014 a bare install would\n# ship only `bin` and native builds would fail to find headers or the .so.\npkg-config.pkg-path = \"pkg-config\"\ngcc.pkg-path = \"gcc\"                                # linker + cc-built crates\ncmake.pkg-path = \"cmake\"                            # \u2190 rust/Dockerfile; librocksdb-sys, aws-lc-sys\nprotobuf.pkg-path = \"protobuf\"                      # \u2190 rust/Dockerfile; protoc for *-proto crates\nopenssl.pkg-path = \"openssl\"                        # \u2190 Cargo.lock openssl-sys; pyproject cryptography\nopenssl.outputs = [\"bin\", \"dev\", \"out\"]\nlibclang.pkg-path = \"libclang\"                      # \u2190 bindgen (rdkafka-sys, librocksdb-sys, clang-sys)\n# `lib` only: libclang's `out` ships the clang driver, which collides with gcc on bin/cpp.\n# bindgen needs just libclang.so, found via LIBCLANG_PATH in the hook.\nlibclang.outputs = [\"lib\"]\n\n# \u2500\u2500 Python native extension deps \u2500\u2500 (\u2190 pyproject.toml)\nxmlsec.pkg-path = \"xmlsec\"                          # \u2190 xmlsec==1.3.17\nxmlsec.outputs = [\"out\", \"dev\"]\nlibxml2.pkg-path = \"libxml2\"                        # \u2190 lxml==6.0.2, xmlsec\nlibxml2.outputs = [\"bin\", \"out\", \"dev\"]\nlibxslt.pkg-path = \"libxslt\"                        # \u2190 lxml==6.0.2\nlibxslt.outputs = [\"bin\", \"out\", \"dev\"]\nfreetds.pkg-path = \"freetds\"                        # \u2190 pymssql==2.3.5\n# psycopg2-binary and pymssql wheels dlopen libz.so.1 at import time; without\n# this their `import` raises ImportError even though the wheel installed fine.\nzlib.pkg-path = \"zlib\"                              # \u2190 psycopg2-binary==2.9.10, pymssql, pillow\n\n# \u2500\u2500 Datastores served as Flox services (see [services] below) \u2500\u2500\npostgresql.pkg-path = \"postgresql_15\"               # \u2190 docker-compose.base.yml postgres:15.12-alpine\nredis.pkg-path = \"redis\"                            # \u2190 docker-compose.base.yml redis:7.2-alpine\nredis.version = \"7.2.7\"\n\n# \u2500\u2500 Orchestration for the services Flox does not serve \u2500\u2500\ndocker-compose.pkg-path = \"docker-compose\"          # ClickHouse / Kafka / Zookeeper\n\n# \u2500\u2500 CLI tooling seen in the repo's own scripts \u2500\u2500\ngit-lfs.pkg-path = \"git-lfs\"\njq.pkg-path = \"jq\"\n\n[vars]\n# Postgres \u2014 matches docker-compose.base.yml's db service credentials so\n# DATABASE_URL from .env.services works unchanged.\nPGUSER = \"posthog\"\nPGPASSWORD = \"posthog\"\nPGDATABASE = \"posthog\"\nPGPORT = \"5432\"\nPGHOST = \"127.0.0.1\"\nREDIS_PORT = \"6379\"\n# \u2190 .env.development\nDEBUG = \"1\"\n# \u2190 .env.services (CLICKHOUSE_DATABASE); ClickHouse itself runs under docker-compose.\nCLICKHOUSE_DATABASE = \"posthog\"\n# Build flags for the native Python/Rust extensions above.\nOPENSSL_NO_VENDOR = \"1\"\n# Keep uv on the Flox-pinned interpreter instead of downloading its own.\nUV_PYTHON_DOWNLOADS = \"never\"\nGOTOOLCHAIN = \"local\"\nRUSTC_WRAPPER = \"sccache\"\n\n[hook]\non-activate = '''\n  # \u2500\u2500 Rust / Go / uv caches live outside the repo tree \u2500\u2500\n  export CARGO_HOME=\"$FLOX_ENV_CACHE/cargo\"\n  export CARGO_TARGET_DIR=\"$FLOX_ENV_CACHE/cargo-target\"\n  export GOPATH=\"$FLOX_ENV_CACHE/go\"\n  export GOCACHE=\"$FLOX_ENV_CACHE/go-build\"\n  export GOMODCACHE=\"$GOPATH/pkg/mod\"\n  export SCCACHE_DIR=\"$FLOX_ENV_CACHE/sccache\"\n  mkdir -p \"$CARGO_HOME\" \"$CARGO_TARGET_DIR\" \"$GOPATH\" \"$GOCACHE\" \"$GOMODCACHE\" \"$SCCACHE_DIR\"\n\n  # bindgen (rdkafka-sys, librocksdb-sys) needs libclang at an explicit path.\n  export LIBCLANG_PATH=\"$FLOX_ENV/lib\"\n\n  # \u2500\u2500 Postgres cluster \u2500\u2500 ported from docker-compose.base.yml's db service and\n  # the docker/postgres-init-scripts/*.sh init mount (which docker-compose runs\n  # via /docker-entrypoint-initdb.d).\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  if [ ! -d \"$PGDATA\" ]; then\n    echo \"Initialising PostgreSQL cluster (first activation)...\" >&2\n    initdb -D \"$PGDATA\" --username=\"$PGUSER\" --auth=trust --no-locale --encoding=UTF8 >&2\n    pg_ctl -D \"$PGDATA\" -o \"-p $PGPORT -k /tmp\" -l \"$PGDATA/init.log\" start >&2\n    until pg_isready -h 127.0.0.1 -p \"$PGPORT\" -q; do sleep 0.2; done\n\n    # Databases created by docker/postgres-init-scripts/*.sh\n    for db in posthog agent_runtime_queue behavioral_cohorts cyclotron \\\n              cyclotron_node ducklake flags_read_store posthog_persons test_dagster; do\n      createdb -h 127.0.0.1 -p \"$PGPORT\" -U \"$PGUSER\" \"$db\" 2>/dev/null || true\n    done\n\n    # Per-product databases \u2014 same derivation as create-product-dbs.sh:\n    # unique `database:` values in products/db_routing.yaml, prefixed posthog_\n    if [ -f \"$FLOX_ENV_PROJECT/products/db_routing.yaml\" ]; then\n      awk -F': ' '/^[[:space:]]*database:/{print $2}' \"$FLOX_ENV_PROJECT/products/db_routing.yaml\" \\\n        | tr -d \"\\\"'\" | sort -u | while read -r name; do\n          case \"$name\" in ''|*[!a-z0-9_]*) continue ;; esac\n          createdb -h 127.0.0.1 -p \"$PGPORT\" -U \"$PGUSER\" \"posthog_${name}\" 2>/dev/null || true\n        done\n    fi\n\n    pg_ctl -D \"$PGDATA\" stop -m fast >&2\n  fi\n\n  mkdir -p \"$FLOX_ENV_CACHE/redis\"\n\n  # \u2500\u2500 Python deps \u2500\u2500\n  export UV_PROJECT_ENVIRONMENT=\"$FLOX_ENV_CACHE/venv\"\n  export UV_PYTHON=\"$FLOX_ENV/bin/python3.13\"\n  uv sync --frozen >&2\n\n  # \u2500\u2500 Node deps \u2500\u2500 pnpm@10.29.3 exactly, as pinned by package.json packageManager.\n  export COREPACK_HOME=\"$FLOX_ENV_CACHE/corepack\"\n  mkdir -p \"$FLOX_ENV_CACHE/node-bin\"\n  corepack enable --install-directory \"$FLOX_ENV_CACHE/node-bin\" pnpm >&2 2>/dev/null || true\n  export PATH=\"$FLOX_ENV_CACHE/node-bin:$PATH\"\n  pnpm install --frozen-lockfile >&2\n\n  # \u2500\u2500 Services Flox does not serve \u2500\u2500 ClickHouse mounts server config and\n  # depends on Kafka/Zookeeper, so it stays under docker-compose.\n  if command -v docker >/dev/null && docker info >/dev/null 2>&1; then\n    docker-compose -f \"$FLOX_ENV_PROJECT/docker-compose.dev.yml\" up -d \\\n      zookeeper kafka clickhouse 2>&1 | tail -5 >&2\n  else\n    echo \"\u26a0  Docker not running \u2014 ClickHouse/Kafka/Zookeeper not started.\" >&2\n    echo \"   Start Docker, then: docker-compose -f docker-compose.dev.yml up -d zookeeper kafka clickhouse\" >&2\n  fi\n'''\n\n[profile]\nbash = '''\n  export CARGO_HOME=\"$FLOX_ENV_CACHE/cargo\"\n  export CARGO_TARGET_DIR=\"$FLOX_ENV_CACHE/cargo-target\"\n  export GOPATH=\"$FLOX_ENV_CACHE/go\"\n  export GOCACHE=\"$FLOX_ENV_CACHE/go-build\"\n  export GOMODCACHE=\"$GOPATH/pkg/mod\"\n  export PATH=\"$CARGO_HOME/bin:$GOPATH/bin:$FLOX_ENV_CACHE/node-bin:$PATH\"\n  export UV_PROJECT_ENVIRONMENT=\"$FLOX_ENV_CACHE/venv\"\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  [ -f \"$UV_PROJECT_ENVIRONMENT/bin/activate\" ] && source \"$UV_PROJECT_ENVIRONMENT/bin/activate\"\n'''\nzsh = '''\n  export CARGO_HOME=\"$FLOX_ENV_CACHE/cargo\"\n  export CARGO_TARGET_DIR=\"$FLOX_ENV_CACHE/cargo-target\"\n  export GOPATH=\"$FLOX_ENV_CACHE/go\"\n  export GOCACHE=\"$FLOX_ENV_CACHE/go-build\"\n  export GOMODCACHE=\"$GOPATH/pkg/mod\"\n  export PATH=\"$CARGO_HOME/bin:$GOPATH/bin:$FLOX_ENV_CACHE/node-bin:$PATH\"\n  export UV_PROJECT_ENVIRONMENT=\"$FLOX_ENV_CACHE/venv\"\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  [ -f \"$UV_PROJECT_ENVIRONMENT/bin/activate\" ] && source \"$UV_PROJECT_ENVIRONMENT/bin/activate\"\n'''\nfish = '''\n  set -gx CARGO_HOME \"$FLOX_ENV_CACHE/cargo\"\n  set -gx CARGO_TARGET_DIR \"$FLOX_ENV_CACHE/cargo-target\"\n  set -gx GOPATH \"$FLOX_ENV_CACHE/go\"\n  set -gx GOCACHE \"$FLOX_ENV_CACHE/go-build\"\n  set -gx GOMODCACHE \"$GOPATH/pkg/mod\"\n  fish_add_path -g \"$CARGO_HOME/bin\" \"$GOPATH/bin\" \"$FLOX_ENV_CACHE/node-bin\"\n  set -gx UV_PROJECT_ENVIRONMENT \"$FLOX_ENV_CACHE/venv\"\n  set -gx PGDATA \"$FLOX_ENV_CACHE/postgres\"\n  test -f \"$UV_PROJECT_ENVIRONMENT/bin/activate.fish\" && source \"$UV_PROJECT_ENVIRONMENT/bin/activate.fish\"\n'''\n\n[services.postgres]\ncommand = '''\n  exec postgres -D \"$PGDATA\" -p \"$PGPORT\" -k /tmp -c listen_addresses=\"$PGHOST\"\n'''\n\n[services.redis]\ncommand = '''\n  exec redis-server --port \"$REDIS_PORT\" --dir \"$FLOX_ENV_CACHE/redis\" \\\n    --maxmemory-policy allkeys-lru --maxmemory 200mb --save \"\" --appendonly no\n'''\n\n[options]\nsystems = [\"aarch64-darwin\", \"aarch64-linux\", \"x86_64-darwin\", \"x86_64-linux\"]\n",
+          "manifest_excerpt": "schema-version = \"1.10.0\"\n# Generated by /floxify\n\n[install]\n# \u2500\u2500 Python 3.13.13 \u2500\u2500 (\u2190 pyproject.toml requires-python \"==3.13.13\", uv.lock,\n#    .github/workflows/ci-backend.yml, Dockerfile FROM python:3.13.13-slim-bookworm)\n#    Exact pin exists in the catalog and carries all four systems.\npython.pkg-path = \"python313\"\npython.version = \"python3-3.13.13\"\npython.pkg-group = \"python\"\nuv.pkg-path = \"uv\"          # \u2190 uv.lock; pyproject [tool.uv] required-version \">=0.10.2\"\nuv.pkg-group = \"uv\"\n\n# \u2500\u2500 Node 24.13.0 \u2500\u2500 (\u2190 .nvmrc \"v24.13.0\"; package.json engines.node \">=24 <25\";\n#    Dockerfile FROM node:24.13.0-bookworm-slim)\nnodejs.pkg-path = \"nodejs_24\"\nnodejs.version = \"24.13.0\"\nnodejs.pkg-group = \"nodejs\"\n# package.json pins pnpm@10.29.3 exactly \u2014 provisioned by corepack in the hook rather\n# than the catalog `pnpm`, so the lockfile's pnpm version is honoured verbatim.\n# Lower priority than nodejs: both ship corepack shims and would otherwise conflict.\ncorepack.pkg-path = \"corepack_24\"\ncorepack.version = \"24.13.0\"\ncorepack.pkg-group = \"nodejs\"\ncorepack.priority = 4\n\n# \u2500\u2500 Go 1.25.5 \u2500\u2500 (\u2190 livestream/go.mod, tools/phrocs/go.mod, bin/hobby-installer/go.mod\n#    all \"go 1.25.5\"; livestream/Dockerfile FROM golang:1.25.5)\ngo.pkg-path = \"go\"\ngo.version = \"1.25.5\"\ngo.pkg-group = \"go\"\ngolangci-lint.pkg-path = \"golangci-lint\"\ngolangci-lint.pkg-group = \"go\"\n\n# \u2500\u2500 Rust 1.91 \u2500\u2500 (\u2190 rust/Dockerfile + rust/Dockerfile.sqlx-migrate FROM rust:1.91-bookworm)\n#    No rust-toolchain.toml in the repo; the Dockerfile is the only pin.\ncargo.pkg-path = \"cargo\"\ncargo.version = \"1.91.1\"\ncargo.pkg-group = \"rust\"\nrustc.pkg-path = \"rustc\"\nrustc.version = \"1.91.1\"\nrustc.pkg-group = \"rust\"\nclippy.pkg-path = \"clippy\"\nclippy.pkg-group = \"rust\"\nrustfmt.pkg-path = \"rustfmt\"\nrustfmt.pkg-group = \"rust\"\nrust-lib-src.pkg-path = \"rustPlatform.rustLibSrc\"   # std sources for rust-analyzer\nrust-lib-src.pkg-group = \"rust\"\nsccache.pkg-path = \"sccache\"                        # \u2190 used as RUSTC_WRAPPER in CI\n\n# \u2500\u2500 Native build inputs \u2500\u2500\n# `out`/`dev` are NOT default outputs on several of these \u2014 a bare install would\n# ship only `bin` and native builds would fail to find headers or the .so.\npkg-config.pkg-path = \"pkg-config\"\ngcc.pkg-path = \"gcc\"                                # linker + cc-built crates\ncmake.pkg-path = \"cmake\"                            # \u2190 rust/Dockerfile; librocksdb-sys, aws-lc-sys\nprotobuf.pkg-path = \"protobuf\"                      # \u2190 rust/Dockerfile; protoc for *-proto crates\nopenssl.pkg-path = \"openssl\"                        # \u2190 Cargo.lock openssl-sys; pyproject cryptography\nopenssl.outputs = [\"bin\", \"dev\", \"out\"]\nlibclang.pkg-path = \"libclang\"                      # \u2190 bindgen (rdkafka-sys, librocksdb-sys, clang-sys)\n# `lib` only: libclang's `out` ships the clang driver, which collides with gcc on bin/cpp.\n# bindgen needs just libclang.so, found via LIBCLANG_PATH in the hook.\nlibclang.outputs = [\"lib\"]\n\n# \u2500\u2500 Python native extension deps \u2500\u2500 (\u2190 pyproject.toml)\nxmlsec.pkg-path = \"x",
+          "agent_output_excerpt": "Done. The manifest is written and verified working end-to-end.\n\n```\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502  posthog  is now Flox-enabled                                   \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n\u2713  Flox manages  (26 packages \u2014 pinned, same on every machine)\n   python 3.13.13   \u2190 pyproject.toml requires-python \"==3.13.13\"\n   node 24.13.0     \u2190 .nvmrc\n   go 1.25.5        \u2190 livestream/go.mod, tools/phrocs/go.mod, bin/hobby-installer/go.mod\n   rustc 1.91.1     \u2190 rust/Dockerfile (FROM rust:1.91-bookworm)\n   postgres 15.13   \u2190 docker-compose.base.yml (project runs 15.12-alpine)\n   redis 7.2.7      \u2190 docker-compose.base.yml (project runs 7.2-alpine)\n   uv \u00b7 pnpm-via-corepack \u00b7 cmake \u00b7 protobuf \u00b7 libclang \u00b7 openssl \u00b7 xml"
+        }
+      ],
+      "hard_pass_rate_across_reps": 0.0
+    }
+  ]
+}
