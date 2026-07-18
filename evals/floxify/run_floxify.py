@@ -1449,9 +1449,9 @@ def _gate_should_fail(binding, bad, errs):
 
 # --- main ---------------------------------------------------------------------
 
-def main():
-    global MODEL
-
+def _parse_args():
+    """Build the CLI parser and return the parsed args -- broken out of
+    main() so the argument surface can be read on its own."""
     ap = argparse.ArgumentParser(
         description="Flox /floxify skill eval harness (outcome-based)"
     )
@@ -1547,7 +1547,98 @@ def main():
             "right (read the JSON's per-rep records directly for that)."
         ),
     )
-    args = ap.parse_args()
+    return ap.parse_args()
+
+
+def _load_tasks(path, only):
+    """Load tasks.jsonl from `path` and, if `only` is set, filter to the
+    comma-separated fixture ids it names (AI-442 Q3: one or more ids,
+    e.g. ruby,python-uv,node-postgres,rust-cargo,go-mod, without five
+    separate invocations). Exits the process if any requested id doesn't
+    match a task.
+    """
+    tasks_path = Path(path)
+    tasks = [
+        json.loads(line)
+        for line in tasks_path.read_text().splitlines()
+        if line.strip()
+    ]
+    if only:
+        only_ids = [s.strip() for s in only.split(",") if s.strip()]
+        tasks = [t for t in tasks if t["id"] in only_ids]
+        found_ids = {t["id"] for t in tasks}
+        missing = [i for i in only_ids if i not in found_ids]
+        if missing:
+            print(f"ERROR: no task with id(s): {', '.join(missing)}", file=sys.stderr)
+            sys.exit(1)
+    return tasks
+
+
+def _resolve_out_path(out):
+    """Resolve --out (or the default timestamped name) to an absolute
+    output path: an explicit absolute path is used as-is, an explicit
+    relative path with a directory component is rooted at this script's
+    directory, and a bare filename (or the default) lands under
+    results/.
+    """
+    out_name = out or f"floxify-{int(time.time())}.json"
+    if os.path.isabs(out_name):
+        return Path(out_name)
+    if os.path.dirname(out_name):
+        return HERE / out_name
+    return HERE / "results" / out_name
+
+
+def _build_summary(results, skill_dir, model, arm, reps):
+    """Build the top-level summary dict for a floxify eval run: overall
+    score stats, cost rollup, per-tier breakdown, and per-fixture
+    efficiency distributions.
+    """
+    costed = [r["cost"] for r in results if "cost" in r]
+    agent_cost = sum(c.get("agent_usd", 0.0) for c in costed)
+    judge_cost = sum(c.get("judge_usd", 0.0) for c in costed)
+    total_cost = sum(c.get("total_usd", 0.0) for c in costed)
+    return {
+        "skill": _skill_identity(skill_dir),
+        "model": model,
+        "arm": arm,
+        "reps": reps,
+        "n_tasks": len(results),
+        "n_errors": sum(1 for r in results if "error" in r),
+        **_stats(results),
+        "by_tier": {
+            tier: _stats([r for r in results if r["tier"] == tier and "judge" in r])
+            for tier in ("should", "may", "stretch")
+            if any(r["tier"] == tier and "judge" in r for r in results)
+        },
+        # AI-459-style cost rollup, ported to the agentic path (AI-442).
+        "cost": {
+            "total_usd": round(total_cost, 4),
+            "agent_usd": round(agent_cost, 4),
+            "judge_usd": round(judge_cost, 4),
+            "mean_per_task_usd": round(total_cost / len(costed), 4) if costed else 0.0,
+            "n_costed_tasks": len(costed),
+        },
+        # AI-442 §1.1: per-fixture censored efficiency distributions,
+        # this run's arm only -- never a pooled cross-fixture scalar
+        # (Q5). Nested by arm (even though a single run has just one) so
+        # a caller merging a separate skills-arm and baseline-arm run
+        # for the two-arm comparison gets a stable, mergeable shape.
+        "efficiency": {
+            fixture_id: {
+                arm: _efficiency_summary(
+                    [r for r in results if r.get("id") == fixture_id]
+                )
+            }
+            for fixture_id in sorted({r["id"] for r in results})
+        },
+    }
+
+
+def main():
+    global MODEL
+
+    args = _parse_args()
 
     MODEL = args.model
     skill_dir = Path(args.skill_dir).resolve()
@@ -1562,35 +1653,13 @@ def main():
         )
         sys.exit(1)
 
-    tasks_path = Path(args.tasks)
-    tasks = [
-        json.loads(line)
-        for line in tasks_path.read_text().splitlines()
-        if line.strip()
-    ]
-    if args.only:
-        # AI-442 Q3: one or more ids, comma-separated -- selects exactly
-        # the batch fixtures (e.g. ruby,python-uv,node-postgres,
-        # rust-cargo,go-mod) without five separate invocations.
-        only_ids = [s.strip() for s in args.only.split(",") if s.strip()]
-        tasks = [t for t in tasks if t["id"] in only_ids]
-        found_ids = {t["id"] for t in tasks}
-        missing = [i for i in only_ids if i not in found_ids]
-        if missing:
-            print(f"ERROR: no task with id(s): {', '.join(missing)}", file=sys.stderr)
-            sys.exit(1)
+    tasks = _load_tasks(args.tasks, args.only)
 
     # Output path computed BEFORE running tasks (not after, as it used to
     # be) -- AI-442 needs it early to derive the raw-stream persistence
     # directory, keyed to the exact run that produced the streams so
     # they stay discoverable from the summary file's own name.
-    out_name = args.out or f"floxify-{int(time.time())}.json"
-    if os.path.isabs(out_name):
-        out_path = Path(out_name)
-    elif os.path.dirname(out_name):
-        out_path = HERE / out_name
-    else:
-        out_path = HERE / "results" / out_name
+    out_path = _resolve_out_path(args.out)
     stream_dir = out_path.parent / "streams" / out_path.stem
 
     reps = max(args.reps, 1)
@@ -1617,45 +1686,7 @@ def main():
         )
 
     scored = [r for r in results if "judge" in r]
-    costed = [r["cost"] for r in results if "cost" in r]
-    agent_cost = sum(c.get("agent_usd", 0.0) for c in costed)
-    judge_cost = sum(c.get("judge_usd", 0.0) for c in costed)
-    total_cost = sum(c.get("total_usd", 0.0) for c in costed)
-    summary = {
-        "skill": _skill_identity(skill_dir),
-        "model": MODEL,
-        "arm": args.arm,
-        "reps": reps,
-        "n_tasks": len(results),
-        "n_errors": sum(1 for r in results if "error" in r),
-        **_stats(results),
-        "by_tier": {
-            tier: _stats([r for r in results if r["tier"] == tier and "judge" in r])
-            for tier in ("should", "may", "stretch")
-            if any(r["tier"] == tier and "judge" in r for r in results)
-        },
-        # AI-459-style cost rollup, ported to the agentic path (AI-442).
-        "cost": {
-            "total_usd": round(total_cost, 4),
-            "agent_usd": round(agent_cost, 4),
-            "judge_usd": round(judge_cost, 4),
-            "mean_per_task_usd": round(total_cost / len(costed), 4) if costed else 0.0,
-            "n_costed_tasks": len(costed),
-        },
-        # AI-442 §1.1: per-fixture censored efficiency distributions,
-        # this run's arm only -- never a pooled cross-fixture scalar
-        # (Q5). Nested by arm (even though a single run has just one) so
-        # a caller merging a separate skills-arm and baseline-arm run
-        # for the two-arm comparison gets a stable, mergeable shape.
-        "efficiency": {
-            fixture_id: {
-                args.arm: _efficiency_summary(
-                    [r for r in results if r.get("id") == fixture_id]
-                )
-            }
-            for fixture_id in sorted({r["id"] for r in results})
-        },
-    }
+    summary = _build_summary(results, skill_dir, MODEL, args.arm, reps)
 
     # Snapshot the baseline BEFORE writing output — otherwise a run that
     # writes to results/floxify-baseline.json would overwrite its own
