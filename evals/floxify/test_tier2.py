@@ -27,6 +27,11 @@ import tier2
 # in test code. Pure logic, no network — safe to load at import time.
 _VERIFY_MOD = tier2._load_verify_module(tier2.DEFAULT_SKILL_DIR)
 
+# A registry entry expecting a single wired postgres service, with no
+# runtime pins -- read-only in every test that uses it (_structural_checks
+# only ever reads entry.get(...)), so sharing this one dict is safe.
+_POSTGRES_ENTRY = {"id": "x", "expected_runtimes": [], "expected_services": ["postgres"]}
+
 
 def _agent_writes_manifest(manifest_text):
     """A `_run_claude_agent` stand-in: parses the target directory out of
@@ -390,9 +395,8 @@ class TestLoadVerifyModule(unittest.TestCase):
         with patch("tier2._load_detect_and_verify",
                     return_value=(None, old_verify_mod)):
             verify_mod = tier2._load_verify_module("/some/skill/dir")
-        entry = {"id": "x", "expected_runtimes": [], "expected_services": ["postgres"]}
         checks = tier2._structural_checks(
-            entry, "[services.postgres]\ncommand = \"postgres\"\n",
+            _POSTGRES_ENTRY, "[services.postgres]\ncommand = \"postgres\"\n",
             verify_mod=verify_mod,
         )
         self.assertFalse(checks["has_service_postgres"], checks)
@@ -616,17 +620,15 @@ class TestStructuralChecks(unittest.TestCase):
         self.assertTrue(checks["has_service_postgres"], checks)
 
     def test_genuinely_absent_service_fails_the_structural_check(self):
-        entry = {"id": "x", "expected_runtimes": [], "expected_services": ["postgres"]}
         manifest = "[services.redis]\ncommand = \"redis-server\"\n"
-        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+        checks = tier2._structural_checks(_POSTGRES_ENTRY, manifest, verify_mod=_VERIFY_MOD)
         self.assertFalse(checks["has_service_postgres"], checks)
 
     def test_no_verify_mod_fails_has_service_closed(self):
         # A skill-dir load failure must not silently pass a service check
         # it never actually evaluated.
-        entry = {"id": "x", "expected_runtimes": [], "expected_services": ["postgres"]}
         manifest = "[services.postgres]\ncommand = \"postgres\"\n"
-        checks = tier2._structural_checks(entry, manifest, verify_mod=None)
+        checks = tier2._structural_checks(_POSTGRES_ENTRY, manifest, verify_mod=None)
         self.assertFalse(checks["has_service_postgres"], checks)
 
     def test_no_manifest_fails_everything(self):
