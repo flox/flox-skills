@@ -388,10 +388,10 @@ Resolving packages...
   Supabase edge functions) means a SECOND runtime — search `"deno"` and pin it
   alongside `nodejs`. A monorepo that pins only Node silently drops the edge-functions runtime
 - **Flutter**: search `"flutter"` only — Dart SDK is bundled; do NOT search "dart" separately
-- **Mise / asdf** (`.mise.toml` / `.tool-versions`): each `key = "version"` is an independent search; `python = "3.12.3"` → search `"python 3.12"`. These patch pins routinely sit AHEAD of the catalog — resolve the major/minor, and if the exact version isn't available, fall back to the language manifest's floor (`mix.exs "~> 1.18"`, `go.mod`, `requires-python`) and note the gap; never force a nonexistent exact pin
+- **Mise / asdf** (`.mise.toml` / `.tool-versions`): each `key = "version"` is an independent search; `python = "3.12.3"` → search `"python 3.12"`. These patch pins routinely sit AHEAD of the catalog — resolve the major/minor, and if the exact version isn't available, fall back to the language manifest's floor (`mix.exs "~> 1.18"`, `go.mod`, `requires-python`) and note the gap; never force a nonexistent exact pin. If the exact patch IS available, emit `<id>.version` for it — see "Emitting an exact pin" below
 - **Conda** (`environment.yml`): search top-level `dependencies:` binaries only; skip `- pip:` entries (handle via uv)
 - **Volta** (`"volta": {"node": "22.4.0"}`): search `"nodejs 22"`
-- **packageManager field** (`pnpm@9.x`, `yarn@4.x`): search the package manager name
+- **packageManager field** (`pnpm@9.x`, `yarn@4.x`): search the package manager name; when the pin is an exact version, see "Pinned package manager" and "Emitting an exact pin" below for whether it resolves directly, needs corepack, or (Yarn Berry) self-delegates via `.yarn/releases/`
 - **`bun.lockb` present**: search `"bun"` and use it instead of nodejs
 
 ### Picking from search results
@@ -581,32 +581,45 @@ build-system dep declaration you encounter.
 `[install]` exists to make the project buildable and runnable, plus its
 declared native chain (Dockerfile/Aptfile/`*-sys` crates and the like) — not
 to replicate everything a CI matrix, `Makefile`, or deferred script happens
-to invoke. Lemmy is the worked counter-example: alongside its real runtime +
-native chain (`cargo`/`rustc`/`postgresql_18`/`pkg-config`/`gcc`), a live run
-over-installed `nodejs_24`, `pnpm_10`, `jq`, `diesel-cli`, `pgformatter`,
-`taplo`, `typos`, `shfmt`, and `git` — none of them build or run
-`lemmy_server`. A judge called this "defensible CI parity, but none
-substitute for the missing service" — CI parity is not the goal; a working
-local build+run is. The clean golden
-(`evals/floxify/testdata/gold/lemmy.toml`) installs only the seven packages
-that actually build and run the binary.
+to invoke. A judge reviewing a live floxify run called an over-broad
+install list "defensible CI parity, but none substitute for the missing
+service" — CI parity is not the goal; a working local build+run is.
 
-- **CI-only lint/format tooling** (`taplo`, `typos`, `shfmt`,
-  `pgformatter`, project-specific linters) is opt-in, not a default
+The carve-out that keeps this from over-correcting: **toolchain-standard
+lint/format tooling is in scope; third-party auxiliary tooling is opt-in.**
+Lemmy's golden (`evals/floxify/testdata/gold/lemmy.toml`) installs seven
+packages total — `cargo`/`rustc`/`postgresql_18`/`pkg-config`/`gcc` build
+and run `lemmy_server` directly, and `clippy`/`rustfmt` round out the seven
+because they're the Rust toolchain's OWN lint/format tools (driven by
+`.woodpecker.yml`'s `cargo clippy`/`cargo fmt` steps and `.rustfmt.toml`,
+per lemmy-notes.md) — installing them is installing more of the same
+toolchain, not scope creep. A third-party formatter or linter with no
+toolchain relationship to the runtime being installed (a standalone binary
+like `taplo`, `typos`, or `shfmt`) is a different case — CI-only, opt-in,
+and belongs in the conversion report rather than `[install]`.
+
+- **CI-only third-party lint/format tooling** (`taplo`, `typos`, `shfmt`,
+  `pgformatter`, and similar standalone tools with no toolchain
+  relationship to the runtime you're installing) is opt-in, not a default
   install — mention it in the conversion report instead of adding it to
   `[install]`, so the developer can bring it in themselves if they want it.
+  A lint/format tool that ships from the SAME catalog page as the
+  language's own toolchain (`clippy`/`rustfmt` alongside `cargo`/`rustc`
+  for Rust) is a different case — see the carve-out above.
 - **Don't install `git` as an env dependency** unless a build step
   genuinely shells out to it — a `build.rs` that clones a dependency, or a
-  `git+` source in `Cargo.lock`/the lockfile. A CI runner installing `git`
-  to check out the repo, or a Dockerfile installing it in the runtime
-  image, is not evidence the BUILD needs it — same builder-vs-runner-stage
-  distinction as the Dockerfile rule above.
+  `git+` source in `Cargo.lock`/the lockfile. Lemmy has zero `git+` sources
+  in `Cargo.lock` (confirmed in lemmy-notes.md) and modern cargo uses the
+  sparse crates.io index, not git — a CI runner installing `git` to check
+  out the repo, or a Dockerfile installing it in the runtime image, is not
+  evidence the BUILD needs it — same builder-vs-runner-stage distinction as
+  the Dockerfile rule above.
 - **A tool referenced only by a script the Flox service replaces doesn't
   carry over.** Lemmy's `jq` existed solely to URL-encode a socket path in
-  `scripts/start_dev_db.sh`; once `[services.postgres]` wires the DB
-  directly (the hard floor above), that script — and its dependency — is
-  no longer in the loop. Don't install a deferred script's own
-  dependencies once you've stopped deferring to it.
+  `scripts/start_dev_db.sh` (per lemmy-notes.md); once `[services.postgres]`
+  wires the DB directly (the hard floor above), that script — and its
+  dependency — is no longer in the loop. Don't install a deferred script's
+  own dependencies once you've stopped deferring to it.
 
 ### Custom service orchestrators
 
@@ -725,7 +738,7 @@ Do not invent syntax.
 - `$FLOX_ENV_PROJECT` — the project root directory
 - `[hook] on-activate` runs as Bash; its output goes to stderr
 - `[profile]` scripts are sourced into the user's interactive shell — keep fast, use for venv activation
-- Services: each service is `[services.<name>]` with `command = "..."` on its own
+- Services: each service is `[services.<name>]` with `command = '...'` on its own
 - `[hook] on-activate` and `[services.*] command` use **literal** strings —
   `'''…'''` for multi-line, `'…'` for one-line — never TOML's basic
   `"""…"""`/`"…"` strings (see "TOML string types" below)
@@ -736,11 +749,17 @@ backslash, or a literal `\d`/`\.` inside a path or regex, gets consumed as a
 TOML escape sequence before the shell ever sees it, silently truncating or
 corrupting the command. Literal strings (`'''…'''`, `'…'`) leave backslashes
 and `$` completely inert, so the shell script reads exactly as written.
-Every `[hook] on-activate` and `[services.*] command` in this skill's own
-patterns, and every file in `evals/floxify/gold/` and
-`evals/floxify/testdata/gold/`, uses `'''…'''` for this reason — e.g.
+Every `[hook] on-activate` and `[services.*] command` this skill's own
+patterns emit uses `'''…'''` for this reason — e.g.
 `evals/floxify/gold/node-postgres.toml`'s `on-activate` and `command` blocks
-are both `'''…'''`.
+are both `'''…'''` (that file's postgres service still uses the old TCP
+default this same PR replaces — cited here only for its string type, not
+its socket/TCP shape; see "Pattern: PostgreSQL as a Flox service" below
+for the current default). Not every `testdata/gold/*.toml` reference
+follows the literal-string rule yet — `firefly-iii.toml`, `lemmy.toml`, and
+`supabase.toml` still carry a basic-string block each — that gap is a
+separate, pre-existing golden defect (tracked outside this guidance-only
+change), not something this rule claims is already universal.
 
 **Pkg-group economy — fewest groups possible is a first-order goal.** Every
 distinct `pkg-group` is a distinct catalog page, and every page downloads its
@@ -832,26 +851,34 @@ before it ships — either find its provenance or drop it.
 **Emitting an exact pin: `<id>.version` alongside `<id>.pkg-path`.** When
 the repo pins an exact patch — `.nvmrc`/`.node-version` with a full
 `X.Y.Z`, a `packageManager` exact version, `rust-toolchain.toml` with a
-dated channel — `pkg-path` alone isn't enough: it resolves to whatever the
-catalog's current default is for that page, which drifts as the catalog
-moves forward. Add `<id>.version = "<exact>"` so the manifest is pinned to
-the specific patch, not just the major/minor line. Resolve the value the
-same way as any other version check ("Reading `flox show` correctly"
-above): read the FULL version list for the versioned pkg-path, and use the
-exact string `flox show` prints.
+dated channel, or a `.tool-versions`/`.mise.toml` entry pinning a patch —
+`pkg-path` alone isn't enough: it resolves to whatever the catalog's
+current default is for that page, which drifts as the catalog moves
+forward. Add `<id>.version = "<exact>"` so the manifest is pinned to the
+specific patch, not just the major/minor line. Resolve the value the same
+way as any other version check ("Reading `flox show` correctly" above):
+read the FULL version list for the versioned pkg-path, and use the exact
+string `flox show` prints — **always against a live `flox show`, never a
+number remembered from this guidance or an earlier run**, since the
+catalog moves forward continuously and yesterday's gap can be today's
+exact match (or vice versa).
 
 If the catalog doesn't carry the repo's exact patch, pin the closest
 available instead of inventing a `version` value that doesn't resolve, and
 say so in the same source-attribution comment the install line already
-carries (see "Version mismatches" in Phase 2) — the attribution convention
-already exists, emitting the `version` field alongside it is what's new
-here. `evals/floxify/testdata/gold/mastodon.toml` is the worked example:
-`.nvmrc` pins Node `24.18` and the catalog has that exact patch, so
-`nodejs.version = "24.18.0"` is a clean exact match; `.ruby-version` pins
-Ruby `4.0.6` but the catalog's newest `ruby_4_0` build is `4.0.5`, so
-`ruby.version = "4.0.5"` pins the closest available with the gap recorded
-in the trailing comment (`# catalog max is 4.0.5; repo pins 4.0.6 (1 patch
-ahead, not yet in catalog)`).
+carries (see "Version mismatches" in Phase 2, and the `packageManager` /
+Mise-asdf entries under "Search term strategies" above) — the attribution
+convention already exists; emitting the `version` field alongside it
+closes that gap. `evals/floxify/testdata/gold/mastodon.toml` is the worked
+example for the mechanism: `.nvmrc` pins Node `24.18`, the catalog carries
+that exact patch, so `nodejs.version = "24.18.0"` is a clean exact match
+(live-verified 2026-07-18). `.ruby-version` pins Ruby `4.0.6` — check
+whether the versioned `ruby_4_0` pkg-path carries that exact patch or only
+the nearest prior one at the time you run the skill, pin whichever `flox
+show` confirms, and record any gap in the trailing comment the same way
+the mastodon golden's comment does (`# catalog max is <X>; repo pins
+4.0.6 (<N> patch(es) ahead, verify live)`) — don't copy the specific
+numbers from this guidance as if they were current.
 
 **Platform-conditional packages** — when a dependency is only relevant on certain
 platforms, use the per-package `systems` field to scope it. Never skip it or bury it
@@ -930,21 +957,41 @@ catalog for that EXACT version FIRST — `flox show pnpm_<major>` / `flox show
 yarn-berry`, reading the full version list per "Reading `flox show`
 correctly" above, not just `Latest:`. If the exact patch resolves, install
 it directly with `<id>.pkg-path` + `<id>.version` (see "Emitting an exact
-pin" above) — mastodon pins `packageManager "yarn@4.17.1"` and the catalog
-serves `yarn-berry` at that line, so the golden installs it directly, no
-corepack involved (`evals/floxify/testdata/gold/mastodon.toml`).
+pin" above) — supabase pins `packageManager "pnpm@10.24.0"` and the catalog
+carries `pnpm_10@10.24.0` exactly, so the golden installs it directly with
+`pnpm_10.version = "10.24.0"`, no corepack involved (live-verified
+2026-07-18; `evals/floxify/testdata/gold/supabase.toml`).
 
 Fall back to **corepack** only when the catalog genuinely can't satisfy the
-pin — the nearest `pnpm_<major>`/`yarn-berry` floor exceeds it, or an
-`.npmrc` `engine-strict=true` rejects the nearest available patch. PostHog
-pins `pnpm@10.29.3` against a catalog ceiling of `10.29.2` — one patch short
-— so its golden provisions pnpm through corepack instead
-(`evals/floxify/testdata/gold/posthog.toml`). **State the tradeoff when you
-do this:** corepack downloads the package manager over the network on first
-activate, unlike a catalog package (resolved once and reused on every
-future activation) — an offline-fragile step that's only worth it when the
-catalog genuinely can't serve the exact pin. Provision into a *writable*
-cache dir (the Nix node prefix is a read-only store path):
+pin — the nearest `pnpm_<major>`/`yarn-berry` version is a gap short of the
+exact patch, or an `.npmrc` `engine-strict=true` rejects the nearest
+available one. **Verify this against a live `flox show` before trusting any
+specific version numbers below** — the catalog moves forward continuously,
+so a gap observed on one day can close by the next; treat the mechanism as
+the lesson, not the numbers. Two worked cases from the goldens:
+
+- PostHog pins `pnpm@10.29.3`; the nearest catalog patch is `10.29.2` — a
+  gap in the version list, not a ceiling (the catalog's `pnpm_10` line
+  continues well past `10.29.x`), but still short of the exact repo pin —
+  so its golden provisions pnpm through corepack instead (verified
+  2026-07-17; `evals/floxify/testdata/gold/posthog.toml`).
+- Mastodon pins `packageManager "yarn@4.17.1"`, but its golden installs
+  `yarn-berry` with NO `.version` field at all
+  (`evals/floxify/testdata/gold/mastodon.toml`) — not because corepack is
+  needed here either, but because Yarn Berry doesn't need the catalog
+  exact match OR corepack: `.yarn/releases/yarn-<version>.cjs`, checked
+  into the repo and referenced by `.yarnrc.yml`, IS the pinned binary — the
+  catalog `yarn-berry` package only bootstraps it. When you find a
+  checked-in `.yarn/releases/`, install the unpinned catalog package and
+  let the repo's own vendored binary self-delegate to the exact version —
+  no `<id>.version`, no corepack.
+
+**State the tradeoff when corepack is genuinely needed:** it downloads the
+package manager over the network on first activate, unlike a catalog
+package (resolved once and reused on every future activation) — an
+offline-fragile step that's only worth it when the catalog genuinely can't
+serve the exact pin. Provision into a *writable* cache dir (the Nix node
+prefix is a read-only store path):
 
 ```toml
 [hook]
@@ -1063,65 +1110,89 @@ Use ONLY when docker-compose does NOT already manage postgres.
 collides with a developer's own host Postgres, which defaults to the exact
 same port — floxify exists to remove that kind of manual conflict, not
 recreate it. `-k` plus `listen_addresses=""` disables TCP entirely and
-scopes the connection to a socket file instead, so a floxified project's
-Postgres, a host-installed one, and another floxified project can all run
-side by side without a port clash.
+scopes the connection to a socket file instead. Name the socket directory
+after the project (`/tmp/myapp-postgres`, not bare `/tmp`) — Postgres's
+socket filename is derived from the port (`.s.PGSQL.5432`), so two
+floxified projects both defaulting to port 5432 would still collide on a
+bare `/tmp` even with TCP disabled.
 
 ```toml
 [install]
 postgresql_16.pkg-path = "postgresql_16"
 
 [vars]
-PGHOST = "/tmp"
+PGHOST = "/tmp/myapp-postgres"
 PGPORT = "5432"
 PGUSER = "postgres"
 PGDATABASE = "myapp_dev"
 
 [hook]
 on-activate = '''
-  export PGDATA="$FLOX_ENV_CACHE/postgres"
-  if [ ! -d "$PGDATA" ]; then
-    initdb -D "$PGDATA" \
+  mkdir -p "$PGHOST"
+  if [ ! -d "$FLOX_ENV_CACHE/postgres" ]; then
+    initdb -D "$FLOX_ENV_CACHE/postgres" \
       --username="$PGUSER" \
       --auth=trust \
       --no-locale \
       --encoding=UTF8 >&2
-    pg_ctl -D "$PGDATA" -o "-p $PGPORT -k $PGHOST" \
-      -l "$PGDATA/init.log" start
+    pg_ctl -D "$FLOX_ENV_CACHE/postgres" \
+      -o "-p $PGPORT -k $PGHOST -c listen_addresses=''" \
+      -l "$FLOX_ENV_CACHE/postgres/init.log" start
     until pg_isready -h "$PGHOST" -p "$PGPORT" -q; do sleep 0.2; done
     createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$PGDATABASE"
-    pg_ctl -D "$PGDATA" stop -m fast
+    pg_ctl -D "$FLOX_ENV_CACHE/postgres" stop -m fast
   fi
 '''
 
 [services.postgres]
 command = '''
   exec postgres \
-    -D "$PGDATA" \
+    -D "$FLOX_ENV_CACHE/postgres" \
     -p "$PGPORT" \
     -k "$PGHOST" \
     -c listen_addresses=""
 '''
 ```
 
+The one-time init inside `on-activate` needs `-c listen_addresses=''` too
+(not just the steady-state `[services.postgres]` block) — without it, the
+FRESH cluster still tries to bind TCP 5432 during `initdb`'s bootstrap
+start, and in the exact scenario this pattern targets (a host Postgres
+already holding 5432) that bind fails silently and the following `until
+pg_isready` loop hangs first activation forever. (Live-verified: `pg_ctl
+-o "... -c listen_addresses=''"` starts socket-only, confirmed against a
+real `flox activate`-managed postgresql_16 on 2026-07-18.)
+
 `PGHOST` set to a directory (not a hostname) is standard libpq — any driver
 built on it (`psql`, the `pg` gem, `psycopg2`) resolves it to the socket
-automatically, no app-side change needed.
-`auth=trust` is dev-only — always note in the report: `(dev-only auth — not safe for shared machines)`
+automatically, no app-side change needed. This is transparent for
+libpq-style consumers only: an app with an explicit
+`DATABASE_URL=postgres://user:pass@localhost:5432/db` that it parses
+itself (Prisma and similar ORMs) ignores `PGHOST` entirely and tries the
+now-disabled TCP port — check how the app actually connects before
+assuming the socket alone is enough; see the TCP-exception case below for
+what to do when it doesn't. `auth=trust` is dev-only — always note in the
+report: `(dev-only auth — not safe for shared machines)`
 
-**TCP is a deliberate, recorded exception — never the silent default.** Add
-it back only when the app genuinely can't consume a socket-directory DSN: a
-driver that requires a `host:port` connection string, or a codebase with two
-DB drivers where only one accepts a socket path. When that applies, set
-`PGHOST` to a real loopback address and restore `-c
-listen_addresses="$PGHOST"`, and record the reason in a comment next to
-`[services.postgres]` — the same recorded-reason discipline as an exact
-version pin (see "Version-pinning discipline" above). Lemmy is the worked
-example: it keeps `127.0.0.1:5432` alongside a `/tmp/lemmy-postgres` socket
-because `LEMMY_DATABASE_URL` must stay byte-identical to the repo's own
-`postgres://lemmy:password@localhost:5432/lemmy` default across two DB
-drivers, one of which can't take a socket path
-(`evals/floxify/testdata/gold/lemmy.toml`).
+**TCP is a deliberate, recorded exception — add it alongside the socket,
+never in place of it.** Some apps need a `host:port` connection string —
+a driver that can't parse a socket-directory DSN, or a codebase that must
+keep a `DATABASE_URL` byte-identical to a documented default — even though
+the socket stays useful for everything else. When that applies, keep `-k
+"$PGHOST"` and add a literal TCP bind next to it (`-h 127.0.0.1 -p
+"$PGPORT"`, or `-c listen_addresses="127.0.0.1"`) — don't repurpose
+`PGHOST` into a hostname, which drops the socket the rest of the pattern
+depends on. Record the reason in a comment next to `[services.postgres]`,
+the same recorded-reason discipline as an exact version pin (see
+"Version-pinning discipline" above). Lemmy is the worked example
+(`evals/floxify/testdata/gold/lemmy.toml:84`): `exec postgres -D "$PGDATA"
+-k "$PGSOCKET" -h 127.0.0.1 -p 5432` serves the socket AND loopback TCP
+together, because `LEMMY_DATABASE_URL` must stay byte-identical to the
+repo's own `postgres://lemmy:password@localhost:5432/lemmy` default —
+avoiding fragile socket-path URL encoding across lemmy's two DB drivers,
+not because either driver is hard-incapable of a socket. (Live-verified:
+`postgres -k <dir> -h 127.0.0.1 -p <port>` accepts connections on both
+transports simultaneously, confirmed 2026-07-18.)
 
 Redis service (add alongside postgres when both are needed):
 
@@ -1130,7 +1201,7 @@ Redis service (add alongside postgres when both are needed):
 redis.pkg-path = "redis"
 
 [vars]
-REDIS_SOCKET = "/tmp/myapp-redis.sock"
+REDIS_URL = "redis://localhost:6379"
 
 [hook]
 on-activate = '''
@@ -1140,29 +1211,29 @@ on-activate = '''
 [services.redis]
 command = '''
   exec redis-server \
-    --unixsocket "$REDIS_SOCKET" \
-    --port 0 \
+    --port 6379 \
+    --unixsocket /tmp/myapp-redis.sock \
     --dir "$FLOX_ENV_CACHE/redis" \
     --save "" \
     --appendonly no
 '''
 ```
 
-`--port 0` disables Redis's TCP listener entirely, matching the postgres
-default above — socket-only. Name the socket file after the project
-(`myapp-redis.sock`, not a generic `redis.sock`) so two floxified projects
-on the same machine don't collide in `/tmp`. `--save ""` and `--appendonly
-no` disable persistence (dev-appropriate). Always note in the report:
-`(no persistence — data resets on service stop; edit manifest if you need durability)`
-
-**Same TCP-as-exception rule as postgres.** When the app's Redis client
-needs `REDIS_HOST`/`REDIS_PORT` or a `redis://host:port` URL and can't take
-a socket path, keep TCP alongside the socket rather than dropping it — use
-`--port 6379` instead of `--port 0`, add the `REDIS_URL`/`REDIS_HOST` vars
-the app reads, and record why. Mastodon does exactly this:
-`REDIS_URL = "redis://localhost:6379"` alongside a `/tmp` unix socket,
-because both its Rails app and its separate Node streaming service read
-`REDIS_URL` in host:port form (`evals/floxify/testdata/gold/mastodon.toml`).
+**Default to TCP on 6379 with a unix socket wired alongside it — not
+socket-only.** Unlike libpq, no standard Redis client reads a socket-path
+env var the way `psql` reads `PGHOST`; an app with `REDIS_URL` unset still
+falls back to `redis://127.0.0.1:6379`, so disabling TCP breaks the common
+case instead of fixing a collision. Every Redis golden confirms this:
+mastodon, posthog, and sentry all keep `--port 6379` and add `--unixsocket`
+beside it (`evals/floxify/testdata/gold/mastodon.toml`, `posthog.toml`,
+`sentry.toml`); firefly-iii keeps TCP with no socket at all
+(`evals/floxify/testdata/gold/firefly-iii.toml`) — zero goldens run
+socket-only. `--unixsocket` is there for the app that CAN use one — name
+the socket file after the project (`myapp-redis.sock`, not a generic
+`redis.sock`) so it doesn't collide with another floxified project's
+socket in `/tmp`. `--save ""` and `--appendonly no` disable persistence
+(dev-appropriate). Always note in the report: `(no persistence — data
+resets on service stop; edit manifest if you need durability)`
 
 ---
 
