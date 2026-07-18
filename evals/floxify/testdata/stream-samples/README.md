@@ -57,3 +57,56 @@ No credentials, tokens, or private data — the transcript is a public
 `flox search hello` catalog query. The one namespace it surfaces
 (`billlevine/hello`) is a published Flox catalog package name, not a
 secret.
+
+## C1 fix verification: `skills-arm-setting-sources-sample.jsonl` /
+## `baseline-arm-setting-sources-sample.jsonl`
+
+A live PR #57 review caught that `flox-search-sample.jsonl` above is
+itself a reproduction of a real bug: it was captured with NEITHER
+`--plugin-dir` NOR `--setting-sources`, and its `init` event shows the
+`flox` plugin loaded anyway (`slash_commands` includes `flox:floxify`,
+`plugins` includes `{"name": "flox", "source": "flox@flox-skills"}`) —
+this machine's user-scope `~/.claude/settings.json` has
+`flox@flox-skills` enabled in `enabledPlugins`, and
+`--strict-mcp-config` only gates MCP servers, not plugins. The
+"baseline" arm would have silently run WITH the skill loaded.
+
+Fix: `--setting-sources project,local` on both arms (excludes the
+user-scope settings file, so its `enabledPlugins` entry never
+applies). Two more sanctioned live calls proved both directions with
+the fix in place:
+
+```bash
+# Skills arm: --setting-sources PLUS --plugin-dir
+claude -p "Say hello, do not use any tools." \
+  --model claude-opus-4-8 --output-format stream-json --verbose \
+  --allowedTools Bash Read Write Edit Skill --strict-mcp-config \
+  --setting-sources project,local \
+  --plugin-dir "<repo>/flox-plugin" \
+  > skills-arm-setting-sources-sample.jsonl
+
+# Baseline arm: --setting-sources, NO --plugin-dir
+claude -p "Say hello, do not use any tools." \
+  --model claude-opus-4-8 --output-format stream-json --verbose \
+  --allowedTools Bash Read Write Edit Skill --strict-mcp-config \
+  --setting-sources project,local \
+  > baseline-arm-setting-sources-sample.jsonl
+```
+
+Results:
+
+- **Skills arm still loads the plugin** — `slash_commands` still
+  includes `flox:flox`/`flox:floxify`, and `plugins` still lists it,
+  now with `"source": "flox@inline"` (pointing at the local
+  `--plugin-dir` path) instead of `"flox@flox-skills"` (the user-scope
+  marketplace cache) — even better than expected: it also proves the
+  in-worktree skill code is what actually loads, not some stale cached
+  copy.
+- **Baseline arm is genuinely clean** — `plugins: []`,
+  zero `flox:`-prefixed `slash_commands` (43 total, none of them
+  flox-related).
+- `_detect_flox_plugin_contamination` (the runtime belt-and-suspenders
+  guard) was run directly against both real captured `init` events:
+  returns `False` for the baseline sample, `True` for the skills
+  sample and for the original `flox-search-sample.jsonl` — matching
+  every expectation above.

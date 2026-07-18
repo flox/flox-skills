@@ -496,6 +496,21 @@ class TestClassifyToolCalls(unittest.TestCase):
         counts = run_floxify._classify_tool_calls(events)
         self.assertEqual(counts["flox_search"], 1)
 
+    def test_multiline_bash_block_counts_every_line_not_just_the_first(self):
+        # AI-442 I1 (review-found): a Bash tool_use commonly carries a
+        # MULTILINE script -- without \n in the separator class, every
+        # line but the first was invisible, undercounting exactly the
+        # reps that issued several catalog lookups in one Bash call.
+        events = [{
+            "type": "assistant",
+            "message": {"content": [
+                {"type": "tool_use", "name": "Bash",
+                 "input": {"command": "flox search nodejs\nflox show nodejs_20"}},
+            ]},
+        }]
+        counts = run_floxify._classify_tool_calls(events)
+        self.assertEqual(counts, {"total": 1, "flox_search": 1, "flox_show": 1})
+
     def test_mention_of_flox_search_in_unrelated_text_does_not_count(self):
         # "flox search" as a SUBSTRING mid-word/mid-sentence, not a
         # leading command, must not be mistaken for an invocation.
@@ -571,6 +586,218 @@ class TestParseStream(unittest.TestCase):
         self.assertEqual(result_text, "")
         self.assertEqual(meta["cost_usd"], 0.0)  # no result event -> no cost data
         self.assertEqual(meta["tool_calls"]["flox_search"], 1)  # but tool calls still counted
+
+
+# ---------------------------------------------------------------------------
+# AI-442 C1 (review-found Critical): a live review caught that this
+# machine's user-scope ~/.claude/settings.json has flox@flox-skills
+# enabled in enabledPlugins, and --strict-mcp-config only gates MCP
+# servers, not plugins -- so the "baseline" arm would silently run WITH
+# the skill loaded. The committed testdata/stream-samples/flox-search-
+# sample.jsonl (captured with NEITHER --plugin-dir NOR --setting-sources)
+# is itself the reproduction: its init event shows the flox plugin
+# loaded despite never being requested.
+# ---------------------------------------------------------------------------
+
+REAL_CONTAMINATED_INIT_EVENT = next(
+    json.loads(l) for l in STREAM_SAMPLE.splitlines()
+    if l.strip() and json.loads(l).get("type") == "system"
+    and json.loads(l).get("subtype") == "init"
+)
+
+# The two follow-up sanctioned live calls made to verify the C1 fix
+# (--setting-sources project,local): one with --plugin-dir (skills arm,
+# must still load the plugin), one without (baseline arm, must NOT).
+# See testdata/stream-samples/README.md's "C1 fix verification" section.
+SKILLS_ARM_SAMPLE = (
+    run_floxify.HERE / "testdata" / "stream-samples"
+    / "skills-arm-setting-sources-sample.jsonl"
+).read_text(encoding="utf-8")
+BASELINE_ARM_SAMPLE = (
+    run_floxify.HERE / "testdata" / "stream-samples"
+    / "baseline-arm-setting-sources-sample.jsonl"
+).read_text(encoding="utf-8")
+
+
+class TestC1FixRealCapturedEvidence(unittest.TestCase):
+    """Encodes the review's demanded two-arm demonstration as a
+    permanent regression test, not just a one-off manual verification:
+    real `claude` calls, both with --setting-sources project,local,
+    differing only in --plugin-dir presence."""
+
+    def test_skills_arm_with_setting_sources_still_loads_the_plugin(self):
+        init_event = run_floxify._find_init_event(SKILLS_ARM_SAMPLE)
+        self.assertIsNotNone(init_event)
+        self.assertTrue(run_floxify._detect_flox_plugin_contamination(init_event))
+        # Loaded from the local --plugin-dir path, not the user-scope
+        # marketplace cache -- proves --setting-sources excluded the
+        # cached copy without breaking the CLI-level plugin load.
+        sources = [p.get("source") for p in init_event.get("plugins", [])]
+        self.assertIn("flox@inline", sources)
+
+    def test_baseline_arm_with_setting_sources_is_genuinely_clean(self):
+        init_event = run_floxify._find_init_event(BASELINE_ARM_SAMPLE)
+        self.assertIsNotNone(init_event)
+        self.assertEqual(init_event.get("plugins"), [])
+        self.assertFalse(run_floxify._detect_flox_plugin_contamination(init_event))
+
+
+class TestFindInitEvent(unittest.TestCase):
+    def test_finds_the_real_captured_streams_init_event(self):
+        event = run_floxify._find_init_event(STREAM_SAMPLE)
+        self.assertIsNotNone(event)
+        self.assertEqual(event["type"], "system")
+        self.assertEqual(event["subtype"], "init")
+
+    def test_returns_none_when_no_init_event_present(self):
+        stream = '{"type": "assistant", "message": {"content": []}}\n'
+        self.assertIsNone(run_floxify._find_init_event(stream))
+
+    def test_returns_none_for_empty_stream(self):
+        self.assertIsNone(run_floxify._find_init_event(""))
+
+    def test_garbled_lines_do_not_raise(self):
+        stream = "not json\n" + STREAM_SAMPLE
+        event = run_floxify._find_init_event(stream)
+        self.assertIsNotNone(event)
+
+
+class TestDetectFloxPluginContamination(unittest.TestCase):
+    def test_real_captured_init_event_is_detected_as_contaminated(self):
+        # This is the actual reproduction: my own sanctioned flag-
+        # verification call (no --plugin-dir, no --setting-sources)
+        # still loaded the flox plugin on this machine.
+        self.assertTrue(
+            run_floxify._detect_flox_plugin_contamination(REAL_CONTAMINATED_INIT_EVENT)
+        )
+
+    def test_plugin_named_flox_via_flox_skills_source_is_detected(self):
+        init_event = {"plugins": [{"name": "flox", "source": "flox@flox-skills"}]}
+        self.assertTrue(run_floxify._detect_flox_plugin_contamination(init_event))
+
+    def test_plugin_named_flox_via_flox_marketplace_source_is_detected(self):
+        # This machine's settings.json has BOTH flox@flox-marketplace and
+        # flox@flox-skills enabled -- either marketplace name must trip
+        # the guard, not just the one in the reproduction fixture.
+        init_event = {"plugins": [{"name": "flox", "source": "flox@flox-marketplace"}]}
+        self.assertTrue(run_floxify._detect_flox_plugin_contamination(init_event))
+
+    def test_flox_slash_command_alone_is_detected(self):
+        # Redundant signal: even if the `plugins` list's shape changes
+        # upstream, a flox: slash command being present is independent
+        # evidence of contamination.
+        init_event = {"plugins": [], "slash_commands": ["flox:floxify"]}
+        self.assertTrue(run_floxify._detect_flox_plugin_contamination(init_event))
+
+    def test_clean_init_event_with_unrelated_plugins_is_not_detected(self):
+        init_event = {
+            "plugins": [{"name": "slack", "source": "slack@claude-plugins-official"}],
+            "slash_commands": ["slack:standup", "clipboard"],
+        }
+        self.assertFalse(run_floxify._detect_flox_plugin_contamination(init_event))
+
+    def test_no_plugins_or_slash_commands_key_is_not_detected(self):
+        self.assertFalse(run_floxify._detect_flox_plugin_contamination({}))
+
+    def test_none_init_event_is_not_detected(self):
+        # _find_init_event returns None when no init event was found at
+        # all -- must not raise, must not false-positive.
+        self.assertFalse(run_floxify._detect_flox_plugin_contamination(None))
+
+    def test_malformed_plugins_entries_do_not_raise(self):
+        init_event = {"plugins": [None, "not a dict", 42], "slash_commands": None}
+        self.assertFalse(run_floxify._detect_flox_plugin_contamination(init_event))
+
+
+class TestRunClaudeAgentArmIsolation(unittest.TestCase):
+    """The design doc's own required test ("assert --arm baseline omits
+    --plugin-dir from the argv and --arm skills includes it"), plus the
+    AI-442 C1 fix on top: --setting-sources on both arms, and the
+    baseline-arm runtime contamination guard."""
+
+    def _mock_stream_proc(self, extra_events=""):
+        result_event = json.dumps({
+            "type": "result", "total_cost_usd": 0.01, "usage": {},
+            "duration_ms": 100, "num_turns": 1, "result": "done",
+        })
+        stdout = extra_events + result_event + "\n"
+        return MagicMock(returncode=0, stdout=stdout, stderr="")
+
+    @patch("run_floxify.subprocess.run")
+    def test_skills_arm_includes_plugin_dir(self, mock_run):
+        mock_run.return_value = self._mock_stream_proc()
+        run_floxify._run_claude_agent("prompt", "/some/skill/dir", arm="skills")
+        cmd = mock_run.call_args.args[0]
+        self.assertIn("--plugin-dir", cmd)
+        self.assertIn("/some/skill/dir", cmd)
+
+    @patch("run_floxify.subprocess.run")
+    def test_baseline_arm_omits_plugin_dir(self, mock_run):
+        mock_run.return_value = self._mock_stream_proc()
+        run_floxify._run_claude_agent("prompt", "/some/skill/dir", arm="baseline")
+        cmd = mock_run.call_args.args[0]
+        self.assertNotIn("--plugin-dir", cmd)
+        self.assertNotIn("/some/skill/dir", cmd)
+
+    @patch("run_floxify.subprocess.run")
+    def test_both_arms_pass_setting_sources_project_local(self, mock_run):
+        mock_run.return_value = self._mock_stream_proc()
+        for arm in ("skills", "baseline"):
+            mock_run.reset_mock()
+            run_floxify._run_claude_agent("prompt", "/some/skill/dir", arm=arm)
+            cmd = mock_run.call_args.args[0]
+            idx = cmd.index("--setting-sources")
+            self.assertEqual(cmd[idx + 1], "project,local")
+
+    @patch("run_floxify.subprocess.run")
+    def test_contaminated_baseline_rep_is_discarded_as_arm_contamination(self, mock_run):
+        # Real captured init event (contaminated) followed by a normal
+        # result event -- the exact shape a leak would actually produce.
+        init_line = json.dumps(REAL_CONTAMINATED_INIT_EVENT)
+        mock_run.return_value = self._mock_stream_proc(extra_events=init_line + "\n")
+        result_text, err, meta = run_floxify._run_claude_agent(
+            "prompt", "/some/skill/dir", arm="baseline",
+        )
+        self.assertIsNone(result_text)
+        self.assertIsNotNone(err)
+        self.assertIn("arm contamination", err)
+        self.assertEqual(meta, run_floxify.ZERO_META)
+
+    @patch("run_floxify.subprocess.run")
+    def test_contaminated_init_event_does_not_flag_the_skills_arm(self, mock_run):
+        # The skills arm is SUPPOSED to have the plugin loaded -- the
+        # same init event must not trip the guard there.
+        init_line = json.dumps(REAL_CONTAMINATED_INIT_EVENT)
+        mock_run.return_value = self._mock_stream_proc(extra_events=init_line + "\n")
+        result_text, err, meta = run_floxify._run_claude_agent(
+            "prompt", "/some/skill/dir", arm="skills",
+        )
+        self.assertIsNone(err)
+        self.assertEqual(result_text, "done")
+
+    @patch("run_floxify.subprocess.run")
+    def test_clean_baseline_rep_is_not_flagged(self, mock_run):
+        # A normal, uncontaminated stream (no init event at all in this
+        # minimal mock) must not be mistaken for contamination.
+        mock_run.return_value = self._mock_stream_proc()
+        result_text, err, meta = run_floxify._run_claude_agent(
+            "prompt", "/some/skill/dir", arm="baseline",
+        )
+        self.assertIsNone(err)
+        self.assertEqual(result_text, "done")
+
+    @patch("run_floxify.time.sleep")
+    @patch("run_floxify.subprocess.run")
+    def test_contamination_does_not_consume_a_retry_attempt(self, mock_run, mock_sleep):
+        # A leak is a deterministic property of the environment, not a
+        # transient flake -- retrying would just reproduce it. The call
+        # must return immediately rather than looping through `retries`.
+        init_line = json.dumps(REAL_CONTAMINATED_INIT_EVENT)
+        mock_run.return_value = self._mock_stream_proc(extra_events=init_line + "\n")
+        run_floxify._run_claude_agent(
+            "prompt", "/some/skill/dir", arm="baseline", retries=3,
+        )
+        self.assertEqual(mock_run.call_count, 1)
 
 
 # ---------------------------------------------------------------------------
