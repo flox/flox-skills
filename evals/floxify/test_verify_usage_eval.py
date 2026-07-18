@@ -67,7 +67,7 @@ class TestIsVerifierInvocation(unittest.TestCase):
         )
 
 
-class TestViaFloxRun(unittest.TestCase):
+class TestViaFloxRunVerify(unittest.TestCase):
     """Reused from detect_usage_eval — verify the shared helper still
     applies to verify.py's own command line."""
 
