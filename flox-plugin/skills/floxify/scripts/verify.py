@@ -49,6 +49,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
+# intentional self-contained copy — keep aligned with the twin in detect.py
 try:
     import tomllib  # Python 3.11+
 except ImportError:  # pragma: no cover - fallback for < 3.11
@@ -101,6 +102,8 @@ def advisory_violations(violations_or_result):
 # manifest parsing
 # ---------------------------------------------------------------------------
 
+# intentional self-contained copy — keep aligned with the twin
+# (_parse_toml) in detect.py
 def parse_manifest(text):
     """Parse manifest.toml text. Returns (manifest_dict, error) — one is None."""
     if tomllib is None:
@@ -286,6 +289,7 @@ RUNTIME_PKG_PATTERNS = {
 # RUNTIME_PKG_PATTERNS key or has a documented reason here for staying out.
 # test_verify.py asserts this list is exhaustive against detect.py's own
 # TOOL_LANG, so a new language added there fails CI until it's triaged here.
+# runtime-inert; test_verify.py exhaustiveness anchor only
 RUNTIME_PATTERNS_DELIBERATELY_EXCLUDED = {
     # Bundled inside the `elixir` catalog package -- the skill's own
     # guidance (SKILL.md) is "do NOT add erlang separately". A standalone

@@ -31,6 +31,7 @@ import re
 import sys
 from pathlib import Path
 
+# intentional self-contained copy — keep aligned with the twin in verify.py
 try:
     import tomllib  # Python 3.11+
 except ImportError:  # pragma: no cover - fallback for < 3.11
@@ -216,6 +217,8 @@ def _add_clients(dep_names, source, acc, scope="runtime"):
                         "source": source, "scope": scope})
 
 
+# intentional self-contained copy — keep aligned with the twin
+# (parse_manifest) in verify.py
 def _parse_toml(text):
     if not text or tomllib is None:
         return None
