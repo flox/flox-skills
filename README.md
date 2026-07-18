@@ -27,6 +27,61 @@ any new project. Covers:
 - Publishing packages/builds to FloxHub — org/personal namespaces, versioning, distribution (see `references/publish.md`)
 - CUDA and GPU development (Linux) — NVIDIA CUDA toolkit, cuDNN, deep-learning frameworks, cross-platform GPU/CPU (see `references/cuda.md`)
 
+## Measured Benefits
+
+The skill is measured continuously against a no-skill baseline in
+`evals/floxify/` — two arms with an identical tool surface where the
+only variable is the skill. Latest batch: five fixture repositories
+(Go, Ruby, Rust, Python/uv, Node+Postgres) × 8 reps per arm on
+Claude Opus, each rep graded against a verified working environment
+(activation, and live services where the repo needs them).
+
+**Portable-by-construction environments.** Without the skill, more
+than half of baseline runs (56%) produced a manifest with a hard
+portability defect — most often declaring platforms the pinned
+package cannot actually serve, an environment that works on the
+author's machine and breaks for the next platform. Skill-guided
+runs produced zero hard violations across 39 verified reps, passed
+100% of fixture hard checks (baseline: 85%), and scored 4.3 vs 2.7
+on the 1–5 quality judge.
+
+**Fewer agent turns where wiring judgment lives.** On repos that
+need real service wiring, the skill reaches a verified working
+environment in materially fewer turns (Node+Postgres: median 13 vs
+18.5; Python/uv: 20.5 vs 28.5) — and the only run in the batch that
+failed verification was a baseline run. On simple single-toolchain
+repos a frontier model is already fluent, and the skill's checking
+discipline costs a few extra turns there; the win on those repos is
+the portability guarantee above, not speed.
+
+**Cost.** A full skill-guided conversion lands at roughly
+$0.50–1.50 per run (Claude Opus, median). Skill runs cost slightly
+more than baseline on simple repos; the delta is the price of the
+verification discipline that produces the conformance gap.
+
+## Best Practices
+
+The evaluation goldens and the skill enforce the same manifest
+discipline, which is equally useful for humans:
+
+- Use the fewest package groups possible — every extra group is a
+  full transitive closure (down to libc) to resolve and download.
+- Check `flox show` before installing or pinning: confirm the
+  version and the platforms the catalog actually serves.
+- Declare only systems every package can serve — never ship a
+  "works on my machine" manifest.
+- Pin only when necessary. Version floors (`>=`) are fine;
+  ceilings (`<=`) and exact pins trade Flox's continuous-upgrade
+  benefit for a frozen snapshot, so use them deliberately.
+- Prefer pinning the top-level toolchain and leaving compatible
+  libraries unpinned over splitting packages into extra groups.
+- Wire the services a developer needs running locally
+  (`[services]`, compose files); leave production-only
+  infrastructure out of the development environment.
+- Verify before declaring done: activate the environment, exercise
+  the runtime and services, and check the manifest against what the
+  repository actually requires.
+
 ## Installation
 
 ### Prerequisites
