@@ -298,7 +298,6 @@ def scan(target):
             notes.append(msg)
 
     root_files = {p.name for p in target.iterdir() if p.is_file()} if target.is_dir() else set()
-    root_dirs = {p.name for p in target.iterdir() if p.is_dir()} if target.is_dir() else set()
 
     # ---- root dotfile version pins -------------------------------------
     def mark(fname):
