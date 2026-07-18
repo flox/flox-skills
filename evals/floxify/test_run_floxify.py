@@ -7,6 +7,7 @@ subprocesses, so it is fast and safe to gate on.
 
     python3 -m unittest test_run_floxify -v
 """
+import json
 import subprocess
 import sys
 import tempfile
@@ -378,6 +379,553 @@ class TestGateShouldFail(unittest.TestCase):
         self.assertEqual(errs, [])  # the error was may-tier, not should-tier
         self.assertFalse(run_floxify._gate_should_fail(binding, bad, errs))
         self.assertIsNone(run_floxify._vacuous_run_message(results))
+
+
+# ---------------------------------------------------------------------------
+# AI-442: cost/usage/turn envelope parsing (AI-459 port) + stream-json
+# tool-call extraction (Q1)
+# ---------------------------------------------------------------------------
+
+STREAM_SAMPLE = (
+    run_floxify.HERE / "testdata" / "stream-samples" / "flox-search-sample.jsonl"
+).read_text(encoding="utf-8")
+
+
+class TestParseMeta(unittest.TestCase):
+    """Direct mirror of AI-459's own test_run.py approach: well-formed,
+    missing fields, non-dict usage, garbage cost -- never raises, always
+    zeroes cleanly."""
+
+    def test_well_formed_envelope(self):
+        meta = run_floxify._parse_meta({
+            "total_cost_usd": 0.51, "usage": {"output_tokens": 100},
+            "duration_ms": 5000, "num_turns": 3,
+        })
+        self.assertEqual(meta["cost_usd"], 0.51)
+        self.assertEqual(meta["usage"], {"output_tokens": 100})
+        self.assertEqual(meta["duration_ms"], 5000)
+        self.assertEqual(meta["num_turns"], 3)
+
+    def test_missing_fields_zero_cleanly(self):
+        meta = run_floxify._parse_meta({})
+        self.assertEqual(meta["cost_usd"], 0.0)
+        self.assertEqual(meta["usage"], {})
+        self.assertEqual(meta["duration_ms"], 0)
+        self.assertEqual(meta["num_turns"], 0)
+
+    def test_non_dict_usage_becomes_empty_dict(self):
+        meta = run_floxify._parse_meta({"usage": "not a dict"})
+        self.assertEqual(meta["usage"], {})
+
+    def test_garbage_cost_does_not_raise(self):
+        meta = run_floxify._parse_meta({"total_cost_usd": "not a number"})
+        self.assertEqual(meta["cost_usd"], 0.0)
+
+    def test_garbage_duration_and_turns_do_not_raise(self):
+        meta = run_floxify._parse_meta({
+            "duration_ms": "garbage", "num_turns": None,
+        })
+        self.assertEqual(meta["duration_ms"], 0)
+        self.assertEqual(meta["num_turns"], 0)
+
+    def test_real_result_event_from_captured_stream(self):
+        # The terminal `result` event of a REAL captured stream (AI-442
+        # PR 1's sanctioned flag-verification call) -- confirms the field
+        # names line up with a genuine claude invocation, not just a
+        # hand-written fixture.
+        events = [json.loads(l) for l in STREAM_SAMPLE.splitlines() if l.strip()]
+        result_event = [e for e in events if e.get("type") == "result"][0]
+        meta = run_floxify._parse_meta(result_event)
+        self.assertGreater(meta["cost_usd"], 0)
+        self.assertEqual(meta["num_turns"], 2)
+        self.assertIn("output_tokens", meta["usage"])
+
+
+class TestClassifyToolCalls(unittest.TestCase):
+    def test_counts_a_bash_flox_search_call(self):
+        events = [{
+            "type": "assistant",
+            "message": {"content": [
+                {"type": "tool_use", "name": "Bash",
+                 "input": {"command": "flox search hello"}},
+            ]},
+        }]
+        counts = run_floxify._classify_tool_calls(events)
+        self.assertEqual(counts, {"total": 1, "flox_search": 1, "flox_show": 0})
+
+    def test_counts_a_bash_flox_show_call(self):
+        events = [{
+            "type": "assistant",
+            "message": {"content": [
+                {"type": "tool_use", "name": "Bash",
+                 "input": {"command": "flox show nodejs_20"}},
+            ]},
+        }]
+        counts = run_floxify._classify_tool_calls(events)
+        self.assertEqual(counts, {"total": 1, "flox_search": 0, "flox_show": 1})
+
+    def test_non_flox_bash_call_counts_toward_total_only(self):
+        events = [{
+            "type": "assistant",
+            "message": {"content": [
+                {"type": "tool_use", "name": "Bash", "input": {"command": "ls -la"}},
+            ]},
+        }]
+        counts = run_floxify._classify_tool_calls(events)
+        self.assertEqual(counts, {"total": 1, "flox_search": 0, "flox_show": 0})
+
+    def test_non_bash_tool_counts_toward_total_only(self):
+        events = [{
+            "type": "assistant",
+            "message": {"content": [
+                {"type": "tool_use", "name": "Read", "input": {"file_path": "/x"}},
+            ]},
+        }]
+        counts = run_floxify._classify_tool_calls(events)
+        self.assertEqual(counts["total"], 1)
+        self.assertEqual(counts["flox_search"], 0)
+
+    def test_flox_search_after_a_shell_separator_still_counts(self):
+        events = [{
+            "type": "assistant",
+            "message": {"content": [
+                {"type": "tool_use", "name": "Bash",
+                 "input": {"command": "cd /tmp && flox search redis"}},
+            ]},
+        }]
+        counts = run_floxify._classify_tool_calls(events)
+        self.assertEqual(counts["flox_search"], 1)
+
+    def test_mention_of_flox_search_in_unrelated_text_does_not_count(self):
+        # "flox search" as a SUBSTRING mid-word/mid-sentence, not a
+        # leading command, must not be mistaken for an invocation.
+        events = [{
+            "type": "assistant",
+            "message": {"content": [
+                {"type": "tool_use", "name": "Bash",
+                 "input": {"command": "echo 'reminder: try flox search later'"}},
+            ]},
+        }]
+        counts = run_floxify._classify_tool_calls(events)
+        self.assertEqual(counts["flox_search"], 0)
+
+    def test_non_assistant_events_are_ignored(self):
+        events = [{"type": "user", "message": {"content": []}}, {"type": "result"}]
+        counts = run_floxify._classify_tool_calls(events)
+        self.assertEqual(counts, {"total": 0, "flox_search": 0, "flox_show": 0})
+
+    def test_malformed_events_do_not_raise(self):
+        events = [None, {}, {"type": "assistant"}, {"type": "assistant", "message": {}},
+                  {"type": "assistant", "message": {"content": "not a list"}},
+                  {"type": "assistant", "message": {"content": [None, {"type": "text"}]}}]
+        counts = run_floxify._classify_tool_calls(events)
+        self.assertEqual(counts, {"total": 0, "flox_search": 0, "flox_show": 0})
+
+    def test_real_captured_stream_matches_manual_inspection(self):
+        # The real fixture has exactly one Bash tool_use, `flox search
+        # hello` -- confirmed by manual inspection during the AI-442 PR 1
+        # flag-verification call.
+        events = [json.loads(l) for l in STREAM_SAMPLE.splitlines() if l.strip()]
+        counts = run_floxify._classify_tool_calls(events)
+        self.assertEqual(counts, {"total": 1, "flox_search": 1, "flox_show": 0})
+
+
+class TestParseStream(unittest.TestCase):
+    def test_real_captured_stream_end_to_end(self):
+        result_text, meta, has_result = run_floxify._parse_stream(STREAM_SAMPLE)
+        self.assertTrue(has_result)
+        self.assertIn("first result", result_text.lower())
+        self.assertEqual(meta["num_turns"], 2)
+        self.assertGreater(meta["cost_usd"], 0)
+        self.assertEqual(meta["tool_calls"],
+                          {"total": 1, "flox_search": 1, "flox_show": 0})
+        self.assertEqual(meta["raw_stream"], STREAM_SAMPLE)
+
+    def test_empty_stream_yields_zero_meta_and_no_result(self):
+        result_text, meta, has_result = run_floxify._parse_stream("")
+        self.assertFalse(has_result)
+        self.assertEqual(result_text, "")
+        self.assertEqual(meta["cost_usd"], 0.0)
+        self.assertEqual(meta["num_turns"], 0)
+        self.assertEqual(meta["tool_calls"], {"total": 0, "flox_search": 0, "flox_show": 0})
+
+    def test_garbled_lines_are_skipped_not_raised(self):
+        stream = "not json\n{\"type\": \"assistant\"\n" + STREAM_SAMPLE
+        result_text, meta, has_result = run_floxify._parse_stream(stream)
+        # The garbled lines are skipped; the real sample's own result
+        # event is still found and parsed correctly.
+        self.assertTrue(has_result)
+        self.assertEqual(meta["num_turns"], 2)
+
+    def test_truncated_stream_with_no_result_event_still_counts_tool_calls(self):
+        # A rep that timed out mid-stream: tool_use events exist, but no
+        # terminal `result` line was ever written. Tool-call counting
+        # must not silently drop to zero just because the stream is
+        # incomplete -- that would undercount exactly the reps most
+        # likely to show a real turns/tool-calls delta.
+        lines = [l for l in STREAM_SAMPLE.splitlines() if l.strip()]
+        truncated = "\n".join(l for l in lines
+                              if json.loads(l).get("type") != "result")
+        result_text, meta, has_result = run_floxify._parse_stream(truncated)
+        self.assertFalse(has_result)
+        self.assertEqual(result_text, "")
+        self.assertEqual(meta["cost_usd"], 0.0)  # no result event -> no cost data
+        self.assertEqual(meta["tool_calls"]["flox_search"], 1)  # but tool calls still counted
+
+
+# ---------------------------------------------------------------------------
+# AI-442 Q2: verified-anchor strength -- services where declared,
+# activation-only elsewhere
+# ---------------------------------------------------------------------------
+
+# The real verify.py, loaded once for this module -- exercises
+# `_probe_service`'s actual `parse_manifest`/`matching_service_names`
+# calls rather than a hand-rolled stand-in (same discipline
+# test_tier2.py's `_VERIFY_MOD` module load uses for the AI-447 probe).
+_, _VERIFY_MOD = run_floxify._load_detect_and_verify(run_floxify.DEFAULT_SKILL_DIR)
+
+
+class TestProbeService(unittest.TestCase):
+    @patch("run_floxify.shutil.which", return_value=None)
+    def test_flox_absent_is_skipped(self, _which):
+        ok, skipped, notes = run_floxify._probe_service(
+            "/tmp/x", "postgres", "[install]\n", _VERIFY_MOD,
+        )
+        self.assertIsNone(ok)
+        self.assertTrue(skipped)
+        self.assertIn("flox", notes.lower())
+
+    @patch("run_floxify.shutil.which", return_value="/usr/bin/flox")
+    def test_no_probe_command_for_kind_is_skipped(self, _which):
+        ok, skipped, notes = run_floxify._probe_service(
+            "/tmp/x", "clickhouse", "[install]\n", _VERIFY_MOD,
+        )
+        self.assertIsNone(ok)
+        self.assertTrue(skipped)
+        self.assertIn("clickhouse", notes)
+
+    @patch("run_floxify.shutil.which", return_value="/usr/bin/flox")
+    def test_manifest_that_does_not_parse_is_skipped(self, _which):
+        ok, skipped, notes = run_floxify._probe_service(
+            "/tmp/x", "postgres", "this is [ not valid toml", _VERIFY_MOD,
+        )
+        self.assertIsNone(ok)
+        self.assertTrue(skipped)
+
+    @patch("run_floxify.shutil.which", return_value="/usr/bin/flox")
+    def test_no_matching_service_entry_is_not_ok_and_not_skipped(self, _which):
+        # AI-442 Q2: a manifest that never wired the declared service
+        # (no [services.postgres]) is a genuine failure, not a skip --
+        # activation succeeding here must not read as "verified".
+        manifest = '[install]\npostgresql.pkg-path = "postgresql"\n'
+        ok, skipped, notes = run_floxify._probe_service(
+            "/tmp/x", "postgres", manifest, _VERIFY_MOD,
+        )
+        self.assertFalse(ok)
+        self.assertFalse(skipped)
+        self.assertIn("not wired", notes)
+
+    @patch("run_floxify.subprocess.run")
+    @patch("run_floxify.shutil.which", return_value="/usr/bin/flox")
+    def test_matching_service_and_probe_confirms_connectivity(self, _which, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=run_floxify._SERVICE_PROBE_OK + "\n", stderr="",
+        )
+        manifest = (
+            '[install]\npostgresql.pkg-path = "postgresql"\n\n'
+            '[services.postgres]\ncommand = "postgres"\n'
+        )
+        ok, skipped, notes = run_floxify._probe_service(
+            "/tmp/x", "postgres", manifest, _VERIFY_MOD,
+        )
+        self.assertTrue(ok)
+        self.assertFalse(skipped)
+
+    @patch("run_floxify.subprocess.run")
+    @patch("run_floxify.shutil.which", return_value="/usr/bin/flox")
+    def test_matching_service_never_answers(self, _which, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout=run_floxify._SERVICE_PROBE_DEAD + "\n", stderr="",
+        )
+        manifest = (
+            '[install]\npostgresql.pkg-path = "postgresql"\n\n'
+            '[services.postgres]\ncommand = "postgres"\n'
+        )
+        ok, skipped, notes = run_floxify._probe_service(
+            "/tmp/x", "postgres", manifest, _VERIFY_MOD,
+        )
+        self.assertFalse(ok)
+        self.assertFalse(skipped)
+        self.assertIn("never answered", notes)
+
+    @patch("run_floxify.subprocess.run")
+    @patch("run_floxify.shutil.which", return_value="/usr/bin/flox")
+    def test_probe_timeout_is_a_real_failure_not_a_skip(self, _which, mock_run):
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="flox", timeout=300)
+        manifest = (
+            '[install]\npostgresql.pkg-path = "postgresql"\n\n'
+            '[services.postgres]\ncommand = "postgres"\n'
+        )
+        ok, skipped, notes = run_floxify._probe_service(
+            "/tmp/x", "postgres", manifest, _VERIFY_MOD, timeout=300,
+        )
+        self.assertFalse(ok)
+        self.assertFalse(skipped)
+        self.assertIn("TIMEOUT", notes)
+
+    @patch("run_floxify.subprocess.run")
+    @patch("run_floxify.shutil.which", return_value="/usr/bin/flox")
+    def test_probe_script_never_ran_is_skipped(self, _which, mock_run):
+        # Neither sentinel present -- flox itself errored before the
+        # polling script ever executed. Not a verdict on the manifest.
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="some flox activation error",
+        )
+        manifest = (
+            '[install]\npostgresql.pkg-path = "postgresql"\n\n'
+            '[services.postgres]\ncommand = "postgres"\n'
+        )
+        ok, skipped, notes = run_floxify._probe_service(
+            "/tmp/x", "postgres", manifest, _VERIFY_MOD,
+        )
+        self.assertIsNone(ok)
+        self.assertTrue(skipped)
+
+
+class TestExpectedServiceKind(unittest.TestCase):
+    def test_node_postgres_shape_returns_postgres(self):
+        task = {"checks": ["manifest_created", "valid_toml", "has_install_section",
+                           "has_services_section", "no_abs_paths",
+                           "no_fake_install_url", "pins_node_20", "pins_postgres"]}
+        self.assertEqual(run_floxify._expected_service_kind(task), "postgres")
+
+    def test_no_has_services_section_returns_none(self):
+        # ruby/python-uv/go-mod/rust-cargo shape -- no service declared.
+        task = {"checks": ["manifest_created", "valid_toml", "has_install_section",
+                           "no_abs_paths", "no_fake_install_url", "pins_ruby"]}
+        self.assertIsNone(run_floxify._expected_service_kind(task))
+
+    def test_has_services_section_without_a_known_pins_kind_returns_none(self):
+        task = {"checks": ["has_services_section", "no_abs_paths"]}
+        self.assertIsNone(run_floxify._expected_service_kind(task))
+
+    def test_pins_postgres_without_has_services_section_returns_none(self):
+        # has_services_section is the gate -- a pins_<kind> check alone
+        # (unusual shape, but must not accidentally trigger the stronger
+        # anchor) does not imply a declared service.
+        task = {"checks": ["pins_postgres"]}
+        self.assertIsNone(run_floxify._expected_service_kind(task))
+
+    def test_missing_checks_key_returns_none(self):
+        self.assertIsNone(run_floxify._expected_service_kind({}))
+
+
+class TestComputeVerification(unittest.TestCase):
+    """AI-442 Q2's anchor rule as a pure, directly testable decision --
+    the four terminal dispositions from the design doc's censoring table."""
+
+    def test_activation_only_success_is_verified(self):
+        verified, method, disposition = run_floxify._compute_verification(
+            act_ok=True, act_skipped=False, service_kind=None, service_probe=None,
+        )
+        self.assertTrue(verified)
+        self.assertEqual(method, "activation")
+        self.assertEqual(disposition, "verified")
+
+    def test_activation_only_failure_is_failed_verify(self):
+        verified, method, disposition = run_floxify._compute_verification(
+            act_ok=False, act_skipped=False, service_kind=None, service_probe=None,
+        )
+        self.assertFalse(verified)
+        self.assertEqual(method, "activation")
+        self.assertEqual(disposition, "failed-verify")
+
+    def test_activation_skipped_is_unverifiable_env(self):
+        verified, method, disposition = run_floxify._compute_verification(
+            act_ok=None, act_skipped=True, service_kind=None, service_probe=None,
+        )
+        self.assertFalse(verified)
+        self.assertEqual(method, "activation")
+        self.assertEqual(disposition, "unverifiable-env")
+
+    def test_service_declared_but_activation_skipped_is_unverifiable_env(self):
+        verified, method, disposition = run_floxify._compute_verification(
+            act_ok=None, act_skipped=True, service_kind="postgres", service_probe=None,
+        )
+        self.assertFalse(verified)
+        self.assertEqual(method, "services")
+        self.assertEqual(disposition, "unverifiable-env")
+
+    def test_service_declared_but_activation_itself_failed_is_failed_verify(self):
+        # Activation never succeeded -- the service was never even
+        # attempted (service_probe is None, matching process_task's own
+        # gating), but the anchor demanded is still "services".
+        verified, method, disposition = run_floxify._compute_verification(
+            act_ok=False, act_skipped=False, service_kind="postgres", service_probe=None,
+        )
+        self.assertFalse(verified)
+        self.assertEqual(method, "services")
+        self.assertEqual(disposition, "failed-verify")
+
+    def test_service_declared_and_probe_confirms_connectivity_is_verified(self):
+        verified, method, disposition = run_floxify._compute_verification(
+            act_ok=True, act_skipped=False, service_kind="postgres",
+            service_probe=(True, False, "connectivity confirmed"),
+        )
+        self.assertTrue(verified)
+        self.assertEqual(method, "services")
+        self.assertEqual(disposition, "verified")
+
+    def test_service_declared_but_never_wired_is_failed_verify_not_verified(self):
+        # AI-442 Q2's whole point: activation succeeding while the
+        # declared service was never wired must NOT read as verified.
+        verified, method, disposition = run_floxify._compute_verification(
+            act_ok=True, act_skipped=False, service_kind="postgres",
+            service_probe=(False, False, "no [services.*] entry matches"),
+        )
+        self.assertFalse(verified)
+        self.assertEqual(method, "services")
+        self.assertEqual(disposition, "failed-verify")
+
+    def test_service_probe_skipped_is_unverifiable_env(self):
+        # flox vanished mid-probe / no probe command for this kind --
+        # not a verdict on the manifest.
+        verified, method, disposition = run_floxify._compute_verification(
+            act_ok=True, act_skipped=False, service_kind="postgres",
+            service_probe=(None, True, "no connectivity probe for 'clickhouse'"),
+        )
+        self.assertFalse(verified)
+        self.assertEqual(method, "services")
+        self.assertEqual(disposition, "unverifiable-env")
+
+
+# ---------------------------------------------------------------------------
+# AI-442 §1.1 / Q5: censored efficiency aggregation -- the highest-value
+# tests in the whole change (design doc: "the censoring logic is where a
+# subtle averaging bug would silently corrupt the headline number").
+# ---------------------------------------------------------------------------
+
+def _rep(disposition, turns=5, tool_total=3, flox_search=1, flox_show=1,
+        output_tokens=1000, cache_read_tokens=5000, cost=0.1):
+    return {
+        "id": "x", "arm": "skills", "rep": 1,
+        "terminal_disposition": disposition,
+        "num_turns": {"agent": turns, "judge": 1},
+        "tool_calls": {"agent": {"total": tool_total, "flox_search": flox_search,
+                                 "flox_show": flox_show}},
+        "usage": {"agent": {"output_tokens": output_tokens,
+                            "cache_read_input_tokens": cache_read_tokens},
+                 "judge": {}},
+        "cost": {"agent_usd": cost, "judge_usd": 0.01, "total_usd": cost + 0.01},
+    }
+
+
+class TestEfficiencySummary(unittest.TestCase):
+    def test_decision_verification_all_failed_verify_gives_zero_rate_and_empty_cost(self):
+        # The design doc's own acceptance bar: a giving-up arm (every rep
+        # failed-verify) must produce verify_rate = 0 and an EMPTY
+        # cost_to_verify (n=0) -- never a deceptively low mean computed
+        # from reps that spent tokens and never arrived.
+        results = [_rep("failed-verify", cost=0.3) for _ in range(5)]
+        summary = run_floxify._efficiency_summary(results)
+        self.assertEqual(summary["verify_rate"], 0.0)
+        self.assertEqual(summary["cost_to_verify"], {"median_usd": None, "n": 0})
+        self.assertEqual(summary["unverified_spend"]["n"], 5)
+        self.assertIsNotNone(summary["unverified_spend"]["median_usd"])
+
+    def test_unverifiable_env_and_agent_error_are_dropped_from_verify_rate(self):
+        results = [
+            _rep("verified"),
+            _rep("unverifiable-env"),
+            _rep("unverifiable-env"),
+            _rep("agent-error"),
+        ]
+        summary = run_floxify._efficiency_summary(results)
+        # 1 verified / (1 verified + 0 failed) = 1.0, NOT 1/4 = 0.25 --
+        # the two dropped dispositions must not appear in the denominator.
+        self.assertEqual(summary["verify_rate"], 1.0)
+        self.assertEqual(summary["env_skipped"], 2)
+        self.assertEqual(summary["agent_errors"], 1)
+
+    def test_cost_to_verify_never_includes_failed_verify_reps(self):
+        results = [
+            _rep("verified", cost=1.0),
+            _rep("failed-verify", cost=99.0),  # deliberately huge outlier
+        ]
+        summary = run_floxify._efficiency_summary(results)
+        self.assertEqual(summary["cost_to_verify"]["n"], 1)
+        self.assertEqual(summary["cost_to_verify"]["median_usd"], 1.01)  # 1.0 + judge 0.01
+        # The huge failed-verify cost must land ONLY in unverified_spend.
+        self.assertEqual(summary["unverified_spend"]["n"], 1)
+        self.assertAlmostEqual(summary["unverified_spend"]["median_usd"], 99.01)
+
+    def test_verify_rate_reflects_mixed_verified_and_failed(self):
+        results = [_rep("verified"), _rep("verified"), _rep("failed-verify")]
+        summary = run_floxify._efficiency_summary(results)
+        self.assertAlmostEqual(summary["verify_rate"], 2 / 3, places=3)
+
+    def test_median_and_iqr_on_a_five_rep_sample(self):
+        results = [_rep("verified", turns=t) for t in (5, 7, 9, 11, 13)]
+        summary = run_floxify._efficiency_summary(results)
+        self.assertEqual(summary["turns_to_verify"]["n"], 5)
+        self.assertEqual(summary["turns_to_verify"]["median"], 9)
+        self.assertEqual(summary["turns_to_verify"]["p25"], 7)
+        self.assertEqual(summary["turns_to_verify"]["p75"], 11)
+
+    def test_tool_calls_distribution_is_computed_separately_from_turns(self):
+        results = [
+            _rep("verified", turns=10, tool_total=2, flox_search=1, flox_show=0),
+            _rep("verified", turns=12, tool_total=6, flox_search=3, flox_show=1),
+        ]
+        summary = run_floxify._efficiency_summary(results)
+        self.assertEqual(summary["tool_calls_to_verify"]["median_total"], 4)
+        self.assertEqual(summary["tool_calls_to_verify"]["median_flox_search"], 2)
+        self.assertEqual(summary["tool_calls_to_verify"]["median_flox_show"], 0.5)
+
+    def test_empty_results_returns_zero_reps_and_none_rate(self):
+        summary = run_floxify._efficiency_summary([])
+        self.assertEqual(summary["reps"], 0)
+        self.assertIsNone(summary["verify_rate"])
+        self.assertEqual(summary["cost_to_verify"], {"median_usd": None, "n": 0})
+
+    def test_single_verified_rep_does_not_raise_on_percentiles(self):
+        summary = run_floxify._efficiency_summary([_rep("verified", turns=8)])
+        self.assertEqual(summary["turns_to_verify"]["n"], 1)
+        self.assertEqual(summary["turns_to_verify"]["median"], 8)
+        self.assertEqual(summary["turns_to_verify"]["p25"], 8)
+        self.assertEqual(summary["turns_to_verify"]["p75"], 8)
+
+    def test_unrecognized_disposition_is_counted_not_silently_dropped(self):
+        results = [_rep("verified"), {"id": "x", "terminal_disposition": "mystery"}]
+        summary = run_floxify._efficiency_summary(results)
+        self.assertEqual(summary["other_disposition"], 1)
+        self.assertEqual(summary["reps"], 2)
+
+    def test_missing_disposition_key_is_counted_as_other(self):
+        results = [_rep("verified"), {"id": "x"}]
+        summary = run_floxify._efficiency_summary(results)
+        self.assertEqual(summary["other_disposition"], 1)
+
+
+class TestMedianAndPercentile(unittest.TestCase):
+    def test_median_odd_count(self):
+        self.assertEqual(run_floxify._median([1, 3, 2]), 2)
+
+    def test_median_even_count(self):
+        self.assertEqual(run_floxify._median([1, 2, 3, 4]), 2.5)
+
+    def test_median_empty_is_none(self):
+        self.assertIsNone(run_floxify._median([]))
+
+    def test_percentile_empty_is_none(self):
+        self.assertIsNone(run_floxify._percentile([], 0.25))
+
+    def test_percentile_single_value(self):
+        self.assertEqual(run_floxify._percentile([7], 0.25), 7)
+        self.assertEqual(run_floxify._percentile([7], 0.75), 7)
+
+    def test_percentile_unsorted_input(self):
+        self.assertEqual(run_floxify._percentile([9, 1, 5], 0.5), 5)
 
 
 if __name__ == "__main__":
