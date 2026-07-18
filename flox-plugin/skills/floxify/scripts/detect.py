@@ -191,6 +191,27 @@ def _rel(target, path):
         return str(path)
 
 
+def _parse_fail_note(fname, fmt):
+    """Build the note text scan() emits when a manifest file exists but
+    fails to parse as `fmt` ("TOML"/"JSON")."""
+    return f"{fname}: could not parse {fmt}"
+
+
+def _apt_hints(tokens, trigger_fmt, source):
+    """Filter candidate apt package tokens against APT_NATIVE and build
+    the native-dep hint dicts scan() appends -- shared between the
+    Aptfile and Dockerfile `apt-get install` extractors, which tokenize
+    their own source text differently but dedup/sort/build hints the
+    same way. `trigger_fmt` is a str.format() template with one
+    placeholder for the token (the two callers use different trigger
+    wording, "Aptfile {}" vs "apt install {}", to name where the token
+    was found)."""
+    found = {tok for tok in tokens if tok in APT_NATIVE}
+    return [{"trigger": trigger_fmt.format(tok),
+             "search_terms": APT_NATIVE[tok], "source": source}
+            for tok in sorted(found)]
+
+
 # --------------------------------------------------------------------------
 # walk (depth-limited, IGNORE-pruned) to find nested config files
 # --------------------------------------------------------------------------
@@ -379,7 +400,7 @@ def scan(target):
                     runtimes.append(_runtime(lang, str(ver), mf))
                     ecosystems.add(lang)
             if data is None and _read(p):
-                note(f"{mf}: could not parse TOML")
+                note(_parse_fail_note(mf, "TOML"))
             mark(mf)
 
     # ---- go.mod --------------------------------------------------------
@@ -435,7 +456,7 @@ def scan(target):
                 if isinstance(pkg, dict) and pkg.get("name"):
                     names.append(pkg["name"])
         elif _read(target / "Cargo.lock"):
-            note("Cargo.lock: could not parse TOML")
+            note(_parse_fail_note("Cargo.lock", "TOML"))
         _add_clients(names, "Cargo.lock", clients)
         mark("Cargo.lock")
 
@@ -488,7 +509,7 @@ def scan(target):
             if proj.get("name"):
                 note(f"python project: {proj['name']}")
         elif _read(target / "pyproject.toml"):
-            note("pyproject.toml: could not parse TOML")
+            note(_parse_fail_note("pyproject.toml", "TOML"))
         mark("pyproject.toml")
 
     if "Pipfile" in root_files:
@@ -528,7 +549,7 @@ def scan(target):
             pj = json.loads(_read(target / "package.json") or "{}")
         except Exception:
             parsed_ok = False
-            note("package.json: could not parse JSON")
+            note(_parse_fail_note("package.json", "JSON"))
         if parsed_ok and not isinstance(pj, dict):
             # Valid JSON that isn't an object at all -- an array
             # (`[1, 2, 3]`) or, degenerately, the literal `null` (which
@@ -599,7 +620,7 @@ def scan(target):
                 runtimes.append(_runtime("dotnet", ver, "global.json"))
                 ecosystems.add("dotnet")
         except Exception:
-            note("global.json: could not parse JSON")
+            note(_parse_fail_note("global.json", "JSON"))
         mark("global.json")
     if "mix.exs" in root_files:
         text = _read(target / "mix.exs") or ""
@@ -634,7 +655,7 @@ def scan(target):
             ver = (cj.get("require") or {}).get("php")
             runtimes.append(_runtime("php", ver, "composer.json (require.php)"))
         except Exception:
-            note("composer.json: could not parse JSON")
+            note(_parse_fail_note("composer.json", "JSON"))
         ecosystems.add("php")
         mark("composer.json")
 
@@ -642,14 +663,9 @@ def scan(target):
     # Native C-extension system libs frequently live here, NOT in the
     # language manifest (e.g. Mastodon's vips/ffmpeg/icu/libidn).
     if "Aptfile" in root_files:
-        found = set()
-        for line in (_read(target / "Aptfile") or "").splitlines():
-            tok = line.split("#")[0].strip()
-            if tok in APT_NATIVE:
-                found.add(tok)
-        for tok in sorted(found):
-            native.append({"trigger": f"Aptfile {tok}",
-                           "search_terms": APT_NATIVE[tok], "source": "Aptfile"})
+        tokens = (line.split("#")[0].strip()
+                  for line in (_read(target / "Aptfile") or "").splitlines())
+        native.extend(_apt_hints(tokens, "Aptfile {}", "Aptfile"))
         mark("Aptfile")
 
     # ---- Deno (config files; edge-runtime compose image handled below) -
@@ -676,15 +692,9 @@ def scan(target):
                 if lang:
                     note(f"Dockerfile FROM {base}:{tag} (runtime hint, {rel})")
             apt = re.findall(r"apt-get\s+install[^\n&|]*", text)
-            found = set()
-            for chunk in apt:
-                for tok in re.split(r"[\s\\]+", chunk):
-                    tok = tok.strip()
-                    if tok in APT_NATIVE:
-                        found.add(tok)
-            for tok in sorted(found):
-                native.append({"trigger": f"apt install {tok}",
-                               "search_terms": APT_NATIVE[tok], "source": rel})
+            tokens = (tok.strip() for chunk in apt
+                      for tok in re.split(r"[\s\\]+", chunk))
+            native.extend(_apt_hints(tokens, "apt install {}", rel))
             scanned.append(rel)
 
     # ---- docker-compose services ---------------------------------------
