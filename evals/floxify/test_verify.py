@@ -52,6 +52,12 @@ def _hard(violations):
     return [v for v in violations if v["severity"] == "hard"]
 
 
+# Minimal wired postgres service block, repeated across many fixture
+# manifests below that only need "postgres is served" and don't care
+# about the exact command.
+POSTGRES_SERVICE = '[services.postgres]\ncommand = "postgres"\n'
+
+
 # ---------------------------------------------------------------------------
 # AI-449 worked example: a Python+Node repo with an undeclared postgres dep.
 # BAD -> exactly the three violations the ticket specifies; GOOD -> zero.
@@ -416,14 +422,12 @@ class TestLeafDatastoreServices(unittest.TestCase):
         # PostHog's own manifest: postgres + redis wired, no mariadb/mongodb
         # [vars] endpoint or compose service anywhere -- the tier2 registry
         # expects neither service for posthog.
-        manifest = '''
+        manifest = f'''
 [install]
 postgresql.pkg-path = "postgresql_15"
 redis.pkg-path = "redis"
 
-[services.postgres]
-command = "postgres"
-
+{POSTGRES_SERVICE}
 [services.redis]
 command = "redis-server"
 '''
@@ -435,13 +439,11 @@ command = "redis-server"
         detect = {"service_clients": [
             {"package": "pg", "search_terms": ["postgresql"], "source": "package.json"},
         ]}
-        manifest = '''
+        manifest = f'''
 [install]
 postgresql.pkg-path = "postgresql"
 
-[services.postgres]
-command = "postgres"
-'''
+{POSTGRES_SERVICE}'''
         self.assertEqual(_violations(detect, manifest), [])
 
     def test_repo_side_compose_presence_alone_does_not_satisfy_the_floor(self):
@@ -786,13 +788,11 @@ class TestVarsEndpoints(unittest.TestCase):
         self.assertEqual(_rules(v), {"vars-endpoint-not-served"})
 
     def test_does_not_fire_when_service_serves_it(self):
-        manifest = '''
+        manifest = f'''
 [vars]
 DATABASE_URL = "postgres://u:p@127.0.0.1:5432/app"
 
-[services.postgres]
-command = "postgres"
-'''
+{POSTGRES_SERVICE}'''
         self.assertEqual(_violations({}, manifest), [])
 
     def test_realistic_lemmy_vars_do_not_false_positive(self):
@@ -1777,13 +1777,11 @@ class TestOutputsHeuristic(unittest.TestCase):
     def test_does_not_fire_for_plain_service_install_like_postgresql(self):
         # postgresql installed purely as a [services.*] server (no native
         # C-extension linking against it) must not be flagged.
-        manifest = '''
+        manifest = f'''
 [install]
 postgresql.pkg-path = "postgresql"
 
-[services.postgres]
-command = "postgres"
-'''
+{POSTGRES_SERVICE}'''
         self.assertEqual(_violations({}, manifest), [])
 
 
@@ -1878,15 +1876,13 @@ openssl.pkg-path = "openssl"
         detect = {"service_clients": [
             {"package": "pg", "search_terms": ["postgresql"], "source": "Gemfile"},
         ]}
-        manifest = '''
+        manifest = f'''
 [install]
 ruby.pkg-path = "ruby_4_0"
 ruby.pkg-group = "runtime-and-native"
 postgresql.pkg-path = "postgresql"
 
-[services.postgres]
-command = "postgres"
-'''
+{POSTGRES_SERVICE}'''
         self.assertEqual(_violations(detect, manifest), [])
 
     def test_does_not_fire_when_native_dep_not_installed(self):
@@ -2235,7 +2231,7 @@ class TestAI467PosthogForensicReproduction(unittest.TestCase):
         # expected_services (postgres, redis, clickhouse; no mariadb/
         # mongodb) and what verify.py HARD-fired incorrectly before this
         # fix.
-        manifest = '''
+        manifest = f'''
 schema-version = "1.13.0"
 
 [install]
@@ -2243,9 +2239,7 @@ python3.pkg-path = "python313"
 postgresql.pkg-path = "postgresql_15"
 redis.pkg-path = "redis"
 
-[services.postgres]
-command = "postgres"
-
+{POSTGRES_SERVICE}
 [services.redis]
 command = "redis-server"
 '''
@@ -2258,13 +2252,11 @@ command = "redis-server"
         # The downgrade must still be VISIBLE (as ADVISORY), not silently
         # dropped -- confirm whether mariadb/mongodb is a runtime need is
         # exactly the judgment call this leaves for a human/agent to make.
-        manifest = '''
+        manifest = f'''
 [install]
 postgresql.pkg-path = "postgresql_15"
 
-[services.postgres]
-command = "postgres"
-'''
+{POSTGRES_SERVICE}'''
         detected = self._detect()
         v = _violations(detected, manifest)
         advisory_kinds = {
