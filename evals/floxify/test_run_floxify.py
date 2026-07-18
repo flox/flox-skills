@@ -709,6 +709,71 @@ class TestDetectFloxPluginContamination(unittest.TestCase):
         self.assertFalse(run_floxify._detect_flox_plugin_contamination(init_event))
 
 
+class TestBuildPrompt(unittest.TestCase):
+    """AI-442 batch-1 finding: the two arms need functionally equivalent
+    prompts, not textually identical ones -- /floxify is an unrecognized
+    slash command (a hard CLI rejection, not a graceful no-op) when the
+    plugin isn't loaded, so the original identical-prompt design killed
+    every baseline rep (40/40) in the first real batch."""
+
+    def test_skills_arm_invokes_the_slash_command(self):
+        prompt = run_floxify._build_prompt("/tmp/some-fixture", "skills")
+        self.assertIn("/floxify /tmp/some-fixture", prompt)
+
+    def test_baseline_arm_does_not_contain_the_slash_command(self):
+        prompt = run_floxify._build_prompt("/tmp/some-fixture", "baseline")
+        self.assertNotIn("/floxify", prompt)
+
+    def test_baseline_arm_states_the_task_in_flox_s_own_vocabulary(self):
+        # Fair per the screen.py precedent: naming Flox's own standard
+        # conventions (what `flox init` creates, the activation success
+        # anchor) is fair game -- it's the same vocabulary a real user
+        # would put in a plain-language request, not SKILL.md guidance.
+        prompt = run_floxify._build_prompt("/tmp/some-fixture", "baseline")
+        self.assertIn(".flox/env/manifest.toml", prompt)
+        self.assertIn("flox activate", prompt)
+        self.assertIn("/tmp/some-fixture", prompt)
+
+    def test_baseline_arm_does_not_ask_for_interactive_input(self):
+        prompt = run_floxify._build_prompt("/tmp/some-fixture", "baseline")
+        self.assertIn("Do not ask for or wait for user input", prompt)
+
+
+class TestDetectHarnessMisconfiguration(unittest.TestCase):
+    """A rep whose agent result shows Claude Code rejected an unrecognized
+    slash command is a harness bug, not a task failure -- it must be
+    discarded like the C1 arm-contamination guard, not scored as
+    failed-verify."""
+
+    def test_real_reported_excerpt_is_detected(self):
+        # The literal signature from AI-442 batch-1's actual failure: all
+        # 40 baseline reps died on this exact line before the prompt fix.
+        result_text = "Unknown command: /floxify\n"
+        self.assertTrue(
+            run_floxify._detect_harness_misconfiguration(result_text)
+        )
+
+    def test_unknown_command_mid_output_is_still_detected(self):
+        result_text = (
+            "Some preamble text.\nUnknown command: /floxify\nMore output."
+        )
+        self.assertTrue(
+            run_floxify._detect_harness_misconfiguration(result_text)
+        )
+
+    def test_normal_successful_output_is_not_flagged(self):
+        result_text = "Wrote .flox/env/manifest.toml successfully."
+        self.assertFalse(
+            run_floxify._detect_harness_misconfiguration(result_text)
+        )
+
+    def test_none_result_text_does_not_raise(self):
+        self.assertFalse(run_floxify._detect_harness_misconfiguration(None))
+
+    def test_empty_result_text_is_not_flagged(self):
+        self.assertFalse(run_floxify._detect_harness_misconfiguration(""))
+
+
 class TestRunClaudeAgentArmIsolation(unittest.TestCase):
     """The design doc's own required test ("assert --arm baseline omits
     --plugin-dir from the argv and --arm skills includes it"), plus the
@@ -798,6 +863,76 @@ class TestRunClaudeAgentArmIsolation(unittest.TestCase):
             "prompt", "/some/skill/dir", arm="baseline", retries=3,
         )
         self.assertEqual(mock_run.call_count, 1)
+
+
+class TestRunClaudeAgentHarnessMisconfigurationGuard(unittest.TestCase):
+    """AI-442 batch-1: a stream whose result text carries the unrecognized-
+    slash-command signature is a harness bug, not task data -- applies to
+    either arm, unlike the baseline-only C1 contamination guard."""
+
+    def _mock_stream_proc_with_result(self, result_text):
+        result_event = json.dumps({
+            "type": "result", "total_cost_usd": 0.01, "usage": {},
+            "duration_ms": 100, "num_turns": 1, "result": result_text,
+        })
+        return MagicMock(returncode=0, stdout=result_event + "\n", stderr="")
+
+    @patch("run_floxify.subprocess.run")
+    def test_unknown_command_rep_is_discarded_as_harness_misconfiguration(
+        self, mock_run
+    ):
+        # Real reported excerpt: every baseline rep in AI-442 batch-1 died
+        # on this exact line before the arm-conditional prompt fix.
+        mock_run.return_value = self._mock_stream_proc_with_result(
+            "Unknown command: /floxify"
+        )
+        result_text, err, meta = run_floxify._run_claude_agent(
+            "prompt", "/some/skill/dir", arm="baseline",
+        )
+        self.assertIsNone(result_text)
+        self.assertIsNotNone(err)
+        self.assertIn("harness misconfiguration", err)
+        self.assertEqual(meta, run_floxify.ZERO_META)
+
+    @patch("run_floxify.subprocess.run")
+    def test_unknown_command_rep_is_flagged_on_the_skills_arm_too(
+        self, mock_run
+    ):
+        # Not baseline-specific: a future regression that puts a wrong
+        # slash command in the skills-arm prompt must be caught the same
+        # way.
+        mock_run.return_value = self._mock_stream_proc_with_result(
+            "Unknown command: /floxify"
+        )
+        result_text, err, meta = run_floxify._run_claude_agent(
+            "prompt", "/some/skill/dir", arm="skills",
+        )
+        self.assertIsNone(result_text)
+        self.assertIn("harness misconfiguration", err)
+
+    @patch("run_floxify.time.sleep")
+    @patch("run_floxify.subprocess.run")
+    def test_harness_misconfiguration_does_not_consume_a_retry_attempt(
+        self, mock_run, mock_sleep
+    ):
+        # Deterministic property of the prompt/harness mismatch, not a
+        # transient flake -- retrying would just reproduce it.
+        mock_run.return_value = self._mock_stream_proc_with_result(
+            "Unknown command: /floxify"
+        )
+        run_floxify._run_claude_agent(
+            "prompt", "/some/skill/dir", arm="baseline", retries=3,
+        )
+        self.assertEqual(mock_run.call_count, 1)
+
+    @patch("run_floxify.subprocess.run")
+    def test_normal_result_is_not_flagged(self, mock_run):
+        mock_run.return_value = self._mock_stream_proc_with_result("done")
+        result_text, err, meta = run_floxify._run_claude_agent(
+            "prompt", "/some/skill/dir", arm="baseline",
+        )
+        self.assertIsNone(err)
+        self.assertEqual(result_text, "done")
 
 
 # ---------------------------------------------------------------------------

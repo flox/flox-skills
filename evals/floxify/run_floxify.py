@@ -503,6 +503,19 @@ def _run_claude_agent(prompt, skill_dir, arm="skills", timeout=600, retries=2):
                         "plugin despite --setting-sources project,local -- "
                         "rep discarded, not counted as baseline data"
                     ), dict(ZERO_META)
+                elif _detect_harness_misconfiguration(result_text):
+                    # AI-442 batch-1 finding: applies to either arm, not
+                    # just baseline -- an unrecognized slash command is a
+                    # deterministic property of the prompt/harness
+                    # mismatch, not a transient flake, so this returns
+                    # immediately rather than consuming a retry attempt
+                    # (same shape as the C1 guard above).
+                    return None, (
+                        "harness misconfiguration: agent output shows an "
+                        "unrecognized slash command was invoked (e.g. "
+                        "'Unknown command: /floxify') -- rep discarded, "
+                        "not counted as verify data"
+                    ), dict(ZERO_META)
                 else:
                     return result_text, None, meta
         if attempt < retries - 1:
@@ -903,6 +916,75 @@ def _compute_verification(act_ok, act_skipped, service_kind, service_probe):
     return bool(ok), "services", ("verified" if ok else "failed-verify")
 
 
+def _build_prompt(tmpdir, arm):
+    """The headless task prompt for one rep.
+
+    AI-442 batch-1 finding: the original assumption that both arms
+    could share the IDENTICAL `/floxify <dir>` prompt was wrong.
+    `/floxify` does not resolve to nothing when the plugin is absent —
+    it is an unrecognized slash command ("Unknown command: /floxify"),
+    so EVERY baseline rep in the first real batch died on turn one
+    without attempting the task at all (40/40 reps). The two arms need
+    functionally EQUIVALENT prompts, not textually identical ones.
+
+    Fairness line (mined from `screen.py`'s established baseline-vs-
+    skills precedent on `bill/ai-435-discriminating-evals` — its two
+    arms share one candidate prompt, phrased in plain task language,
+    never a skill-specific invocation): naming Flox's own standard
+    conventions is fair — `.flox/env/manifest.toml` (what `flox init`
+    creates), "`flox activate` succeeds" as the success anchor,
+    resolving packages "in the Flox catalog", wiring "services" — this
+    is the tool's own vocabulary, the same words a user would put in a
+    real request, and `screen.py`'s own candidate prompts use exactly
+    this level of Flox-specificity (e.g. "sandbox = \"pure\"",
+    "flox activate --start-services"). Embedding anything FROM SKILL.md
+    itself — the pkg-group economy escalation ladder, the pin-
+    discipline gradation, the service-floor invariant's exact wording,
+    a specific hook idiom like `$FLOX_ENV_CACHE` — would be
+    contamination: that is the skill teaching the baseline arm its own
+    answer, not a neutral task description.
+    """
+    if arm == "baseline":
+        return (
+            f"Convert the repository at {tmpdir} into a working Flox "
+            f"environment: create .flox/env/manifest.toml such that "
+            f"`flox activate` succeeds, wiring any services the "
+            f"project needs to run locally (e.g. a database) as Flox "
+            f"services.\n\n"
+            f"Run non-interactively: scan the project files, resolve "
+            f"packages in the Flox catalog, and write "
+            f".flox/env/manifest.toml. Do not ask for or wait for "
+            f"user input — produce the best manifest you can and stop "
+            f"after writing it."
+        )
+    # The /floxify prefix invokes the skill by name. The non-interactive
+    # note prevents the skill from blocking on "What would you like to
+    # do next?" in the Phase 4 menu.
+    return (
+        f"/floxify {tmpdir}\n\n"
+        "Run non-interactively: complete all phases (scan project files, "
+        "resolve packages in the Flox catalog, write .flox/env/manifest.toml). "
+        "Do not ask for or wait for user input — produce the best manifest you "
+        "can and stop after writing it."
+    )
+
+
+# A rep whose agent result text shows Claude Code rejected an
+# unrecognized slash command -- AI-442 batch-1's actual failure mode
+# (every baseline rep hit "Unknown command: /floxify" before the
+# baseline prompt fix above). The prompt fix is the real fix; this is
+# the belt-and-suspenders guard, same shape as the C1 arm-contamination
+# guard, so a FUTURE regression that reintroduces a skill-specific
+# slash command in a prompt fails loudly and specifically instead of
+# silently recording a `failed-verify` rep that never attempted the
+# task at all.
+_UNKNOWN_COMMAND_RE = re.compile(r"^Unknown command:", re.MULTILINE)
+
+
+def _detect_harness_misconfiguration(result_text):
+    return bool(_UNKNOWN_COMMAND_RE.search(result_text or ""))
+
+
 def _write_stream_file(stream_dir, task_id, arm, rep, role, raw_stream):
     """Persist one rep's raw stream-json transcript to disk (AI-442:
     "persist raw streams per rep"). Returns the path relative to
@@ -953,19 +1035,7 @@ def process_task(task, skill_dir, skip_activation=False,
         shutil.copytree(str(fixture_src), tmpdir, dirs_exist_ok=True)
         tmp = Path(tmpdir)
 
-        # Build the headless prompt.  The /floxify prefix invokes the skill by
-        # name.  The non-interactive note prevents the skill from blocking on
-        # "What would you like to do next?" in the Phase 4 menu. The baseline
-        # arm gets the IDENTICAL prompt (AI-442 Q7) — /floxify simply resolves
-        # to nothing without the skill loaded, so the model falls back to its
-        # own unassisted judgment with the same tool surface.
-        prompt = (
-            f"/floxify {tmpdir}\n\n"
-            "Run non-interactively: complete all phases (scan project files, "
-            "resolve packages in the Flox catalog, write .flox/env/manifest.toml). "
-            "Do not ask for or wait for user input — produce the best manifest you "
-            "can and stop after writing it."
-        )
+        prompt = _build_prompt(tmpdir, arm)
 
         print(f"  [{task.get('tier', '?')}] {task_id} ({arm}#{rep}): invoking skill ...",
               flush=True)
