@@ -577,6 +577,37 @@ if it's in the catalog, add it; if it's not, put it in ✗. The same logic appli
 `Makefile` targets, Dockerfile `RUN apt-get`/`brew install` lines, and any other
 build-system dep declaration you encounter.
 
+**Curb dev-tooling scope creep — install for BUILD and RUN, not CI parity.**
+`[install]` exists to make the project buildable and runnable, plus its
+declared native chain (Dockerfile/Aptfile/`*-sys` crates and the like) — not
+to replicate everything a CI matrix, `Makefile`, or deferred script happens
+to invoke. Lemmy is the worked counter-example: alongside its real runtime +
+native chain (`cargo`/`rustc`/`postgresql_18`/`pkg-config`/`gcc`), a live run
+over-installed `nodejs_24`, `pnpm_10`, `jq`, `diesel-cli`, `pgformatter`,
+`taplo`, `typos`, `shfmt`, and `git` — none of them build or run
+`lemmy_server`. A judge called this "defensible CI parity, but none
+substitute for the missing service" — CI parity is not the goal; a working
+local build+run is. The clean golden
+(`evals/floxify/testdata/gold/lemmy.toml`) installs only the seven packages
+that actually build and run the binary.
+
+- **CI-only lint/format tooling** (`taplo`, `typos`, `shfmt`,
+  `pgformatter`, project-specific linters) is opt-in, not a default
+  install — mention it in the conversion report instead of adding it to
+  `[install]`, so the developer can bring it in themselves if they want it.
+- **Don't install `git` as an env dependency** unless a build step
+  genuinely shells out to it — a `build.rs` that clones a dependency, or a
+  `git+` source in `Cargo.lock`/the lockfile. A CI runner installing `git`
+  to check out the repo, or a Dockerfile installing it in the runtime
+  image, is not evidence the BUILD needs it — same builder-vs-runner-stage
+  distinction as the Dockerfile rule above.
+- **A tool referenced only by a script the Flox service replaces doesn't
+  carry over.** Lemmy's `jq` existed solely to URL-encode a socket path in
+  `scripts/start_dev_db.sh`; once `[services.postgres]` wires the DB
+  directly (the hard floor above), that script — and its dependency — is
+  no longer in the loop. Don't install a deferred script's own
+  dependencies once you've stopped deferring to it.
+
 ### Custom service orchestrators
 
 **This section is about services the orchestrator genuinely owns — never the
