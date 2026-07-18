@@ -152,9 +152,9 @@ If the hook is missing, suggest:
 No on-activate hook found. To auto-run pip install on activate:
   flox edit
   # Add in [hook] section:
-  # on-activate = """
+  # on-activate = '''
   #   pip install --quiet -r requirements.txt
-  # """
+  # '''
 ```
 
 Stop here. **Never modify an existing manifest.**
@@ -629,13 +629,13 @@ ones deferred by the rules above (e.g. ClickHouse, Kafka). Wire them so
 docker-compose.pkg-path = "docker-compose"
 
 [hook]
-on-activate = """
+on-activate = '''
   if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
     docker-compose up -d 2>&1 | tail -5 >&2
   else
     echo "⚠  Docker not running — start Docker Desktop then re-activate" >&2
   fi
-"""
+'''
 ```
 
 For selective startup: `docker-compose up -d clickhouse kafka`
@@ -695,6 +695,21 @@ Do not invent syntax.
 - `[hook] on-activate` runs as Bash; its output goes to stderr
 - `[profile]` scripts are sourced into the user's interactive shell — keep fast, use for venv activation
 - Services: each service is `[services.<name>]` with `command = "..."` on its own
+- `[hook] on-activate` and `[services.*] command` use **literal** strings —
+  `'''…'''` for multi-line, `'…'` for one-line — never TOML's basic
+  `"""…"""`/`"…"` strings (see "TOML string types" below)
+
+**TOML string types — literal, not basic, for shell content.** Basic
+strings (`"""…"""`, `"…"`) are escape-processed: a shell line-continuation
+backslash, or a literal `\d`/`\.` inside a path or regex, gets consumed as a
+TOML escape sequence before the shell ever sees it, silently truncating or
+corrupting the command. Literal strings (`'''…'''`, `'…'`) leave backslashes
+and `$` completely inert, so the shell script reads exactly as written.
+Every `[hook] on-activate` and `[services.*] command` in this skill's own
+patterns, and every file in `evals/floxify/gold/` and
+`evals/floxify/testdata/gold/`, uses `'''…'''` for this reason — e.g.
+`evals/floxify/gold/node-postgres.toml`'s `on-activate` and `command` blocks
+are both `'''…'''`.
 
 **Pkg-group economy — fewest groups possible is a first-order goal.** Every
 distinct `pkg-group` is a distinct catalog page, and every page downloads its
@@ -783,6 +798,30 @@ is the recording, not pin abstinence. Legitimate reasons include:
 A pin with neither kind of reason recorded next to it is worth a second look
 before it ships — either find its provenance or drop it.
 
+**Emitting an exact pin: `<id>.version` alongside `<id>.pkg-path`.** When
+the repo pins an exact patch — `.nvmrc`/`.node-version` with a full
+`X.Y.Z`, a `packageManager` exact version, `rust-toolchain.toml` with a
+dated channel — `pkg-path` alone isn't enough: it resolves to whatever the
+catalog's current default is for that page, which drifts as the catalog
+moves forward. Add `<id>.version = "<exact>"` so the manifest is pinned to
+the specific patch, not just the major/minor line. Resolve the value the
+same way as any other version check ("Reading `flox show` correctly"
+above): read the FULL version list for the versioned pkg-path, and use the
+exact string `flox show` prints.
+
+If the catalog doesn't carry the repo's exact patch, pin the closest
+available instead of inventing a `version` value that doesn't resolve, and
+say so in the same source-attribution comment the install line already
+carries (see "Version mismatches" in Phase 2) — the attribution convention
+already exists, emitting the `version` field alongside it is what's new
+here. `evals/floxify/testdata/gold/mastodon.toml` is the worked example:
+`.nvmrc` pins Node `24.18` and the catalog has that exact patch, so
+`nodejs.version = "24.18.0"` is a clean exact match; `.ruby-version` pins
+Ruby `4.0.6` but the catalog's newest `ruby_4_0` build is `4.0.5`, so
+`ruby.version = "4.0.5"` pins the closest available with the gap recorded
+in the trailing comment (`# catalog max is 4.0.5; repo pins 4.0.6 (1 patch
+ahead, not yet in catalog)`).
+
 **Platform-conditional packages** — when a dependency is only relevant on certain
 platforms, use the per-package `systems` field to scope it. Never skip it or bury it
 in a ⚠ warning just because the current machine can't use it. Another developer on a
@@ -822,7 +861,7 @@ when the project has multiple stacks (e.g. Python + Node).
 **Python**
 ```toml
 [hook]
-on-activate = """
+on-activate = '''
   if [ ! -d "$FLOX_ENV_CACHE/venv" ]; then
     uv venv "$FLOX_ENV_CACHE/venv" >&2
   fi
@@ -830,7 +869,7 @@ on-activate = """
     source "$FLOX_ENV_CACHE/venv/bin/activate"
     uv pip install --quiet -r requirements.txt
   )
-"""
+'''
 
 [profile]
 bash = 'source "$FLOX_ENV_CACHE/venv/bin/activate"'
@@ -845,42 +884,57 @@ fish = 'source "$FLOX_ENV_CACHE/venv/bin/activate.fish"'
 **Node**
 ```toml
 [hook]
-on-activate = """
+on-activate = '''
   if [ ! -d node_modules ] || { [ -f package-lock.json ] && [ package-lock.json -nt node_modules ]; }; then
     npm install --silent
   fi
-"""
+'''
 ```
 - pnpm → `pnpm-lock.yaml` staleness check, `pnpm install --frozen-lockfile --silent`
 - yarn → `yarn.lock` staleness check, `yarn install --silent`
 
 **Pinned package manager (`packageManager` field / `engines.pnpm`).** When the
-repo pins an exact pnpm/yarn (`"packageManager": "pnpm@10.24.0"`), do NOT install
-a catalog `pnpm` — the catalog's `pnpm_<major>` floor can exceed the pin, and an
-`.npmrc` `engine-strict=true` will then reject it. Provision the exact version
-with **corepack** (ships with the `nodejs` package) into a *writable* cache dir
-(the Nix node prefix is a read-only store path):
+repo pins an exact pnpm/yarn (`"packageManager": "pnpm@10.24.0"`), search the
+catalog for that EXACT version FIRST — `flox show pnpm_<major>` / `flox show
+yarn-berry`, reading the full version list per "Reading `flox show`
+correctly" above, not just `Latest:`. If the exact patch resolves, install
+it directly with `<id>.pkg-path` + `<id>.version` (see "Emitting an exact
+pin" above) — mastodon pins `packageManager "yarn@4.17.1"` and the catalog
+serves `yarn-berry` at that line, so the golden installs it directly, no
+corepack involved (`evals/floxify/testdata/gold/mastodon.toml`).
+
+Fall back to **corepack** only when the catalog genuinely can't satisfy the
+pin — the nearest `pnpm_<major>`/`yarn-berry` floor exceeds it, or an
+`.npmrc` `engine-strict=true` rejects the nearest available patch. PostHog
+pins `pnpm@10.29.3` against a catalog ceiling of `10.29.2` — one patch short
+— so its golden provisions pnpm through corepack instead
+(`evals/floxify/testdata/gold/posthog.toml`). **State the tradeoff when you
+do this:** corepack downloads the package manager over the network on first
+activate, unlike a catalog package (resolved once and reused on every
+future activation) — an offline-fragile step that's only worth it when the
+catalog genuinely can't serve the exact pin. Provision into a *writable*
+cache dir (the Nix node prefix is a read-only store path):
 
 ```toml
 [hook]
-on-activate = """
+on-activate = '''
   export COREPACK_HOME="$FLOX_ENV_CACHE/corepack"
   mkdir -p "$FLOX_ENV_CACHE/node-bin"
   corepack enable --install-directory "$FLOX_ENV_CACHE/node-bin" pnpm
   export PATH="$FLOX_ENV_CACHE/node-bin:$PATH"
   pnpm install --frozen-lockfile
-"""
+'''
 ```
 
 **Go**
 ```toml
 [hook]
-on-activate = """
+on-activate = '''
   export GOPATH="$FLOX_ENV_CACHE/go"
   export GOCACHE="$FLOX_ENV_CACHE/go/cache"
   export GOMODCACHE="$FLOX_ENV_CACHE/go/pkg/mod"
   mkdir -p "$GOPATH" "$GOCACHE" "$GOMODCACHE"
-"""
+'''
 
 [profile]
 bash = 'export GOPATH="$FLOX_ENV_CACHE/go"; export PATH="$GOPATH/bin:$PATH"'
@@ -890,11 +944,11 @@ zsh  = 'export GOPATH="$FLOX_ENV_CACHE/go"; export PATH="$GOPATH/bin:$PATH"'
 **Rust**
 ```toml
 [hook]
-on-activate = """
+on-activate = '''
   export CARGO_HOME="$FLOX_ENV_CACHE/cargo"
   export CARGO_TARGET_DIR="$FLOX_ENV_CACHE/target"
   mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR"
-"""
+'''
 
 [profile]
 bash = 'export CARGO_HOME="$FLOX_ENV_CACHE/cargo"; export PATH="$CARGO_HOME/bin:$PATH"'
@@ -915,14 +969,14 @@ fish = 'set -x CARGO_HOME "$FLOX_ENV_CACHE/cargo"; fish_add_path "$CARGO_HOME/bi
 **Elixir**
 ```toml
 [hook]
-on-activate = """
+on-activate = '''
   export MIX_HOME="$FLOX_ENV_CACHE/mix"
   export HEX_HOME="$FLOX_ENV_CACHE/hex"
   mkdir -p "$MIX_HOME" "$HEX_HOME"
   mix local.hex --force --if-missing >&2
   mix local.rebar --force --if-missing >&2
   [ -f mix.exs ] && mix deps.get --quiet >&2
-"""
+'''
 
 [profile]
 bash = 'export MIX_HOME="$FLOX_ENV_CACHE/mix"; export PATH="$MIX_HOME/escripts:$PATH"'
@@ -934,11 +988,11 @@ zsh  = 'export MIX_HOME="$FLOX_ENV_CACHE/mix"; export PATH="$MIX_HOME/escripts:$
 **.NET**
 ```toml
 [hook]
-on-activate = """
+on-activate = '''
   export DOTNET_ROOT="$FLOX_ENV_CACHE/dotnet"
   export NUGET_PACKAGES="$FLOX_ENV_CACHE/nuget"
   mkdir -p "$DOTNET_ROOT" "$NUGET_PACKAGES"
-"""
+'''
 
 [profile]
 bash = 'export DOTNET_ROOT="$FLOX_ENV_CACHE/dotnet"; export PATH="$HOME/.dotnet/tools:$PATH"'
@@ -949,9 +1003,9 @@ zsh  = 'export DOTNET_ROOT="$FLOX_ENV_CACHE/dotnet"; export PATH="$HOME/.dotnet/
 **PHP** — a fixed-bundle interpreter, unlike Python/Node.
 ```toml
 [hook]
-on-activate = """
+on-activate = '''
   composer install --no-interaction
-"""
+'''
 ```
 - Pick the VERSIONED `phpNN` (from `composer.json` `require.php` / `config.platform.php`);
   the bare `php` pkg-path lags a minor. Pair Composer as `phpNNPackages.composer`
@@ -974,18 +1028,26 @@ on-activate = """
 
 Use ONLY when docker-compose does NOT already manage postgres.
 
+**Default to a unix socket, not TCP.** A TCP bind on `127.0.0.1:5432`
+collides with a developer's own host Postgres, which defaults to the exact
+same port — floxify exists to remove that kind of manual conflict, not
+recreate it. `-k` plus `listen_addresses=""` disables TCP entirely and
+scopes the connection to a socket file instead, so a floxified project's
+Postgres, a host-installed one, and another floxified project can all run
+side by side without a port clash.
+
 ```toml
 [install]
 postgresql_16.pkg-path = "postgresql_16"
 
 [vars]
-PGHOST = "127.0.0.1"
+PGHOST = "/tmp"
 PGPORT = "5432"
 PGUSER = "postgres"
 PGDATABASE = "myapp_dev"
 
 [hook]
-on-activate = """
+on-activate = '''
   export PGDATA="$FLOX_ENV_CACHE/postgres"
   if [ ! -d "$PGDATA" ]; then
     initdb -D "$PGDATA" \
@@ -993,26 +1055,42 @@ on-activate = """
       --auth=trust \
       --no-locale \
       --encoding=UTF8 >&2
-    pg_ctl -D "$PGDATA" -o "-p $PGPORT -k /tmp" \
+    pg_ctl -D "$PGDATA" -o "-p $PGPORT -k $PGHOST" \
       -l "$PGDATA/init.log" start
-    until pg_isready -h 127.0.0.1 -p "$PGPORT" -q; do sleep 0.2; done
-    createdb -h 127.0.0.1 -p "$PGPORT" -U "$PGUSER" "$PGDATABASE"
+    until pg_isready -h "$PGHOST" -p "$PGPORT" -q; do sleep 0.2; done
+    createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$PGDATABASE"
     pg_ctl -D "$PGDATA" stop -m fast
   fi
-"""
+'''
 
 [services.postgres]
-command = """
+command = '''
   exec postgres \
     -D "$PGDATA" \
     -p "$PGPORT" \
-    -k /tmp \
-    -c listen_addresses="$PGHOST"
-"""
+    -k "$PGHOST" \
+    -c listen_addresses=""
+'''
 ```
 
-`-k /tmp` puts the Unix socket in `/tmp` (works without root).
+`PGHOST` set to a directory (not a hostname) is standard libpq — any driver
+built on it (`psql`, the `pg` gem, `psycopg2`) resolves it to the socket
+automatically, no app-side change needed.
 `auth=trust` is dev-only — always note in the report: `(dev-only auth — not safe for shared machines)`
+
+**TCP is a deliberate, recorded exception — never the silent default.** Add
+it back only when the app genuinely can't consume a socket-directory DSN: a
+driver that requires a `host:port` connection string, or a codebase with two
+DB drivers where only one accepts a socket path. When that applies, set
+`PGHOST` to a real loopback address and restore `-c
+listen_addresses="$PGHOST"`, and record the reason in a comment next to
+`[services.postgres]` — the same recorded-reason discipline as an exact
+version pin (see "Version-pinning discipline" above). Lemmy is the worked
+example: it keeps `127.0.0.1:5432` alongside a `/tmp/lemmy-postgres` socket
+because `LEMMY_DATABASE_URL` must stay byte-identical to the repo's own
+`postgres://lemmy:password@localhost:5432/lemmy` default across two DB
+drivers, one of which can't take a socket path
+(`evals/floxify/testdata/gold/lemmy.toml`).
 
 Redis service (add alongside postgres when both are needed):
 
@@ -1021,25 +1099,39 @@ Redis service (add alongside postgres when both are needed):
 redis.pkg-path = "redis"
 
 [vars]
-REDIS_PORT = "6379"
+REDIS_SOCKET = "/tmp/myapp-redis.sock"
 
 [hook]
-on-activate = """
+on-activate = '''
   mkdir -p "$FLOX_ENV_CACHE/redis"
-"""
+'''
 
 [services.redis]
-command = """
+command = '''
   exec redis-server \
-    --port "$REDIS_PORT" \
+    --unixsocket "$REDIS_SOCKET" \
+    --port 0 \
     --dir "$FLOX_ENV_CACHE/redis" \
     --save "" \
     --appendonly no
-"""
+'''
 ```
 
-`--save ""` and `--appendonly no` disable persistence (dev-appropriate).
-Always note in the report: `(no persistence — data resets on service stop; edit manifest if you need durability)`
+`--port 0` disables Redis's TCP listener entirely, matching the postgres
+default above — socket-only. Name the socket file after the project
+(`myapp-redis.sock`, not a generic `redis.sock`) so two floxified projects
+on the same machine don't collide in `/tmp`. `--save ""` and `--appendonly
+no` disable persistence (dev-appropriate). Always note in the report:
+`(no persistence — data resets on service stop; edit manifest if you need durability)`
+
+**Same TCP-as-exception rule as postgres.** When the app's Redis client
+needs `REDIS_HOST`/`REDIS_PORT` or a `redis://host:port` URL and can't take
+a socket path, keep TCP alongside the socket rather than dropping it — use
+`--port 6379` instead of `--port 0`, add the `REDIS_URL`/`REDIS_HOST` vars
+the app reads, and record why. Mastodon does exactly this:
+`REDIS_URL = "redis://localhost:6379"` alongside a `/tmp` unix socket,
+because both its Rails app and its separate Node streaming service read
+`REDIS_URL` in host:port form (`evals/floxify/testdata/gold/mastodon.toml`).
 
 ---
 
