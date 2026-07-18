@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Discrimination screening harness for stretch-tier eval candidates.
 
-For each candidate in candidates.jsonl, runs the baseline arm (bare model,
+For each candidate in candidates-all.jsonl (default; override with
+--candidates), runs the baseline arm (bare model,
 no plugin) and the skills arm (plugin loaded, MCP off), scores both, and
 classifies the candidate:
 
@@ -32,6 +33,12 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import run as _run
 from run import run_claude, judge, NEUTRAL_SUFFIX, ANSWER_SUFFIX
+
+# candidates-all.jsonl is the consolidated candidate set: every batch
+# (pass2, regression, triggering, new-features) folded in, with a single
+# current definition per id. Other candidates*.jsonl files hold individual
+# historical batches for `--candidates <file>` runs against just that batch.
+DEFAULT_CANDIDATES = HERE / "candidates-all.jsonl"
 
 
 def hard_check(answer: str, must_match: list, must_not_match: list) -> bool:
@@ -72,15 +79,21 @@ def _score_arm(candidate: dict, mode: str, allow_tools: list, reps: int = 1) -> 
     judge_correct_hits = 0
     first_excerpt = ""
     errors = []
+    cost_usd = 0.0
     for _ in range(reps):
-        answer, err = run_claude(prompt, mode, allow_tools)
+        # run_claude returns (result, err, meta); judge returns (verdict, meta)
+        # -- meta carries cost/usage accounting (AI-459) and must be captured
+        # even where unused, or the tuple destructure raises.
+        answer, err, agent_meta = run_claude(prompt, mode, allow_tools)
+        cost_usd += agent_meta.get("cost_usd", 0.0)
         if err:
             errors.append(err)
             continue
         if hard_check(answer, candidate.get("must_match", []),
                       candidate.get("must_not_match", [])):
             hard_hits += 1
-        verdict = judge(candidate, answer)
+        verdict, judge_meta = judge(candidate, answer)
+        cost_usd += judge_meta.get("cost_usd", 0.0)
         judge_scores.append(verdict["score"])
         if verdict["correct"]:
             judge_correct_hits += 1
@@ -95,6 +108,7 @@ def _score_arm(candidate: dict, mode: str, allow_tools: list, reps: int = 1) -> 
             "judge_score": 0, "judge_correct": False,
             "judge_issues": [f"arm error: {errors[0] if errors else 'unknown'}"],
             "error": errors[0] if errors else "unknown", "answer_excerpt": "",
+            "cost_usd": round(cost_usd, 4),
         }
     rate = hard_hits / ok
     mean_judge = round(sum(judge_scores) / len(judge_scores), 2) if judge_scores else 0
@@ -107,6 +121,7 @@ def _score_arm(candidate: dict, mode: str, allow_tools: list, reps: int = 1) -> 
         "judge_correct": judge_correct_hits * 2 >= ok,
         "judge_issues": [],
         "answer_excerpt": first_excerpt,
+        "cost_usd": round(cost_usd, 4),
     }
 
 
@@ -160,6 +175,7 @@ def screen_candidate(candidate: dict, allow_tools: list, reps: int = 1) -> dict:
             "judge_correct": arm["judge_correct"],
             "judge_issues": arm["judge_issues"],
             "answer_excerpt": arm["answer_excerpt"],
+            "cost_usd": arm.get("cost_usd", 0.0),
         }
         if arm.get("error"):
             rec["error"] = arm["error"]
@@ -217,8 +233,9 @@ def main():
     )
     ap.add_argument(
         "--candidates",
-        default=str(HERE / "candidates.jsonl"),
-        help="path to candidates.jsonl (default: candidates.jsonl next to screen.py)",
+        default=str(DEFAULT_CANDIDATES),
+        help="path to a candidates jsonl file (default: candidates-all.jsonl, the "
+             "current consolidated + fixed set, next to screen.py)",
     )
     ap.add_argument("--only", help="run a single candidate id")
     ap.add_argument(
@@ -310,11 +327,18 @@ def main():
                 if r[arm_key].get("hard_pass_rate") is not None]
         return round(sum(vals) / len(vals), 3) if vals else None
 
+    total_cost_usd = round(
+        sum(r["baseline"].get("cost_usd", 0.0) + r["skills"].get("cost_usd", 0.0)
+            for r in results),
+        4,
+    )
+
     summary = {
         "model": args.model,
         "reps": args.reps,
         "mean_baseline_hard_pass_rate": mean_rate("baseline"),
         "mean_skills_hard_pass_rate": mean_rate("skills"),
+        "total_cost_usd": total_cost_usd,
         "total": len(results),
         "errors": len(errored),
         "discriminators": len(discriminators),

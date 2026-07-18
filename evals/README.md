@@ -68,10 +68,9 @@ How:
   (`must_not_match`) — good answers often show the anti-pattern as a labeled
   counter-example, which false-fires a negative check.
 - Screen it baseline-vs-skills to confirm the skill arm follows the
-  guidance; promote it into `tasks.jsonl` once it holds. Note: the
-  `screen.py` screening harness has not landed on main (AI-438 tracks
-  it, along with the multi-rep policy); until it does, this step
-  requires the branch tooling.
+  guidance; promote it into `tasks.jsonl` once it holds. See the
+  Screening section below for `screen.py`, the rep policy, and
+  check-design rules.
 
 ## What it does
 
@@ -152,3 +151,115 @@ chance of an all-green run). So `--gate` is split:
   per-tier breakdown, and `should_trigger_rate`. These are tracked as quality/
   triggering trends (watch for a sustained drop), not pass/fail gates. `may` and
   `stretch` tasks are advisory by definition.
+
+## Screening (`screen.py`)
+
+`screen.py` develops the *discriminating stretch tier*: it runs candidate prompts
+(`candidates*.jsonl`) through the **baseline** arm (bare model) and the **skills**
+arm (plugin loaded) and classifies each as a **discriminator** (skill lifts over
+baseline), a **skill-gap** (both fail — the skill may be missing coverage), or
+**no-signal** (baseline already passes — too easy). Hard-checks are data-driven
+per candidate via `must_match` / `must_not_match` regex lists.
+
+`candidates-all.jsonl` is the default and the only candidate set this harness
+ships — it is a superset of the original `candidates.jsonl` (retired) with the
+same false-firing checks fixed under new ids
+(`trap-layer-vs-compose-fixed`, `trap-containerize-nopush-fixed`) plus the
+pass2/regression batches folded in. Pass `--candidates` to screen a specific
+historical batch (`candidates-pass2.jsonl`, `candidates-regression.jsonl`,
+`candidates-triggering.jsonl`, `candidates-new-features.jsonl`) instead.
+
+```bash
+python3 screen.py --reps 5                                    # default set, n=5
+python3 screen.py --candidates candidates-pass2.jsonl --reps 5   # one batch, n=5
+python3 screen.py --only trap-vars-no-interpolation --reps 5
+python3 screen.py --plugin-dir /path/to/fixed-skill/flox-plugin  # test a skill edit
+```
+
+Like `run.py`, each `claude` call's cost/usage is read from the JSON envelope
+(AI-459) and rolled into `results/screen.json`'s `summary.total_cost_usd` and
+each arm's `cost_usd` — screening is not free, and the multi-rep policy below
+multiplies call volume by `reps`, so cost is worth watching per run.
+
+### Multi-rep policy (required)
+
+Single runs have a **~50% cell-level flip rate** — the baseline arm alone flipped
+hard-pass on 3 of 6 cells between identical runs. A lone P/F is dominated by
+sampling noise. Therefore:
+
+- **`--reps` ≥ 5 is required** for any promote / discard / skill-gap decision.
+  `screen.py` reports `hard_pass_rate` (fraction of reps passing) and mean judge;
+  `hard_pass`/`judge_correct` are majority verdicts.
+- Compare **pass-rates**, not single cells. A discriminator must show a rate gap
+  that survives n≥5.
+
+### Model policy
+
+The discriminating tier screens and gates on the **same model as the functional
+gate — Opus (`claude-opus-4-8`)**. Rationale: content recall does not separate
+modern Claude from itself (Opus *and* Sonnet already know Flox specifics), so the
+tier's value is **triggering + freshness**, which the Opus gate measures directly.
+No separate weaker-model arm.
+
+### Check-design rules (learned the hard way)
+
+- **Prefer positive `must_match` over negative `must_not_match`.** Assert the
+  *correct* construction rather than detecting the wrong one.
+- **A correct answer often illustrates the anti-pattern as a labeled
+  counter-example.** A proximity/negative check then false-fires on good answers
+  — this sank three checks independently: `trap-vars-no-interpolation`
+  (`\[vars\]…PATH`), the pre-fix `trap-hook-return-not-exit`
+  (`\bexit\s+[0-9]\b` fired on a documented "Don't: `exit 0`" table cell), and
+  the retired `stretch-layer-vs-compose` (`\[include\]` fired on the sentence
+  explaining why `[include]` is the wrong tool). Fixed by asserting the
+  positive construction only and dropping the negative check.
+- **A case-insensitive `must_not_match` can match ordinary prose, not just the
+  pattern it targets.** The retired `stretch-containerize-nopush` used
+  `FROM\s+\w` to catch a Dockerfile `FROM` line, but `re.I` also matches the
+  common English word "from" (e.g. "builds an image **from** your
+  environment") — it false-fired on nearly any prose answer. There is no safe
+  case-insensitive substring for an all-caps Dockerfile directive; the fix
+  (`trap-containerize-nopush-fixed`) drops the negative check entirely.
+- **A literal multi-word `must_match` assumes one argument order.**
+  `trap-uv-venv-invocation`'s `"uv pip install --python"` required `--python`
+  to immediately follow the subcommand, but real correct answers commonly
+  write `uv pip install -r requirements.txt --python ...` — flag order varies
+  and a fixed-order substring false-negatives on it. Loosen to
+  `uv pip install\b.*--python\b` (same line, either order) rather than
+  enumerating every permutation.
+- **Validate a new/edited check against a real known-good answer** (the
+  `answer_excerpt` fields in `results/*.json`, or a fixture copied into a unit
+  test) before trusting it — the check is a pure function of the answer text,
+  so this needs no model calls. `evals/test_screen.py` does this for every
+  check above.
+
+### CI-gate policy — PROPOSED, not yet decided
+
+`screen.py` is not wired into `.github/workflows/evals.yml`; it is a
+pre-promotion tool run manually or by an agent before a candidate is added to
+`tasks.jsonl` (which *is* gated, per Gate policy above). Whether — and how —
+to eventually gate CI on `screen.py` output directly is an open question this
+section only frames; it needs a human decision, not an agent one:
+
+- **Option A: gate at `--reps` ≥ 3 per task.** Run screening at reduced `n=3`
+  (cheaper than the documented `n=5` promotion bar) on every PR that touches
+  `candidates-all.jsonl` or a skill file, and fail if any `should`-tier
+  candidate's `hard_pass_rate` drops under a threshold (e.g. < 2/3). Pro:
+  catches a regression on the exact candidate that changed, fast. Con: n=3
+  is below the harness's own documented reliability floor (n≥5), so the gate
+  itself inherits some of the flakiness `--gate` in `run.py` was designed to
+  avoid; false-fail risk on a real PR is non-trivial at n=3.
+- **Option B: gate on aggregate pass-rate, not per-task.** Run the full
+  screening batch at n=5 on a schedule (not per-PR, given cost) and gate on
+  `mean_skills_hard_pass_rate` staying above a floor (e.g. no more than a
+  5pp drop from the last committed golden), rather than any single
+  candidate's cell. Pro: matches the harness's own reliability
+  recommendation (n≥5) and is less prone to single-candidate flakiness. Con:
+  a real regression on one candidate can be masked by noise/improvement on
+  others; slower feedback (schedule, not per-PR); needs a committed
+  `results/screen.json` golden to diff against, which does not yet exist.
+- **Neither is implemented.** This tier currently gates nothing; discriminator
+  promotion into `tasks.jsonl` is a manual/agent-reviewed step, and *that*
+  promoted task is what `run.py --gate` binds on. Pick one (or a hybrid: A
+  scoped to changed candidates, B as a scheduled backstop) on this PR before
+  wiring either into CI.
