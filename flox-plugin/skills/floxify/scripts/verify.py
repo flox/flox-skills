@@ -545,21 +545,10 @@ def manifest_wires_compose(manifest):
     keep firing; this errs toward the stricter, not the more permissive,
     reading rather than an oversight.
     """
-    hook = _table(manifest, "hook")
-    script = hook.get("on-activate")
-    if not isinstance(script, str):
-        return False
     wires_up = False
-    for raw_line in script.splitlines():
-        line = _strip_comment(raw_line)
-        if not line.strip():
-            continue
-        for stmt in re.split(r"[;&|]+", line):
-            stmt = stmt.strip()
-            if not stmt or _ECHO_OR_PRINTF_RE.match(stmt):
-                continue
-            if _DOCKER_COMPOSE_UP_RE.search(stmt):
-                wires_up = True
+    for stmt in _hook_statements(manifest):
+        if _DOCKER_COMPOSE_UP_RE.search(stmt):
+            wires_up = True
     if not wires_up:
         return False
     install = _table(manifest, "install")
@@ -604,6 +593,19 @@ def _service_covers(manifest, kind):
 
 def _truncate(value, limit=64):
     return value if len(value) <= limit else value[:limit] + "…"
+
+
+def _leaf_msg(package, source, kind, reason=None):
+    """Build a leaf-datastore-not-served violation message. `reason`, when
+    given, is appended as the corroboration-gap explanation. Strings
+    reproduced verbatim from check_leaf_datastore_services' three call
+    sites — test_verify.py asserts the exact text.
+    """
+    base = (f"client '{package}' ({source}) implies {kind}, but no "
+            f"[services.*] serves it")
+    if reason is None:
+        return base
+    return f"{base} — {reason}; confirm whether {kind} is actually used"
 
 
 def check_leaf_datastore_services(detect, manifest):
@@ -662,10 +664,10 @@ def check_leaf_datastore_services(detect, manifest):
             if scope != "runtime":
                 violations.append(violation(
                     "leaf-datastore-not-served",
-                    f"client '{package}' ({source}) implies {kind}, but no "
-                    f"[services.*] serves it — detected in a dev/test/"
-                    f"optional-only dependency section, not proof of a "
-                    f"runtime need; confirm whether {kind} is actually used",
+                    _leaf_msg(package, source, kind, reason=(
+                        "detected in a dev/test/optional-only dependency "
+                        "section, not proof of a runtime need"
+                    )),
                     severity=ADVISORY,
                 ))
                 continue
@@ -673,19 +675,18 @@ def check_leaf_datastore_services(detect, manifest):
             if not corroborated:
                 violations.append(violation(
                     "leaf-datastore-not-served",
-                    f"client '{package}' ({source}) implies {kind}, but no "
-                    f"[services.*] serves it — no independent [vars] "
-                    f"endpoint or compose service corroborates it, so a "
-                    f"declared dependency alone isn't proof of a runtime "
-                    f"need; confirm whether {kind} is actually used",
+                    _leaf_msg(package, source, kind, reason=(
+                        "no independent [vars] endpoint or compose service "
+                        "corroborates it, so a declared dependency alone "
+                        "isn't proof of a runtime need"
+                    )),
                     severity=ADVISORY,
                 ))
                 continue
 
             violations.append(violation(
                 "leaf-datastore-not-served",
-                f"client '{package}' ({source}) implies {kind}, but no "
-                f"[services.*] serves it",
+                _leaf_msg(package, source, kind),
             ))
     return violations
 
@@ -874,6 +875,28 @@ def _strip_comment(line):
     return line
 
 
+def _hook_statements(manifest):
+    """Yield each on-activate statement with comments stripped and blank
+    or echo/printf-only statements excluded. Shared tokenizer for
+    manifest_wires_compose, check_hook_no_mutation, and check_hook_network
+    — yields nothing if there's no on-activate string, matching each
+    caller's own empty-script handling.
+    """
+    hook = _table(manifest, "hook")
+    script = hook.get("on-activate")
+    if not isinstance(script, str):
+        return
+    for raw_line in script.splitlines():
+        line = _strip_comment(raw_line)
+        if not line.strip():
+            continue
+        for stmt in re.split(r"[;&|]+", line):
+            stmt = stmt.strip()
+            if not stmt or _ECHO_OR_PRINTF_RE.match(stmt):
+                continue
+            yield stmt
+
+
 def check_hook_no_mutation(manifest):
     """Hooks run on EVERY activation — a hook that mutates the tracked git
     tree (`git submodule update`, `git checkout`, ...) re-mutates it every
@@ -885,32 +908,20 @@ def check_hook_no_mutation(manifest):
     statement exempts it (`git apply --check` validates without mutating).
     """
     violations = []
-    hook = _table(manifest, "hook")
-    script = hook.get("on-activate")
-    if not isinstance(script, str):
-        return violations
-
     seen = set()
-    for raw_line in script.splitlines():
-        line = _strip_comment(raw_line)
-        if not line.strip():
+    for stmt in _hook_statements(manifest):
+        if not _GIT_MUTATION_RE.search(stmt):
             continue
-        for stmt in re.split(r"[;&|]+", line):
-            stmt = stmt.strip()
-            if not stmt or _ECHO_OR_PRINTF_RE.match(stmt):
-                continue
-            if not _GIT_MUTATION_RE.search(stmt):
-                continue
-            if _GIT_READ_ONLY_FLAGS_RE.search(stmt):
-                continue
-            if stmt in seen:
-                continue
-            seen.add(stmt)
-            violations.append(violation(
-                "hook-mutates-tree",
-                f"[hook] on-activate runs '{stmt}' — hooks run on every "
-                f"activation and must not mutate the tracked git tree",
-            ))
+        if _GIT_READ_ONLY_FLAGS_RE.search(stmt):
+            continue
+        if stmt in seen:
+            continue
+        seen.add(stmt)
+        violations.append(violation(
+            "hook-mutates-tree",
+            f"[hook] on-activate runs '{stmt}' — hooks run on every "
+            f"activation and must not mutate the tracked git tree",
+        ))
     return violations
 
 
@@ -960,33 +971,21 @@ def check_hook_network(manifest):
     discipline as check_hook_no_mutation.
     """
     violations = []
-    hook = _table(manifest, "hook")
-    script = hook.get("on-activate")
-    if not isinstance(script, str):
-        return violations
-
     seen = set()
-    for raw_line in script.splitlines():
-        line = _strip_comment(raw_line)
-        if not line.strip():
+    for stmt in _hook_statements(manifest):
+        if not (_GIT_NETWORK_RE.search(stmt) or _CURL_WGET_RE.match(stmt)):
             continue
-        for stmt in re.split(r"[;&|]+", line):
-            stmt = stmt.strip()
-            if not stmt or _ECHO_OR_PRINTF_RE.match(stmt):
-                continue
-            if not (_GIT_NETWORK_RE.search(stmt) or _CURL_WGET_RE.match(stmt)):
-                continue
-            if stmt in seen:
-                continue
-            seen.add(stmt)
-            violations.append(violation(
-                "hook-network-fetch",
-                f"[hook] on-activate runs '{stmt}' — this fetches over the "
-                f"network on every activation; confirm this is intentional "
-                f"(ecosystem package-manager installs are the accepted "
-                f"idiom for dependency fetching and are not flagged)",
-                severity=ADVISORY,
-            ))
+        if stmt in seen:
+            continue
+        seen.add(stmt)
+        violations.append(violation(
+            "hook-network-fetch",
+            f"[hook] on-activate runs '{stmt}' — this fetches over the "
+            f"network on every activation; confirm this is intentional "
+            f"(ecosystem package-manager installs are the accepted "
+            f"idiom for dependency fetching and are not flagged)",
+            severity=ADVISORY,
+        ))
     return violations
 
 
