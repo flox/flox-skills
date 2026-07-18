@@ -150,8 +150,8 @@ def screen_candidate(candidate: dict, allow_tools: list, reps: int = 1) -> dict:
     b_err = baseline.get("error", "")
     s_err = skills.get("error", "")
     err_note = (
-        f" [BASE ERR: {b_err[:60]}]" if b_err else ""
-        + f" [SKILLS ERR: {s_err[:60]}]" if s_err else ""
+        (f" [BASE ERR: {b_err[:60]}]" if b_err else "")
+        + (f" [SKILLS ERR: {s_err[:60]}]" if s_err else "")
     )
     def arm_str(a):
         return f"{a['hard_pass_count']}/{a['ok_reps']}h,j{a['judge_score']}"

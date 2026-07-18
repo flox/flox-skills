@@ -362,8 +362,14 @@ class TestScoreArmMatchesRunClaudeShape(unittest.TestCase):
         # AGENT_JSON's total_cost_usd (0.5) + JUDGE_JSON's (0.1).
         self.assertAlmostEqual(result["cost_usd"], 0.6)
 
+    @patch("run.time.sleep")
     @patch("run.subprocess.run")
-    def test_agent_error_does_not_raise_and_records_zero_cost_meta(self, mock_run):
+    def test_agent_error_does_not_raise_and_records_zero_cost_meta(
+        self, mock_run, mock_sleep
+    ):
+        # run_claude retries 3x with a real backoff (up to ~7s) between
+        # attempts on a transient error; patch time.sleep so this test
+        # doesn't actually wait for it.
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=1)
         result = screen._score_arm(self.CANDIDATE, "baseline", None, reps=1)
         self.assertFalse(result["hard_pass"])
