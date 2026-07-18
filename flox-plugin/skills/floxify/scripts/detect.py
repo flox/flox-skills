@@ -141,6 +141,27 @@ TOOL_LANG = {
     "bun": "bun", "php": "php", "terraform": "terraform",
 }
 
+# Dockerfile `FROM` image base -> runtime language, for the FROM-line hint.
+DOCKERFILE_FROM_LANG = {
+    "ruby": "ruby", "python": "python", "node": "node",
+    "golang": "go", "rust": "rust", "php": "php",
+    "eclipse-temurin": "java", "openjdk": "java",
+}
+
+# CI workflow setup-* action version keys -> canonical runtime language.
+CI_SETUP_ACTION_KEYS = (
+    ("node", "node-version"), ("python", "python-version"),
+    ("go", "go-version"),
+)
+
+# docker-compose service/image name substrings that identify a datastore.
+COMPOSE_SERVICE_KINDS = (
+    "postgres", "postgis", "redis", "valkey", "mysql", "mariadb",
+    "mongo", "clickhouse", "kafka", "redpanda", "zookeeper",
+    "elasticsearch", "opensearch", "rabbitmq", "minio", "memcached",
+    "cassandra", "temporal", "nats",
+)
+
 
 # --------------------------------------------------------------------------
 # small IO helpers
@@ -651,9 +672,7 @@ def scan(target):
             ):
                 img, tag = fm.group(1), fm.group(2)
                 base = img.split("/")[-1]
-                lang = {"ruby": "ruby", "python": "python", "node": "node",
-                        "golang": "go", "rust": "rust", "php": "php",
-                        "eclipse-temurin": "java", "openjdk": "java"}.get(base)
+                lang = DOCKERFILE_FROM_LANG.get(base)
                 if lang:
                     note(f"Dockerfile FROM {base}:{tag} (runtime hint, {rel})")
             apt = re.findall(r"apt-get\s+install[^\n&|]*", text)
@@ -693,8 +712,7 @@ def scan(target):
         for p in wf_dir.glob("*.y*ml"):
             text = _read(p) or ""
             rel = _rel(target, p)
-            for lang, key in (("node", "node-version"), ("python", "python-version"),
-                              ("go", "go-version")):
+            for lang, key in CI_SETUP_ACTION_KEYS:
                 m = re.search(key + r":\s*['\"]?([0-9][0-9.xX*]*)", text)
                 if m:
                     runtimes.append(_runtime(lang, m.group(1), f"{rel} (setup-{lang})"))
@@ -813,10 +831,7 @@ def _parse_compose(text):
             tag = rest if (sep and "/" not in rest) else None
         blob = f"{s['name']} {base or ''}".lower()
         kind = None
-        for k in ("postgres", "postgis", "redis", "valkey", "mysql", "mariadb",
-                  "mongo", "clickhouse", "kafka", "redpanda", "zookeeper",
-                  "elasticsearch", "opensearch", "rabbitmq", "minio", "memcached",
-                  "cassandra", "temporal", "nats"):
+        for k in COMPOSE_SERVICE_KINDS:
             if k in blob:
                 kind = k
                 break
