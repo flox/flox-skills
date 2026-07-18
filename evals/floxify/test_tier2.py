@@ -45,7 +45,15 @@ def _agent_writes_manifest(manifest_text):
         target = Path(prompt.split("\n", 1)[0].removeprefix("/floxify ").strip())
         (target / ".flox" / "env").mkdir(parents=True, exist_ok=True)
         (target / ".flox" / "env" / "manifest.toml").write_text(manifest_text)
-        return "agent output", None
+        # AI-442: _run_claude_agent is a 3-tuple now (adds cost/usage/
+        # tool-call meta) -- tier2.py's own call site only mechanically
+        # unpacks and discards the third element (out of AI-442 PR 1's
+        # scope), so a zeroed stand-in is enough here.
+        return "agent output", None, {
+            "cost_usd": 0.0, "usage": {}, "duration_ms": 0, "num_turns": 0,
+            "tool_calls": {"total": 0, "flox_search": 0, "flox_show": 0},
+            "raw_stream": None,
+        }
     return _agent
 
 
@@ -1172,7 +1180,11 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
         # (not mocked here) must short-circuit to a skip, matching Tier 1's
         # own no-manifest test in test_run_floxify.py.
         mock_clone.return_value = None
-        mock_agent.return_value = ("agent output", None)
+        mock_agent.return_value = ("agent output", None, {
+            "cost_usd": 0.0, "usage": {}, "duration_ms": 0, "num_turns": 0,
+            "tool_calls": {"total": 0, "flox_search": 0, "flox_show": 0},
+            "raw_stream": None,
+        })
         mock_judge.return_value = {"score": 0, "correct": False, "issues": []}
 
         result = tier2.process_entry(self._entry(), str(tier2.DEFAULT_SKILL_DIR))
@@ -1349,7 +1361,11 @@ class TestProcessEntryUpstreamFloxStrip(unittest.TestCase):
             (target / ".flox" / "env" / "manifest.toml").write_text(
                 "[install]\nfrom_skill = true\n"
             )
-            return "agent output", None
+            return "agent output", None, {
+                "cost_usd": 0.0, "usage": {}, "duration_ms": 0, "num_turns": 0,
+                "tool_calls": {"total": 0, "flox_search": 0, "flox_show": 0},
+                "raw_stream": None,
+            }
 
         mock_agent.side_effect = _agent
         mock_verify.return_value = {
@@ -1598,14 +1614,14 @@ class TestJudgeTier2CatalogNote(unittest.TestCase):
     def test_no_verify_result_tells_judge_not_to_assert_from_memory(
         self, mock_run_judge
     ):
-        mock_run_judge.return_value = ('{"score": 3, "correct": true, "issues": []}', None)
+        mock_run_judge.return_value = ('{"score": 3, "correct": true, "issues": []}', None, {"cost_usd": 0.0, "usage": {}, "duration_ms": 0, "num_turns": 0})
         tier2._judge_tier2(self._entry(), "[install]\n", verify_result=None)
         prompt = mock_run_judge.call_args.args[0]
         self.assertIn("do not assert catalog facts from memory", prompt.lower())
 
     @patch("tier2._run_judge")
     def test_clean_catalog_confirms_resolution_to_judge(self, mock_run_judge):
-        mock_run_judge.return_value = ('{"score": 5, "correct": true, "issues": []}', None)
+        mock_run_judge.return_value = ('{"score": 5, "correct": true, "issues": []}', None, {"cost_usd": 0.0, "usage": {}, "duration_ms": 0, "num_turns": 0})
         verify_result = {"catalog_checked": True, "violations": []}
         tier2._judge_tier2(self._entry(), "[install]\n", verify_result=verify_result)
         prompt = mock_run_judge.call_args.args[0]

@@ -446,6 +446,143 @@ If catalog access or `flox` is unavailable:
 - Activation is automatically skipped and recorded as such
 - Use `--skip-activation` to suppress the activation attempt entirely
 
+## Efficiency axis (AI-442)
+
+AI-435 found Claude reaches a correct manifest on its own, across
+model tiers — correctness no longer discriminates the skill from the
+bare model. What the skill actually changes is the *path*: how much
+search-and-verify effort it takes to get there. This section is the
+capture-and-measurement machinery for that axis. PR 1 lands the
+plumbing and its unit tests, not a measurement run — "First real
+signal" below is how to run one once you're ready to spend the API
+budget.
+
+### What gets captured
+
+Every agent and judge call already returns cost/usage/turn data on the
+envelope (`total_cost_usd`, `usage`, `num_turns`, `duration_ms`) —
+AI-459 proved this for `../run.py`'s single-turn harness, and this
+harness threw it away at both spawn points (`_run_claude_agent`,
+`_run_judge`). AI-442 ports that parsing (`_parse_meta`, mirroring
+`../run.py:81`) into both functions, which changes their return shape
+from `(result, err)` to `(result, err, meta)`. `tier2.py` imports both
+and picks up the port for free at the call-site level — its own two
+call sites now unpack a 3-tuple, but it does not record cost in its
+own output yet (out of PR 1's scope; a mechanical fix, not a feature).
+
+Cost alone was not the sharpest instrument for Bill's actual thesis —
+"the skill saves the search loop" — so PR 1 goes straight to
+`--output-format stream-json --verbose` for the agent call (per-ticket
+decision Q1: no `num_turns`-only phase first) and parses the event
+stream for `tool_use` blocks, counting `flox search`/`flox show`
+invocations specifically (via the Bash tool's `input.command`)
+alongside the total tool-call count. The judge call stays on plain
+`--output-format json` — it never calls a tool, so there is nothing to
+stream-parse. The flag combination (does `stream-json` work headless
+with `-p`? is `--verbose` required?) was verified with one live,
+minimal `claude` call before any code was written; the captured
+transcript lives in `testdata/stream-samples/`, and its own README
+documents exactly what that call confirmed.
+
+### The verified anchor (Q2)
+
+Efficiency is meaningless without an anchor — cost to reach *what*?
+`flox activate -c "echo __ok__"` proves packages resolve and build; it
+does not prove a declared service actually serves (the same gap
+`--services` closes for Tier 2 — see "…and activation doesn't tell
+you the services serve" above). The binding decision on Q2: use the
+stronger anchor for exactly the fixtures that declare one. A task's
+own `checks` array is the signal — `has_services_section` plus a
+`pins_<kind>` check (currently only `pins_postgres`, i.e.
+`node-postgres`) means the fixture expects a service, and
+`_probe_service` (a leaner, Tier-1-local version of `tier2.py`'s
+AI-447 probe — not imported from there, since `tier2.py` already
+imports from this module and a reverse import would be circular) runs
+the same `flox activate --start-services -c <polling script>`
+technique to confirm real connectivity before crediting the rep as
+verified. Every other fixture stays activation-only. Each rep records
+which anchor applied (`verify_method`: `"activation"` or
+`"services"`), so the aggregation never conflates a runtime-only pass
+with a service-answers pass.
+
+### Censoring (Q5: distributions, never a pooled scalar)
+
+A rep can spend tokens and never reach the anchor — averaging "cost
+to succeed" over reps that never succeeded would let a giving-up arm
+look artificially cheap. Every rep ends in exactly one terminal
+disposition:
+
+| Disposition | Meaning | Feeds `verify_rate`? | Feeds cost/turns "to verify"? |
+|---|---|---|---|
+| `verified` | anchor reached | yes (numerator) | **yes** |
+| `failed-verify` | activation/service ran, came back non-ok, or timed out | yes (denominator) | no — right-censored into `unverified_spend` |
+| `unverifiable-env` | flox absent / harness error / `--skip-activation` | **dropped** | no |
+| `agent-error` | `claude` call failed, no manifest produced | **dropped** | no |
+
+`_efficiency_summary` (sibling to `_stats`) computes this per fixture,
+reporting median + p25/p75 + `n` for turns, tool-calls (total /
+`flox search` / `flox show`), tokens (output, cache-read), and cost —
+**never** a single pooled number across fixtures (Q5: a trivial
+fixture's short loop and a service fixture's long one would hide
+exactly the contrast that makes a result credible). The
+`test_decision_verification_*` test in `test_run_floxify.py` is the
+one to trust most: a giving-up arm (every rep `failed-verify`) must
+produce `verify_rate = 0` and an EMPTY `cost_to_verify` (`n=0`), never
+a deceptively low mean — confirmed by deliberately breaking the
+censoring logic during development and watching that exact test catch it.
+
+### Two arms (Q7)
+
+`--arm {skills,baseline}` (default `skills`) selects whether
+`--plugin-dir` is passed to `claude` — the ONLY difference between
+arms. Both get the identical tool surface (`Bash Read Write Edit
+Skill`); `baseline` simply has no skill to invoke, so `/floxify <dir>`
+resolves to nothing and the model falls back to its own unassisted
+judgment with the same tools. This is a DIFFERENT flag from the
+pre-existing `--baseline` (the regression-diff file to compare
+against) — that flag keeps its original meaning untouched; the naming
+collision was flagged and deliberately avoided.
+
+### First real signal — running a batch
+
+```bash
+# Five-fixture batch (Q3): three long search/verify loops
+# (ruby/python-uv/node-postgres) + one native-linkage/pkg-group-
+# pressure fixture (rust-cargo) + one negative control (go-mod: a
+# single runtime, no services, no hook -- the loop should be short
+# regardless of arm).
+python3 run_floxify.py \
+  --only ruby,python-uv,node-postgres,rust-cargo,go-mod \
+  --arm skills --reps 8 --out results/floxify-skills-batch.json
+
+python3 run_floxify.py \
+  --only ruby,python-uv,node-postgres,rust-cargo,go-mod \
+  --arm baseline --reps 8 --out results/floxify-baseline-batch.json
+```
+
+n=8 per (fixture, arm) — above the AI-438 n≥5 floor, for a readable
+IQR (Q4). Run the two arms interleaved in the same session window if
+catalog drift matters (the live catalog moves; keep it fixed across
+the pair you're comparing). Raw agent streams persist per rep under
+`results/streams/<out-basename-without-extension>/<id>__<arm>__rep<N>__agent.jsonl`
+— keyed to the summary file's own name, so a rep stays traceable back
+to the exact run that produced it for forensics later.
+
+The headline read: `verify_rate` roughly equal across arms (confirms
+AI-435 — both arms *get there*), `turns_to_verify` / `tool_calls_to_verify`
+materially lower on the skills arm for the three long-loop fixtures,
+and ~0 delta on `go-mod`. That contrast — not a pooled scalar — is the
+evidence for the axis.
+
+### What PR 1 does not do
+
+Cost/usage capture and the two-arm CLI machinery are additive and
+zero-API to land — mocked stream fixtures (derived from the one real
+captured sample) and RED-first tests for the parser, disposition
+classification, censoring rules, and arm selection. The batch above is
+a separate, paid, subscription-covered step that runs AFTER this
+lands: PR 1 ships the instrument, not a measurement.
+
 ## Tier 2: real OSS conversion repos (`tier2.py`)
 
 Tier 1 fixtures above are small synthetic dirs vendored into this repo.

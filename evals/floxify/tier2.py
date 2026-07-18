@@ -610,7 +610,11 @@ def _judge_tier2(entry, manifest_text, verify_result=None):
         'Return ONLY a JSON object: {"score": <int 1-5>, "correct": '
         '<true|false>, "issues": [<short strings>]}'
     )
-    result, err = _run_judge(prompt)
+    # AI-442: _run_judge is now a 3-tuple (adds cost/usage meta for the
+    # efficiency axis). tier2.py doesn't record judge cost itself yet
+    # (out of AI-442 PR 1's scope) -- mechanical unpack only, so this
+    # call site doesn't break under the new shared-function signature.
+    result, err, _meta = _run_judge(prompt)
     if err:
         return {"score": 0, "correct": False, "issues": [f"judge error: {err}"]}
     raw = {}
@@ -770,7 +774,15 @@ def process_entry(entry, skill_dir, activate=False, services=False,
         )
 
         print(f"  {entry['id']}: invoking skill (this may take a while) ...", flush=True)
-        agent_out, agent_err = _run_claude_agent(prompt, skill_dir, timeout=agent_timeout)
+        # AI-442: _run_claude_agent is now a 3-tuple (adds cost/usage/
+        # tool-call meta for the efficiency axis) and switched its
+        # transport to --output-format stream-json. tier2.py doesn't
+        # record agent cost itself yet (out of AI-442 PR 1's scope) --
+        # mechanical unpack only. `arm` defaults to "skills", preserving
+        # Tier 2's existing always-skill-loaded behavior exactly.
+        agent_out, agent_err, _meta = _run_claude_agent(
+            prompt, skill_dir, timeout=agent_timeout
+        )
 
         if agent_err:
             print(f"  {entry['id']}: agent error: {agent_err}", flush=True)
