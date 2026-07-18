@@ -434,9 +434,14 @@ asserting anything about a package:
    `go_1_23`, `python313`) is authoritative for a pinned runtime. The bare
    `flox show ruby` may report a *lower* ceiling that belongs to a different
    catalog entry — trusting it silently downgrades the runtime. Mastodon
-   pins Ruby 4.0.6: `flox show ruby` tops out at 3.4.x, but `ruby_4_0` exists
-   at 4.0.5. Search the versioned `pkg-path` first; fall back to the bare
-   name only for genuinely unversioned tools.
+   pins Ruby 4.0.6: `flox show ruby` tops out at 3.4.x, but the versioned
+   `ruby_4_0` page carries the 4.x line the bare name doesn't reach at
+   all — verify live whether it reaches the repo's exact patch or only the
+   nearest prior one (same live-verify discipline as "Emitting an exact
+   pin" below; the catalog moves forward, so don't trust a number cited
+   elsewhere in this guidance over today's `flox show`). Search the
+   versioned `pkg-path` first; fall back to the bare name only for
+   genuinely unversioned tools.
 4. **When the question is package CONTENTS (does this build include a given
    extension/module?), don't infer it from the name — execute it.**
    `flox show` describes outputs and versions; it does not enumerate what's
