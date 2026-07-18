@@ -55,14 +55,16 @@ discipline costs a few extra turns there; the win on those repos is
 the portability guarantee above, not speed.
 
 **Cost.** A full skill-guided conversion lands at roughly
-$0.50–1.50 per run (Claude Opus, median). Skill runs cost slightly
-more than baseline on simple repos; the delta is the price of the
-verification discipline that produces the conformance gap. Delegating
-that same skill-guided conversion to a cheaper model narrows the cost
-further while holding the same deterministic bar: claude-haiku-4-5,
-gated on the identical activation + verification checks, reached a
-median $0.21–0.26 per verified conversion across these five fixtures —
-the gates are equal, not the models, so this is a cost comparison on
+$0.50–1.50 per run (Claude Opus, median; agent + judge combined).
+Skill runs cost slightly more than baseline on simple repos; the delta
+is the price of the verification discipline that produces the
+conformance gap. Delegating that same skill-guided conversion to a
+cheaper model narrows the cost further while holding the same
+deterministic bar: claude-haiku-4-5, gated on the identical activation
++ verification checks, reached a median $0.21–0.26 per verified
+conversion across these five fixtures — the same agent-plus-judge
+basis as the Opus figure above, so agent-only spend is lower still.
+The gates are equal, not the models, so this is a cost comparison on
 conversions that both cleared the same bar, not a claim that a cheap
 model matches Opus in every respect.
 
