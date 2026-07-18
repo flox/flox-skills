@@ -391,7 +391,7 @@ STREAM_SAMPLE = (
 ).read_text(encoding="utf-8")
 
 
-class TestParseMeta(unittest.TestCase):
+class TestParseMetaFloxify(unittest.TestCase):
     """Direct mirror of AI-459's own test_run.py approach: well-formed,
     missing fields, non-dict usage, garbage cost -- never raises, always
     zeroes cleanly."""
