@@ -291,7 +291,13 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: floxify-eval-results
-          path: evals/floxify/results/
+          # AI-442: results/streams/ holds raw per-rep agent stream-json
+          # transcripts (one per fixture even on a default single-rep
+          # run) -- large and not useful as a CI artifact; excluded the
+          # same way evals/floxify/.gitignore excludes them from commits.
+          path: |
+            evals/floxify/results/
+            !evals/floxify/results/streams/
 
   floxify-tier2:
     # Tier 2 outcome eval — runs /floxify against a real OSS repo cloned at a

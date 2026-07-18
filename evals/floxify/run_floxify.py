@@ -271,14 +271,21 @@ ZERO_META = {
 
 
 # A Bash tool_use's `input.command` counts as `flox search`/`flox show`
-# when that verb appears as the leading command or after a shell
-# separator (;, &, |) -- same discipline verify.py's hook checks use for
-# "is this genuinely invoked, not just mentioned." This is a metric, not
-# a security gate, so it is deliberately permissive (no global-opts
-# handling like verify.py's git/compose regexes) — a missed classification
-# undercounts a turns/tool-calls metric, it does not silently pass a bug.
-_FLOX_SEARCH_RE = re.compile(r"(?:^|[;&|]\s*)flox\s+search\b")
-_FLOX_SHOW_RE = re.compile(r"(?:^|[;&|]\s*)flox\s+show\b")
+# when that verb appears as the leading command, after a shell separator
+# (;, &, |), or on its own line of a multiline command block (\n) --
+# review-found (I1): a Bash tool_use commonly carries a MULTILINE script
+# (e.g. "flox search x\nflox show y"), and without \n in the separator
+# class, every line but the first was invisible to this classifier,
+# undercounting exactly the reps that issued several catalog lookups in
+# one Bash call -- and multiline usage can differ BETWEEN arms, so the
+# gap was an asymmetric bias on the core metric, not just noise. Same
+# discipline verify.py's hook checks use for "is this genuinely invoked,
+# not just mentioned." This is a metric, not a security gate, so it stays
+# deliberately permissive otherwise (no global-opts handling like
+# verify.py's git/compose regexes) — a missed classification undercounts
+# a turns/tool-calls metric, it does not silently pass a bug.
+_FLOX_SEARCH_RE = re.compile(r"(?:^|[;&|\n]\s*)flox\s+search\b")
+_FLOX_SHOW_RE = re.compile(r"(?:^|[;&|\n]\s*)flox\s+show\b")
 
 
 def _classify_tool_calls(stream_events):
@@ -361,6 +368,64 @@ def _parse_stream(stdout_text):
     return result_text, meta, result_event is not None
 
 
+def _find_init_event(stdout_text):
+    """The first well-formed `type: "system", subtype: "init"` event in a
+    stream-json transcript, or None. That event carries `plugins` and
+    `slash_commands` — which plugins genuinely loaded for this call —
+    independent of `_parse_stream`'s own tool-call-focused handling.
+    Used by the arm-contamination guard below (AI-442 C1)."""
+    for line in (stdout_text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (isinstance(event, dict) and event.get("type") == "system"
+                and event.get("subtype") == "init"):
+            return event
+    return None
+
+
+def _detect_flox_plugin_contamination(init_event):
+    """True if the flox/floxify plugin loaded for this call despite not
+    being requested via `--plugin-dir` (AI-442 C1 — a live review found
+    this machine's user-scope `~/.claude/settings.json` has
+    `flox@flox-skills` enabled in `enabledPlugins`, and
+    `--strict-mcp-config` only gates MCP servers, not plugins: a bare
+    `claude -p` call with NEITHER `--plugin-dir` NOR any plugin flag
+    still loaded `flox:floxify` — see
+    testdata/stream-samples/README.md). `--setting-sources project,local`
+    on both arms is the primary fix (suppresses user-scope
+    `enabledPlugins` entirely); this is the belt-and-suspenders runtime
+    check specifically for the baseline arm, so a leak can never
+    silently poison a rep's data even if the primary fix regresses on a
+    future Claude Code CLI version or a different machine's settings.
+
+    Checks two independent signals so a change to either the `plugins`
+    list's shape or the `slash_commands` list's shape alone doesn't
+    blind the guard: a `plugins` entry named `flox` (or whose `source`
+    starts with `flox@`, covering both the `flox-marketplace` and
+    `flox-skills` marketplace names seen in practice), OR any
+    `flox:`-prefixed slash command (`flox:flox`, `flox:floxify`).
+    """
+    if not isinstance(init_event, dict):
+        return False
+    plugins = init_event.get("plugins")
+    if isinstance(plugins, list):
+        for p in plugins:
+            if not isinstance(p, dict):
+                continue
+            if p.get("name") == "flox" or str(p.get("source", "")).startswith("flox@"):
+                return True
+    slash_commands = init_event.get("slash_commands")
+    if isinstance(slash_commands, list):
+        if any(str(c).startswith("flox:") for c in slash_commands):
+            return True
+    return False
+
+
 # --- claude invocation --------------------------------------------------------
 
 def _run_claude_agent(prompt, skill_dir, arm="skills", timeout=600, retries=2):
@@ -369,11 +434,28 @@ def _run_claude_agent(prompt, skill_dir, arm="skills", timeout=600, retries=2):
 
     The floxify skill needs Bash (flox search/init/activate, ls, etc.),
     Read (project files), Write+Edit (manifest.toml), and Skill (to invoke
-    the /floxify skill itself). `--plugin-dir` is the sole arm switch
+    the /floxify skill itself). `--plugin-dir` is the intended arm switch
     (AI-442 Q7: both arms get the identical tool surface, "skills" vs
     "baseline" differs ONLY in whether the skill is loaded) — `baseline`
     omits it, matching run.py's/screen.py's own arm-isolation mechanism
     ported to the agentic path.
+
+    `--setting-sources project,local` (AI-442 C1, review-found): a live
+    review caught that `--plugin-dir` presence/absence is NOT sufficient
+    isolation by itself on a machine whose user-scope
+    `~/.claude/settings.json` has `flox@flox-skills` enabled in
+    `enabledPlugins` — `--strict-mcp-config` only gates MCP servers, not
+    plugins, so the "baseline" arm would silently run WITH the skill
+    loaded. `--setting-sources project,local` excludes the user-scope
+    settings file from consideration (so its `enabledPlugins` entry
+    never applies), while `--plugin-dir` itself is a CLI-level plugin
+    load independent of the settings-file plugin-enablement mechanism —
+    confirmed live it still loads the skill on the skills arm with this
+    flag present (testdata/stream-samples/README.md carries both
+    directions' verification). Applied unconditionally (both arms): the
+    baseline arm needs the leak closed, and there is no reason for the
+    skills arm to read this machine's other ambient user-scope settings
+    either — reproducibility, not just isolation.
 
     `--output-format stream-json --verbose` (not plain `json`) — AI-442
     Q1: tool-call counting needs the per-event stream, not just the
@@ -387,6 +469,7 @@ def _run_claude_agent(prompt, skill_dir, arm="skills", timeout=600, retries=2):
         "--verbose",
         "--allowedTools", "Bash", "Read", "Write", "Edit", "Skill",
         "--strict-mcp-config",
+        "--setting-sources", "project,local",
     ]
     if arm != "baseline":
         cmd += ["--plugin-dir", str(skill_dir)]
@@ -407,6 +490,19 @@ def _run_claude_agent(prompt, skill_dir, arm="skills", timeout=600, retries=2):
                     # No terminal `result` event -- genuinely unparseable
                     # or truncated output, not a quiet success.
                     last = f"BAD_STREAM: {proc.stdout[:200]}"
+                elif arm == "baseline" and _detect_flox_plugin_contamination(
+                    _find_init_event(proc.stdout)
+                ):
+                    # AI-442 C1: belt-and-suspenders runtime guard. A
+                    # leak is a deterministic property of this
+                    # environment's settings, not a transient flake --
+                    # retrying would just reproduce it, so this returns
+                    # immediately rather than consuming a retry attempt.
+                    return None, (
+                        "arm contamination: baseline arm loaded the flox "
+                        "plugin despite --setting-sources project,local -- "
+                        "rep discarded, not counted as baseline data"
+                    ), dict(ZERO_META)
                 else:
                     return result_text, None, meta
         if attempt < retries - 1:
@@ -731,6 +827,17 @@ def _probe_service(target_dir, kind, manifest_text, verify_mod,
     must not read as "verified." Requires flox on PATH and a working
     activation already established by the caller (probing an
     unactivated env errors — services can only start from inside one).
+
+    Deliberate divergence from `tier2.py`'s own `_probe_services`: that
+    function leaves an unmatched service at its `skipped=True` default
+    (tier2's declared-service gating is advisory-only, never Tier 2's
+    own gate). This function returns a real `(False, False, ...)`
+    failure for the identical shape instead, because Tier 1's
+    efficiency axis needs "unwired" to count as `failed-verify`, not a
+    dropped observation (see the censoring table in the module
+    docstring / README's "Efficiency axis" section). A future pass that
+    aligns the two probes should treat this as an intentional
+    difference to preserve, not an inconsistency to fix.
     """
     if not shutil.which("flox"):
         return None, True, "flox not in PATH"
