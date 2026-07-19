@@ -362,6 +362,14 @@ class TestLeafDatastoreServices(unittest.TestCase):
         v = _violations(detect, "[install]\n")
         self.assertEqual(_rules(v), {"leaf-datastore-not-served"})
         self.assertEqual(v[0]["severity"], "advisory")
+        self.assertEqual(
+            v[0]["message"],
+            "client 'pg' (package.json) implies postgres, but no "
+            "[services.*] serves it — no independent [vars] endpoint or "
+            "compose service corroborates it, so a declared dependency "
+            "alone isn't proof of a runtime need; confirm whether postgres "
+            "is actually used",
+        )
 
     def test_fires_hard_when_client_is_corroborated(self):
         # The realistic, incident-motivating shape (AI-449/lemmy): a
@@ -390,6 +398,13 @@ class TestLeafDatastoreServices(unittest.TestCase):
         leaf = [x for x in v if x["rule"] == "leaf-datastore-not-served"]
         self.assertEqual(len(leaf), 1)
         self.assertEqual(leaf[0]["severity"], "advisory")
+        self.assertEqual(
+            leaf[0]["message"],
+            "client 'pg-native' (package.json) implies postgres, but no "
+            "[services.*] serves it — detected in a dev/test/optional-only "
+            "dependency section, not proof of a runtime need; confirm "
+            "whether postgres is actually used",
+        )
 
     def test_missing_scope_key_defaults_to_runtime(self):
         # Backward compatibility: detect facts predating AI-467 (or a
