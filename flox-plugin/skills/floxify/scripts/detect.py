@@ -500,16 +500,20 @@ def scan(target):
     # ---- package.json --------------------------------------------------
     if "package.json" in root_files:
         pj = None
+        parsed_ok = True
         try:
             pj = json.loads(_read(target / "package.json") or "{}")
         except Exception:
+            parsed_ok = False
             note("package.json: could not parse JSON")
+        if parsed_ok and not isinstance(pj, dict):
+            # Valid JSON that isn't an object at all -- an array
+            # (`[1, 2, 3]`) or, degenerately, the literal `null` (which
+            # parses to Python None just like the parse-failure branch
+            # above, so `parsed_ok` -- not an `is not None` check -- is
+            # what tells the two apart and avoids double-noting).
+            note("package.json: not a JSON object")
         if not isinstance(pj, dict):
-            # Valid JSON that isn't an object at all (`[1, 2, 3]`) --
-            # `pj is None` only on the parse-failure branch above, which
-            # already recorded its own note; don't double-note that case.
-            if pj is not None:
-                note("package.json: not a JSON object")
             pj = {}
         eng = pj.get("engines", {}) if isinstance(pj.get("engines"), dict) else {}
         if eng.get("node"):

@@ -2011,6 +2011,30 @@ class TestNonStrPkgPath(unittest.TestCase):
         self.assertIsNone(verify_mod._pkg_path_str({"pkg-path": True}))
         self.assertIsNone(verify_mod._pkg_path_str({"pkg-path": {"nested": "table"}}))
 
+    def test_malformed_pkg_path_fires_hard(self):
+        # PR #66 review I1: F3 must have HARD-finding parity with F4
+        # (malformed-systems) -- reviewer's exact repro. Without
+        # detect facts or a catalog check, a garbage pkg-path used to
+        # read as a fully clean manifest (zero violations), which is
+        # the same vacuous-green failure malformed-section/
+        # malformed-systems already guard against, one level down.
+        manifest = '[install]\nfoo.pkg-path = 123\nbar.pkg-path = true\n'
+        v = verify({}, manifest, check_catalog_live=False)["violations"]
+        matches = [x for x in v if x["rule"] == "malformed-pkg-path"]
+        self.assertEqual(len(matches), 2, v)
+        for m in matches:
+            self.assertEqual(m["severity"], "hard")
+
+    def test_well_formed_pkg_paths_never_trip_this_rule(self):
+        manifest = '[install]\na.pkg-path = "a"\nb.pkg-path = ["python310Packages", "pip"]\n'
+        v = verify({}, manifest, check_catalog_live=False)["violations"]
+        self.assertNotIn("malformed-pkg-path", _rules(v))
+
+    def test_absent_pkg_path_never_trips_this_rule(self):
+        manifest = '[install]\na.priority = 1\n'
+        v = verify({}, manifest, check_catalog_live=False)["violations"]
+        self.assertNotIn("malformed-pkg-path", _rules(v))
+
 
 class TestMalformedDetectFacts(unittest.TestCase):
     """F5: detect.json (produced by detect.py, consumed by verify.py) can
@@ -2028,16 +2052,49 @@ class TestMalformedDetectFacts(unittest.TestCase):
 
     def test_detect_runtimes_field_wrong_type_does_not_raise(self):
         v = _violations({"runtimes": "python"}, AI449_GOOD_MANIFEST)
-        self.assertEqual(v, [])
+        self.assertEqual(_hard(v), [])
+        self.assertIn("malformed-detect-facts", _rules(v))
 
     def test_detect_service_clients_field_wrong_type_does_not_raise(self):
         v = _violations({"service_clients": {"not": "a-list"}}, AI449_GOOD_MANIFEST)
-        self.assertEqual(v, [])
+        self.assertEqual(_hard(v), [])
+        self.assertIn("malformed-detect-facts", _rules(v))
 
     def test_detect_native_hints_field_wrong_type_does_not_raise(self):
         manifest = '[install]\nvips.pkg-path = "vips"\n'
         v = _violations({"native_hints": "vips"}, manifest)
-        self.assertEqual(v, [])
+        self.assertEqual(_hard(v), [])
+        self.assertIn("malformed-detect-facts", _rules(v))
+
+    def test_partial_malformation_gets_advisory_not_silent(self):
+        # PR #66 review M1: reviewer's exact repro -- runtimes valid,
+        # service_clients garbage. A partially-malformed detect blob is
+        # NOT the same as detect=None (that whole-blob case is a
+        # documented no-op); silently emptying only the bad field could
+        # quietly weaken a HARD cross-check (e.g. leaf-datastore-not-
+        # served) with an unsurfaced gap, so it gets an ADVISORY instead.
+        detect_facts = {
+            "runtimes": [{"language": "python", "version": "3.12", "source": "test"}],
+            "service_clients": "garbage-not-a-list",
+        }
+        v = _violations(detect_facts, AI449_GOOD_MANIFEST)
+        matches = [x for x in v if x["rule"] == "malformed-detect-facts"]
+        self.assertEqual(len(matches), 1, v)
+        self.assertEqual(matches[0]["severity"], "advisory")
+        self.assertIn("service_clients", matches[0]["message"])
+        # A field the checker never asked for is unaffected -- only
+        # PRESENT-but-wrong-typed fields are flagged.
+        self.assertNotIn("runtimes", matches[0]["message"])
+
+    def test_absent_detect_fields_never_trip_this_rule(self):
+        # An absent field is the documented detect=None/{} no-op case,
+        # not a malformation -- must not be flagged.
+        v = _violations({"runtimes": []}, AI449_GOOD_MANIFEST)
+        self.assertNotIn("malformed-detect-facts", _rules(v))
+
+    def test_well_formed_detect_facts_never_trip_this_rule(self):
+        v = _violations(AI449_DETECT, AI449_GOOD_MANIFEST)
+        self.assertNotIn("malformed-detect-facts", _rules(v))
 
 
 # ---------------------------------------------------------------------------

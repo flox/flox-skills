@@ -536,6 +536,16 @@ def test_package_json_non_object_root_records_a_note_not_a_crash():
     assert any("package.json" in n for n in r["notes"]), r["notes"]
 
 
+def test_package_json_literal_null_records_a_note():
+    # PR #66 review M2: `null` is valid JSON and parses to Python None,
+    # the same value the parse-FAILURE branch leaves `pj` as -- without
+    # a `parsed_ok` flag to tell the two apart, this degenerate case
+    # silently recorded no note at all.
+    r = _scan_tmp({"package.json": "null"})
+    assert r["service_clients"] == [], r["service_clients"]
+    assert any("package.json" in n for n in r["notes"]), r["notes"]
+
+
 def test_mise_tools_non_dict_does_not_raise():
     # F7: `[tools]` declared as an array instead of a table -- valid TOML,
     # wrong shape. `tools.items()` used to crash with AttributeError.

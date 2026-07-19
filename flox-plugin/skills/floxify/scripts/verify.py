@@ -168,6 +168,42 @@ def check_malformed_sections(manifest):
     return violations
 
 
+def check_malformed_pkg_paths(manifest):
+    """HARD: an [install] entry's `pkg-path` is present but not a string
+    or a list of path segments -- parity with `check_malformed_sections`
+    (F1/F2) and `_coerce_systems`'s `malformed-systems` (F4), applied one
+    level down (PR #66 review, I1). `_pkg_path_str` already treats a
+    wrong-typed `pkg-path` the same as an absent one, so every downstream
+    check (catalog resolution, runtime matching, the outputs/native-group
+    heuristics) degrades safely with no crash -- but with no detect facts
+    to cross-check against and no live catalog check, that silent
+    coercion alone lets a genuinely malformed entry read as a fully
+    clean manifest. This is what surfaces it as a finding instead.
+    """
+    violations = []
+    for install_id, descriptor in _table(manifest, "install").items():
+        if not isinstance(descriptor, dict):
+            continue
+        pp = descriptor.get("pkg-path")
+        if pp is None or isinstance(pp, (str, list)):
+            continue  # absent, or a shape _pkg_path_str already handles
+        violations.append(violation(
+            "malformed-pkg-path",
+            f"[install] {install_id}.pkg-path = {pp!r} is not a string "
+            f"or a list of path segments -- treated as no pkg-path, so "
+            f"this entry contributes nothing to any check below",
+            install_id=install_id,
+        ))
+    return violations
+
+
+# AI-485 F5 / PR #66 review M1: the list-shaped detect.json fields every
+# check below reads via `_facts_list`. Kept as an explicit tuple (not
+# derived from `_facts_list` call sites) so `check_malformed_detect_facts`
+# can't silently drift out of sync with a future new field.
+DETECT_LIST_FIELDS = ("runtimes", "service_clients", "services", "native_hints")
+
+
 def _facts_list(detect, key):
     """detect[key] filtered to a list of dicts, or [] -- the detect-facts
     analog of `_table` (AI-485 F5). detect.json is normally produced by
@@ -177,11 +213,43 @@ def _facts_list(detect, key):
     module's own docstring already treats `detect=None`/`{}` as "nothing
     to cross-check, degrade the cross-check invariants to no-ops" — a
     malformed field degrades the exact same way rather than crashing.
+    `check_malformed_detect_facts` is what surfaces a PRESENT-but-wrong-
+    typed field as a finding; this helper's only job is the safe degrade.
     """
     value = (detect or {}).get(key)
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
+
+
+def check_malformed_detect_facts(detect):
+    """ADVISORY: a detect.json field every check here expects to be a
+    list of dicts (runtimes/service_clients/services/native_hints) is
+    PRESENT but typed wrong -- a string, a dict, a list of non-dict
+    items (PR #66 review, M1). `_facts_list` already empties just that
+    field so nothing crashes and every OTHER field still cross-checks
+    normally, but that silent, field-scoped degrade is not the same as
+    the documented `detect=None`/`{}` whole-blob no-op: a HARD check
+    (e.g. `leaf-datastore-not-served`) can quietly weaken to a pass with
+    an unsurfaced evidence gap. ADVISORY, not HARD -- this is checker-
+    input degradation (a stale/corrupted detect.json), not a manifest
+    authoring bug the manifest's own author is responsible for. An
+    ABSENT field (key missing entirely) is the ordinary "nothing to
+    cross-check for this fact" case and is not flagged.
+    """
+    violations = []
+    detect = detect if isinstance(detect, dict) else {}
+    for key in DETECT_LIST_FIELDS:
+        if key not in detect or isinstance(detect[key], list):
+            continue
+        violations.append(violation(
+            "malformed-detect-facts",
+            f"detect.json's \"{key}\" field is a "
+            f"{type(detect[key]).__name__}, not a list -- the checker "
+            f"ran with reduced evidence for {key}",
+            severity=ADVISORY,
+        ))
+    return violations
 
 
 # ---------------------------------------------------------------------------
@@ -1447,6 +1515,8 @@ def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
 
     violations = []
     violations += check_malformed_sections(manifest)
+    violations += check_malformed_pkg_paths(manifest)
+    violations += check_malformed_detect_facts(detect)
     violations += check_runtimes_installed(detect, manifest)
     violations += check_leaf_datastore_services(detect, manifest)
     violations += check_vars_endpoints(detect, manifest)
