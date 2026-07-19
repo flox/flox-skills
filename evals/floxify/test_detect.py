@@ -503,6 +503,47 @@ def test_compose_config_coupled_flags():
     assert byname["cache"]["config_coupled"] is False, byname["cache"]
 
 
+# --------------------------------------------------------------------------
+# AI-485: malformed-but-syntactically-valid JSON/TOML shapes. package.json
+# and .mise.toml are agent-editable inputs -- both can carry the wrong
+# VALUE TYPE for a field detect.py assumes is an object/table while still
+# being syntactically valid JSON/TOML, which json.loads/tomllib parse
+# without error. detect.py's own docstring promises it "never raises on a
+# malformed input file"; these two fields were the gap in that promise.
+# --------------------------------------------------------------------------
+
+def test_package_json_non_dict_dependencies_does_not_raise():
+    # F6: `"dependencies": [...]` instead of `{...}` -- valid JSON, wrong
+    # shape. `(pj.get("dependencies") or {}).keys()` used to crash with
+    # AttributeError the moment dependencies was a list.
+    r = _scan_tmp({"package.json": '{"name": "app", "dependencies": ["react", "pg"]}'})
+    assert r["service_clients"] == [], r["service_clients"]
+    assert "package.json" in r["files_scanned"]
+
+
+def test_package_json_non_dict_dev_dependencies_does_not_raise():
+    r = _scan_tmp({
+        "package.json": '{"name": "app", "devDependencies": ["jest"]}',
+    })
+    assert r["service_clients"] == [], r["service_clients"]
+
+
+def test_package_json_non_object_root_records_a_note_not_a_crash():
+    # The whole file can be valid JSON that isn't an object at all
+    # (`[1, 2, 3]`) -- same fragility class, one level up.
+    r = _scan_tmp({"package.json": "[1, 2, 3]"})
+    assert r["service_clients"] == [], r["service_clients"]
+    assert any("package.json" in n for n in r["notes"]), r["notes"]
+
+
+def test_mise_tools_non_dict_does_not_raise():
+    # F7: `[tools]` declared as an array instead of a table -- valid TOML,
+    # wrong shape. `tools.items()` used to crash with AttributeError.
+    r = _scan_tmp({".mise.toml": 'tools = ["node", "python"]\n'})
+    assert r["runtimes"] == [], r["runtimes"]
+    assert any("tools" in n for n in r["notes"]), r["notes"]
+
+
 def _all_tests():
     return [(n, f) for n, f in sorted(globals().items())
             if n.startswith("test_") and callable(f)]

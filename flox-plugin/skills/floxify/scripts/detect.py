@@ -343,6 +343,12 @@ def scan(target):
         if p.is_file():
             data = _parse_toml(_read(p))
             tools = (data or {}).get("tools", {}) if isinstance(data, dict) else {}
+            if not isinstance(tools, dict):
+                # AI-485 F7: `tools = [...]` (array) instead of a table --
+                # valid TOML, but tomllib happily hands back a list here;
+                # `.items()` on it used to crash with AttributeError.
+                note(f"{mf}: [tools] is not a table")
+                tools = {}
             for k, v in tools.items():
                 lang = TOOL_LANG.get(k.lower())
                 ver = v if isinstance(v, str) else (v.get("version") if isinstance(v, dict) else None)
@@ -493,11 +499,18 @@ def scan(target):
 
     # ---- package.json --------------------------------------------------
     if "package.json" in root_files:
+        pj = None
         try:
             pj = json.loads(_read(target / "package.json") or "{}")
         except Exception:
-            pj = {}
             note("package.json: could not parse JSON")
+        if not isinstance(pj, dict):
+            # Valid JSON that isn't an object at all (`[1, 2, 3]`) --
+            # `pj is None` only on the parse-failure branch above, which
+            # already recorded its own note; don't double-note that case.
+            if pj is not None:
+                note("package.json: not a JSON object")
+            pj = {}
         eng = pj.get("engines", {}) if isinstance(pj.get("engines"), dict) else {}
         if eng.get("node"):
             runtimes.append(_runtime("node", str(eng["node"]), "package.json (engines.node)"))
@@ -511,8 +524,13 @@ def scan(target):
             nm, _, ver = pm.partition("@")
             pkg_mgrs.append({"name": nm, "version": ver, "source": "package.json (packageManager)"})
             ecosystems.add("node")
-        deps = list((pj.get("dependencies") or {}).keys())
-        dev_deps = list((pj.get("devDependencies") or {}).keys())
+        # AI-485 F6: `"dependencies": [...]` (array) instead of `{...}` --
+        # valid JSON, wrong shape. `(pj.get(...) or {}).keys()` used to
+        # crash with AttributeError the moment either field was a list.
+        deps_raw = pj.get("dependencies")
+        dev_deps_raw = pj.get("devDependencies")
+        deps = list(deps_raw.keys()) if isinstance(deps_raw, dict) else []
+        dev_deps = list(dev_deps_raw.keys()) if isinstance(dev_deps_raw, dict) else []
         _add_clients(deps, "package.json", clients, scope="runtime")
         _add_clients(dev_deps, "package.json", clients, scope="dev")
         if pj.get("workspaces"):
