@@ -242,18 +242,89 @@ COMPOSE_KIND_MAP = {
 }
 
 
+def _socket_endpoint_kind(key, value):
+    """The leaf-datastore kind a [vars] entry advertises via a Unix-domain
+    socket shape, or None if it doesn't look like one — the socket-side
+    counterpart to `_CONN_STRING_RE`/`_CONN_STRING_KIND` (AI-482).
+    SKILL.md's postgres and redis service patterns default to a unix
+    socket, not TCP (PR #59): `PGHOST` repurposed as a socket directory
+    (`/tmp/myapp-postgres`), and a `--unixsocket` wired alongside redis's
+    TCP port — a connection-string-only check is blind to exactly the
+    shape the skill now emits by default.
+
+    Three recognized shapes:
+      - a `PG*`-named var (libpq convention: PGHOST, PGSOCKET, ...) whose
+        value is an absolute path — unambiguously postgres regardless of
+        what the path itself contains, since PG* is a fixed libpq prefix;
+      - a `*_SOCKET`-named var, or any value ending in `.sock`;
+      - a `unix://` scheme value.
+    For the latter two, kind is read off the combined var name + value
+    against `SERVICE_KIND_ALIASES` (the same alias table
+    `matching_service_names` uses) — so an unrelated socket path (e.g.
+    `DOCKER_HOST=unix:///var/run/docker.sock`) matches no kind and is
+    left alone rather than mis-flagged as a datastore.
+    """
+    key_lower = key.lower()
+    if key_lower.startswith("pg") and value.startswith("/"):
+        return "postgres"
+
+    looks_like_socket = (
+        (key_lower.endswith("_socket") and value.startswith("/"))
+        or value.lower().endswith(".sock")
+        or value.lower().startswith("unix://")
+    )
+    if not looks_like_socket:
+        return None
+
+    haystack = f"{key_lower} {value.lower()}"
+    for kind, aliases in SERVICE_KIND_ALIASES.items():
+        if any(alias in haystack for alias in aliases):
+            return kind
+    return None
+
+
+def _endpoint_kind(key, value):
+    """The leaf-datastore kind a [vars] entry advertises, via either a
+    connection-string URL or a Unix-domain socket shape (AI-482), or
+    None if it looks like neither. Shared by check_vars_endpoints (which
+    also needs the severity split) and _vars_endpoint_kind_present (pure
+    corroboration) so both recognize exactly the same shapes."""
+    m = _CONN_STRING_RE.search(value)
+    if m:
+        return _CONN_STRING_KIND[m.group(1).lower()]
+    return _socket_endpoint_kind(key, value)
+
+
 def _vars_endpoint_kind_present(manifest, kind):
-    """True if any [vars] value is a connection-string endpoint of this
-    kind — corroboration for client evidence (AI-466 I1 / AI-467),
-    independent of whether check_vars_endpoints finds it already
-    served."""
-    for value in (manifest.get("vars", {}) or {}).values():
+    """True if any [vars] entry is a connection-string OR socket-shaped
+    endpoint of this kind — corroboration for client evidence (AI-466 I1
+    / AI-467, extended to socket shapes by AI-482), independent of
+    whether check_vars_endpoints finds it already served."""
+    for key, value in (manifest.get("vars", {}) or {}).items():
         if not isinstance(value, str):
             continue
-        m = _CONN_STRING_RE.search(value)
-        if m and _CONN_STRING_KIND[m.group(1).lower()] == kind:
+        if _endpoint_kind(key, value) == kind:
             return True
     return False
+
+
+def _client_kinds_by_scope(detect):
+    """{kind: set-of-scopes} across every detect.py service_client — the
+    section-provenance evidence (AI-467) `check_vars_endpoints`'s socket
+    branch uses to tell a genuine local-service gap from client-side
+    config for an external datastore (AI-482): if every corroborating
+    client for a kind is dev/test/optional-scoped, that's the same
+    "not proven to be a live local need" signal
+    check_leaf_datastore_services already downgrades on, not proof the
+    manifest owes that kind a [services.*] block."""
+    result = {}
+    for client in (detect or {}).get("service_clients", []):
+        scope = client.get("scope", "runtime")
+        for term in client.get("search_terms", []):
+            kind = LEAF_DATASTORE_DISPLAY.get(term)
+            if kind:
+                result.setdefault(kind, set()).add(scope)
+    return result
 
 
 def _compose_service_kind_present(detect, kind):
@@ -492,42 +563,79 @@ def _looks_local(host):
 
 
 def check_vars_endpoints(detect, manifest):
-    """A [vars] value that advertises a datastore connection string must be
-    backed by a matching [services.*], or by a hook that genuinely starts
-    it via `docker-compose up` (see `_manifest_wires_compose` — repo-side
-    compose FILE presence alone does not count, AI-466 Hole 1).
+    """A [vars] value that advertises a datastore connection string, OR a
+    Unix-domain socket (AI-482 — see `_socket_endpoint_kind`: socket-dir
+    `PG*` vars, `*_SOCKET`/`.sock` values, `unix://` URLs), must be backed
+    by a matching [services.*], or by a hook that genuinely starts it via
+    `docker-compose up` (see `_manifest_wires_compose` — repo-side compose
+    FILE presence alone does not count, AI-466 Hole 1).
 
-    HARD when the host looks local (a Flox service could plausibly be the
-    thing missing); ADVISORY when the host doesn't (`db.prod.internal.
-    example.com`, a public IP) — a managed external datastore with no
-    local service is a common, often intentional pattern, not necessarily
-    a bug (see check_vars_endpoints' _looks_local for the exact rule).
+    Connection strings: HARD when the host looks local (a Flox service
+    could plausibly be the thing missing); ADVISORY when the host doesn't
+    (`db.prod.internal.example.com`, a public IP) — a managed external
+    datastore with no local service is a common, often intentional
+    pattern, not necessarily a bug (see `_looks_local` for the exact
+    rule).
+
+    Socket shapes have no host to apply that same locality test to (a
+    filesystem path is always local to whichever machine reads it), so
+    the parallel signal is section-provenance (AI-467): HARD by default,
+    same as an unserved connection string, UNLESS every detect.py client
+    corroborating this kind is dev/test/optional-scoped (`_client_kinds_
+    by_scope`) — evidence the socket reference is client-side config for
+    a service this environment isn't proven to need locally, not an
+    unwired local service (ADVISORY, matching check_leaf_datastore_
+    services' own scope-based downgrade for the identical evidence).
     """
     violations = []
+    client_scopes = _client_kinds_by_scope(detect)
     for key, value in (manifest.get("vars", {}) or {}).items():
         if not isinstance(value, str):
             continue
         m = _CONN_STRING_RE.search(value)
-        if not m:
+        if m:
+            kind = _CONN_STRING_KIND[m.group(1).lower()]
+            if _manifest_wires_compose(manifest) or _service_covers(manifest, kind):
+                continue
+            host = urlsplit(value[m.start():]).hostname
+            if _looks_local(host):
+                violations.append(violation(
+                    "vars-endpoint-not-served",
+                    f"[vars] {key}='{_truncate(value)}' advertises {kind} but "
+                    f"no [services.{kind}] serves it",
+                ))
+            else:
+                violations.append(violation(
+                    "vars-endpoint-not-served",
+                    f"[vars] {key}='{_truncate(value)}' advertises {kind} at a "
+                    f"non-local host ('{host}') with no [services.{kind}] — "
+                    f"confirm this is an intentionally external/managed "
+                    f"datastore, not an oversight",
+                    severity=ADVISORY,
+                ))
             continue
-        kind = _CONN_STRING_KIND[m.group(1).lower()]
+
+        kind = _socket_endpoint_kind(key, value)
+        if kind is None:
+            continue
         if _manifest_wires_compose(manifest) or _service_covers(manifest, kind):
             continue
-        host = urlsplit(value[m.start():]).hostname
-        if _looks_local(host):
+        scopes = client_scopes.get(kind)
+        if scopes and "runtime" not in scopes:
             violations.append(violation(
                 "vars-endpoint-not-served",
-                f"[vars] {key}='{_truncate(value)}' advertises {kind} but "
-                f"no [services.{kind}] serves it",
+                f"[vars] {key}='{_truncate(value)}' advertises a {kind} "
+                f"socket, but the only corroborating client evidence is "
+                f"dev/test/optional-scoped — confirm this is genuinely a "
+                f"local service and not client-side config for an "
+                f"external {kind}",
+                severity=ADVISORY,
             ))
         else:
             violations.append(violation(
                 "vars-endpoint-not-served",
-                f"[vars] {key}='{_truncate(value)}' advertises {kind} at a "
-                f"non-local host ('{host}') with no [services.{kind}] — "
-                f"confirm this is an intentionally external/managed "
-                f"datastore, not an oversight",
-                severity=ADVISORY,
+                f"[vars] {key}='{_truncate(value)}' advertises a {kind} "
+                f"socket but no [services.{kind}] serves it",
             ))
     return violations
 

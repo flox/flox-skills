@@ -742,6 +742,38 @@ on-activate = """
         self.assertEqual(_rules(v), {"leaf-datastore-not-served"})
         self.assertEqual(v[0]["severity"], "advisory")
 
+    # --- AI-482: a socket-shaped [vars] entry must corroborate exactly
+    # like a connection-string one -- parity with the TCP path above. ---
+
+    def test_socket_shaped_vars_entry_corroborates_hard(self):
+        # Same shape as test_fires_hard_when_client_is_corroborated, but
+        # the corroborating [vars] entry is a socket dir (PGHOST), not a
+        # postgres:// URL -- the real shape SKILL.md's postgres pattern
+        # now emits by default (PR #59).
+        detect = {"service_clients": [
+            {"package": "pg", "search_terms": ["postgresql"], "source": "package.json",
+             "scope": "runtime"},
+        ]}
+        manifest = '[vars]\nPGHOST = "/tmp/myapp-postgres"\n'
+        v = _hard(_violations(detect, manifest))
+        rules = {x["rule"] for x in v}
+        self.assertIn("leaf-datastore-not-served", rules)
+
+    def test_dev_scoped_client_stays_advisory_even_with_socket_corroboration(self):
+        # Parity with test_dev_scoped_client_downgrades_to_advisory_even_
+        # when_corroborated: the scope guard must not be defeated just
+        # because the corroborating evidence is now socket-shaped instead
+        # of a connection string.
+        detect = {"service_clients": [
+            {"package": "pg-native", "search_terms": ["postgresql"], "source": "package.json",
+             "scope": "dev"},
+        ]}
+        manifest = '[vars]\nPGHOST = "/tmp/myapp-postgres"\n'
+        v = _violations(detect, manifest)
+        leaf = [x for x in v if x["rule"] == "leaf-datastore-not-served"]
+        self.assertEqual(len(leaf), 1)
+        self.assertEqual(leaf[0]["severity"], "advisory")
+
 
 # ---------------------------------------------------------------------------
 # invariant 3 — [vars] endpoint implies a service
@@ -859,6 +891,134 @@ on-activate = """
 
     def test_non_connection_string_vars_are_ignored(self):
         manifest = '[vars]\nRAILS_ENV = "development"\n'
+        self.assertEqual(_violations({}, manifest), [])
+
+    # --- AI-482: socket-shaped [vars] endpoints -- SKILL.md's postgres
+    # and redis patterns default to a unix socket, not TCP (PR #59), so
+    # a connection-string-only check is blind to exactly the shape the
+    # skill itself now emits by default. ---
+
+    def test_fires_hard_on_unserved_socket_dir_pghost(self):
+        # Socket-dir PGHOST (libpq convention) with no [services.postgres].
+        manifest = '[vars]\nPGHOST = "/tmp/myapp-postgres"\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"vars-endpoint-not-served"})
+        self.assertEqual(v[0]["severity"], "hard")
+
+    def test_socket_dir_pghost_served_by_service_does_not_fire(self):
+        manifest = '''
+[vars]
+PGHOST = "/tmp/myapp-postgres"
+
+[services.postgres]
+command = "postgres -k /tmp/myapp-postgres"
+'''
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_fires_hard_on_socket_named_var_no_dot_sock_suffix(self):
+        # *_SOCKET-named var whose value is a bare directory, not a
+        # `.sock` file -- name alone is enough to recognize the shape.
+        manifest = '[vars]\nREDIS_SOCKET = "/tmp/myapp-redis"\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"vars-endpoint-not-served"})
+        self.assertEqual(v[0]["severity"], "hard")
+
+    def test_fires_hard_on_dot_sock_value_without_socket_named_var(self):
+        # `.sock`-suffixed value recognized even when the var name itself
+        # doesn't end in `_SOCKET`.
+        manifest = '[vars]\nREDIS_CONN = "/tmp/myapp-redis.sock"\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"vars-endpoint-not-served"})
+        self.assertEqual(v[0]["severity"], "hard")
+
+    def test_redis_socket_served_by_service_does_not_fire(self):
+        manifest = '''
+[vars]
+REDIS_SOCKET = "/tmp/myapp-redis.sock"
+
+[services.redis]
+command = "redis-server --unixsocket /tmp/myapp-redis.sock"
+'''
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_fires_hard_on_unix_scheme_url(self):
+        manifest = '[vars]\nREDIS_URL = "unix:///tmp/myapp-redis.sock"\n'
+        v = _violations({}, manifest)
+        self.assertEqual(_rules(v), {"vars-endpoint-not-served"})
+        self.assertEqual(v[0]["severity"], "hard")
+
+    def test_unix_scheme_url_served_by_service_does_not_fire(self):
+        manifest = '''
+[vars]
+REDIS_URL = "unix:///tmp/myapp-redis.sock"
+
+[services.redis]
+command = "redis-server --unixsocket /tmp/myapp-redis.sock"
+'''
+        self.assertEqual(_violations({}, manifest), [])
+
+    def test_socket_dir_served_by_genuine_compose_up_does_not_fire(self):
+        # Parity with the connection-string compose-coverage case.
+        detect = {"services": [{"name": "db", "kind": "postgres", "config_coupled": True}]}
+        manifest = '''
+[install]
+docker-compose.pkg-path = "docker-compose"
+
+[vars]
+PGHOST = "/tmp/myapp-postgres"
+
+[hook]
+on-activate = """
+  docker-compose up -d
+"""
+'''
+        self.assertEqual(_violations(detect, manifest), [])
+
+    def test_socket_shaped_var_with_dev_scoped_client_downgrades_to_advisory(self):
+        # Provenance guard: the only corroborating detect.py evidence for
+        # this kind is a dev/test/optional-scoped client -- the same
+        # "not proven to be a live local need" signal
+        # check_leaf_datastore_services already uses (AI-467's
+        # section-provenance scope), applied here so a socket-shaped var
+        # doesn't unconditionally HARD-fire when the manifest's own
+        # client evidence says this is client-side config, not a service
+        # this environment is expected to run itself.
+        detect = {"service_clients": [
+            {"package": "pymysql", "search_terms": ["mariadb"], "source": "pyproject.toml",
+             "scope": "dev"},
+        ]}
+        manifest = '[vars]\nMYSQL_SOCKET = "/var/run/mysqld/mysqld.sock"\n'
+        v = _violations(detect, manifest)
+        # The dev-scoped client itself also independently fires an
+        # ADVISORY leaf-datastore-not-served (check_leaf_datastore_
+        # services' own pre-existing scope guard) -- expected, not what
+        # this test is about. Isolate the vars-endpoint rule.
+        self.assertEqual(_hard(v), [])
+        endpoint = [x for x in v if x["rule"] == "vars-endpoint-not-served"]
+        self.assertEqual(len(endpoint), 1)
+        self.assertEqual(endpoint[0]["severity"], "advisory")
+
+    def test_socket_shaped_var_with_no_client_evidence_stays_hard(self):
+        # No detect facts at all (the common case) -- default is HARD,
+        # not a free pass just because there's no corroborating client.
+        v = _violations(None, '[vars]\nPGHOST = "/tmp/myapp-postgres"\n')
+        self.assertEqual(_rules(v), {"vars-endpoint-not-served"})
+        self.assertEqual(v[0]["severity"], "hard")
+
+    def test_tcp_pghost_value_is_not_socket_shaped(self):
+        # A loopback/hostname PGHOST is the existing TCP pattern, not a
+        # socket dir -- must not be swept in by the new socket check
+        # (out of this ticket's scope; verify.py's connection-string
+        # check doesn't cover bare PGHOST=host forms either).
+        self.assertEqual(_violations({}, '[vars]\nPGHOST = "127.0.0.1"\n'), [])
+
+    def test_unrelated_socket_var_is_not_recognized_as_a_datastore(self):
+        # unix:// scheme + absolute path, but neither the var name nor
+        # the value names any of the four recognized leaf-datastore
+        # kinds -- must not false-fire (the Docker daemon socket is
+        # client-side config for Docker, not something a [services.*]
+        # entry would ever serve).
+        manifest = '[vars]\nDOCKER_HOST = "unix:///var/run/docker.sock"\n'
         self.assertEqual(_violations({}, manifest), [])
 
 
