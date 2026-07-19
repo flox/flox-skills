@@ -1704,6 +1704,41 @@ systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
         v = verify({}, manifest, check_catalog_live=True)["violations"]
         self.assertEqual(_rules(v), set())
 
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_scalar_options_systems_is_reported_not_raised(self, mock_run, mock_which):
+        # AI-485 F4: TOML allows `systems = 4` at [options] (a bare int is
+        # not iterable) just as readily as a proper array -- tomllib parses
+        # it without error, but the old `set(options.get("systems") or
+        # ALL_SYSTEMS)` crashed with TypeError the moment a non-iterable
+        # scalar reached it.
+        manifest = '[install]\npg.pkg-path = "postgresql"\n\n[options]\nsystems = 4\n'
+        v = verify({}, manifest, check_catalog_live=True)["violations"]
+        self.assertIn("malformed-systems", _rules(v))
+        note = [x for x in v if x["rule"] == "malformed-systems"][0]
+        self.assertIn("options", note["message"])
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_scalar_descriptor_systems_is_reported_not_raised(self, mock_run, mock_which):
+        # Same fragility, per-install-entry `systems` field instead of
+        # [options].systems -- `set(descriptor.get("systems") or
+        # default_systems)` hit the identical TypeError.
+        manifest = '[install]\npg.pkg-path = "postgresql"\npg.systems = 4\n'
+        v = verify({}, manifest, check_catalog_live=True)["violations"]
+        self.assertIn("malformed-systems", _rules(v))
+        note = [x for x in v if x["rule"] == "malformed-systems"][0]
+        self.assertIn("pg", note["message"])
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_empty_list_systems_still_falls_back_silently(self, mock_run, mock_which):
+        # An empty [] must keep behaving like "not declared" (the pre-485
+        # `or default_systems` behavior) -- not get flagged as malformed.
+        manifest = '[install]\npg.pkg-path = "postgresql"\npg.systems = []\n'
+        v = verify({}, manifest, check_catalog_live=True)["violations"]
+        self.assertNotIn("malformed-systems", _rules(v))
+
 
 # ---------------------------------------------------------------------------
 # heuristic — native build input with no `outputs` (ADVISORY, never hard)
@@ -1917,6 +1952,92 @@ class TestGroupFragmentation(unittest.TestCase):
     def test_does_not_fire_for_toplevel_only_manifest(self):
         manifest = '[install]\na.pkg-path = "a"\nb.pkg-path = "b"\n'
         self.assertEqual(_violations({}, manifest), [])
+
+
+# ---------------------------------------------------------------------------
+# AI-485: malformed-but-syntactically-valid TOML/JSON shapes. An agent-
+# generated manifest.toml or a stale/corrupted detect.json can be perfectly
+# valid TOML/JSON while carrying the wrong VALUE TYPE for a field every
+# check here assumes is a specific shape (a table, a list, a string).
+# tomllib/json.loads parse all of these without error -- these fragility
+# classes (F1-F5) are what used to reach the actual TypeError/AttributeError
+# instead of a reported finding. Same lineage as the AI-463 KeyError fix.
+# ---------------------------------------------------------------------------
+
+class TestMalformedManifestSections(unittest.TestCase):
+    """F1/F2: a top-level manifest section TOML only allows Flox to treat
+    as a table can itself be declared as a scalar or an array."""
+
+    def test_scalar_install_section_is_reported_not_raised(self):
+        manifest = 'install = "python"\n'
+        result = verify({}, manifest, check_catalog_live=False)
+        v = result["violations"]
+        self.assertIn("malformed-section", _rules(v))
+        match = [x for x in v if x["rule"] == "malformed-section"][0]
+        self.assertEqual(match["severity"], "hard")
+        self.assertIn("install", match["message"])
+
+    def test_array_vars_section_is_reported_not_raised(self):
+        manifest = 'vars = ["FOO", "BAR"]\n\n[install]\npython3.pkg-path = "python312"\n'
+        result = verify({}, manifest, check_catalog_live=False)
+        v = result["violations"]
+        self.assertIn("malformed-section", _rules(v))
+        match = [x for x in v if x["rule"] == "malformed-section"][0]
+        self.assertIn("vars", match["message"])
+
+    def test_well_formed_sections_never_trip_this_rule(self):
+        self.assertNotIn("malformed-section", _rules(_violations({}, AI449_GOOD_MANIFEST)))
+
+
+class TestNonStrPkgPath(unittest.TestCase):
+    """F3: `pkg-path` can be declared as a non-string, non-array scalar
+    (an int, a bool, a nested table) -- valid TOML, but `_pkg_path_str`
+    used to hand the raw value straight through, which later crashed
+    `re.Pattern.match` (needs str/bytes) wherever a pkg-path is pattern-
+    matched against a runtime language."""
+
+    def test_non_str_pkg_path_does_not_crash_runtime_check(self):
+        manifest = '[install]\nfoo.pkg-path = 123\n'
+        detect_facts = {"runtimes": [
+            {"language": "python", "version": "3.12", "source": "test"},
+        ]}
+        v = _violations(detect_facts, manifest)
+        # A garbage pkg-path is treated the same as no pkg-path at all --
+        # python still reads as undeclared, which is the accurate finding.
+        self.assertIn("runtime-not-installed", _rules(v))
+
+    def test_non_str_pkg_path_is_excluded_from_catalog_checks(self):
+        self.assertIsNone(verify_mod._pkg_path_str({"pkg-path": 123}))
+        self.assertIsNone(verify_mod._pkg_path_str({"pkg-path": True}))
+        self.assertIsNone(verify_mod._pkg_path_str({"pkg-path": {"nested": "table"}}))
+
+
+class TestMalformedDetectFacts(unittest.TestCase):
+    """F5: detect.json (produced by detect.py, consumed by verify.py) can
+    reach verify() with the wrong shape -- not an object at all, or a
+    known list-shaped field (runtimes/service_clients/services/
+    native_hints) typed as something else. verify()'s own docstring
+    already treats `detect=None`/`{}` as "nothing to cross-check, degrade
+    to no-ops" -- a malformed detect blob degrades the same way rather
+    than crashing, instead of inventing new violation semantics for it."""
+
+    def test_detect_facts_not_a_dict_degrades_like_no_detect_facts(self):
+        malformed = verify(["oops"], AI449_BAD_MANIFEST, check_catalog_live=False)
+        baseline = verify(None, AI449_BAD_MANIFEST, check_catalog_live=False)
+        self.assertEqual(malformed["violations"], baseline["violations"])
+
+    def test_detect_runtimes_field_wrong_type_does_not_raise(self):
+        v = _violations({"runtimes": "python"}, AI449_GOOD_MANIFEST)
+        self.assertEqual(v, [])
+
+    def test_detect_service_clients_field_wrong_type_does_not_raise(self):
+        v = _violations({"service_clients": {"not": "a-list"}}, AI449_GOOD_MANIFEST)
+        self.assertEqual(v, [])
+
+    def test_detect_native_hints_field_wrong_type_does_not_raise(self):
+        manifest = '[install]\nvips.pkg-path = "vips"\n'
+        v = _violations({"native_hints": "vips"}, manifest)
+        self.assertEqual(v, [])
 
 
 # ---------------------------------------------------------------------------

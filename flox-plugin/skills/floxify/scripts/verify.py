@@ -115,7 +115,73 @@ def _pkg_path_str(descriptor):
     pp = descriptor.get("pkg-path") if isinstance(descriptor, dict) else None
     if isinstance(pp, list):
         return ".".join(str(p) for p in pp)
-    return pp
+    # AI-485 F3: TOML lets `pkg-path` be any scalar type (`pkg-path = 123`,
+    # `pkg-path = true`, a nested table) -- only a str or a list-of-parts is
+    # a pkg-path this module can act on. A non-str value used to pass
+    # through unchanged and later crash `re.Pattern.match` (needs
+    # str/bytes) wherever a pkg-path is pattern-matched; treating it as
+    # None instead makes it "no pkg-path" -- the same, already-handled
+    # falsy case every caller here skips over for a genuinely absent one.
+    return pp if isinstance(pp, str) else None
+
+
+# AI-485 F1/F2: the manifest sections every check below expects to be a
+# TOML table (`[install]`, `[vars]`, `[hook]`, `[services]`, `[options]`).
+# TOML syntax allows any of them to be declared as a scalar
+# (`install = "python"`) or an array (`install = [...]`) instead --
+# tomllib parses either without error.
+KNOWN_TABLE_SECTIONS = ("install", "vars", "hook", "services", "options")
+
+
+def _table(manifest, key):
+    """manifest[key] if it's a dict/table, else {} -- centralizes the
+    "malformed section" guard used at every [install]/[vars]/[hook]/
+    [services]/[options] access below (~13 call sites before this helper).
+    `check_malformed_sections` is what SURFACES a malformed value as a
+    finding; this helper's only job is to keep every other check from
+    crashing on it by treating it as an empty table, the same as an
+    absent section.
+    """
+    value = manifest.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def check_malformed_sections(manifest):
+    """HARD: a top-level section TOML only allows Flox to treat as a table
+    was declared as a scalar or an array instead. A demonstrable
+    structural bug, not a judgment call -- every other check silently
+    treats the malformed value as an empty table (via `_table`), which
+    would read as a clean manifest with zero findings if this check
+    didn't surface it directly -- a manifest section this module could
+    not actually check must not read as clean.
+    """
+    violations = []
+    for key in KNOWN_TABLE_SECTIONS:
+        value = manifest.get(key)
+        if value is not None and not isinstance(value, dict):
+            violations.append(violation(
+                "malformed-section",
+                f"[{key}] is a {type(value).__name__}, not a table -- "
+                f"treated as empty, so every entry that should be "
+                f"declared under it was dropped",
+            ))
+    return violations
+
+
+def _facts_list(detect, key):
+    """detect[key] filtered to a list of dicts, or [] -- the detect-facts
+    analog of `_table` (AI-485 F5). detect.json is normally produced by
+    detect.py in the same run, but nothing stops a stale, hand-edited, or
+    corrupted detect.json from reaching verify.py with a field typed
+    wrong (a string instead of a list of dicts, a list of strings). This
+    module's own docstring already treats `detect=None`/`{}` as "nothing
+    to cross-check, degrade the cross-check invariants to no-ops" — a
+    malformed field degrades the exact same way rather than crashing.
+    """
+    value = (detect or {}).get(key)
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
 
 
 # ---------------------------------------------------------------------------
@@ -178,19 +244,19 @@ def check_runtimes_installed(detect, manifest):
     detect.py grounded was silently dropped on the floor.
     """
     violations = []
-    install = manifest.get("install", {}) or {}
+    install = _table(manifest, "install")
     pkg_paths = {_pkg_path_str(d) for d in install.values() if isinstance(d, dict)}
     pkg_paths.discard(None)
 
-    languages = {r["language"] for r in (detect or {}).get("runtimes", [])
-                 if r.get("language")}
+    runtimes = _facts_list(detect, "runtimes")
+    languages = {r["language"] for r in runtimes if r.get("language")}
     for lang in sorted(languages):
         pattern = RUNTIME_PKG_PATTERNS.get(lang)
         if pattern is None:
             continue  # no known catalog naming convention — nothing to check
         if not any(pattern.match(pp) for pp in pkg_paths):
-            sources = sorted({r["source"] for r in detect["runtimes"]
-                              if r["language"] == lang})
+            sources = sorted({r["source"] for r in runtimes
+                              if r.get("language") == lang and r.get("source")})
             violations.append(violation(
                 "runtime-not-installed",
                 f"detected runtime '{lang}' (from {', '.join(sources)}) has "
@@ -313,7 +379,7 @@ def _vars_endpoint_kind_present(manifest, kind):
     endpoint of this kind — corroboration for client evidence (AI-466 I1
     / AI-467, extended to socket shapes by AI-482), independent of
     whether check_vars_endpoints finds it already served."""
-    for key, value in (manifest.get("vars", {}) or {}).items():
+    for key, value in _table(manifest, "vars").items():
         if not isinstance(value, str):
             continue
         if _endpoint_kind(key, value) == kind:
@@ -331,7 +397,7 @@ def _client_kinds_by_scope(detect):
     check_leaf_datastore_services already downgrades on, not proof the
     manifest owes that kind a [services.*] block."""
     result = {}
-    for client in (detect or {}).get("service_clients", []):
+    for client in _facts_list(detect, "service_clients"):
         scope = client.get("scope", "runtime")
         for term in client.get("search_terms", []):
             kind = LEAF_DATASTORE_DISPLAY.get(term)
@@ -343,7 +409,7 @@ def _client_kinds_by_scope(detect):
 def _compose_service_kind_present(detect, kind):
     """True if detect.py found a compose service of this kind in the repo
     — corroboration for client evidence (AI-466 I1 / AI-467)."""
-    for svc in (detect or {}).get("services", []):
+    for svc in _facts_list(detect, "services"):
         if COMPOSE_KIND_MAP.get((svc.get("kind") or "").lower()) == kind:
             return True
     return False
@@ -407,7 +473,7 @@ def manifest_wires_compose(manifest):
     keep firing; this errs toward the stricter, not the more permissive,
     reading rather than an oversight.
     """
-    hook = manifest.get("hook", {}) or {}
+    hook = _table(manifest, "hook")
     script = hook.get("on-activate")
     if not isinstance(script, str):
         return False
@@ -424,7 +490,7 @@ def manifest_wires_compose(manifest):
                 wires_up = True
     if not wires_up:
         return False
-    install = manifest.get("install", {}) or {}
+    install = _table(manifest, "install")
     pkg_paths = {_pkg_path_str(d) for d in install.values() if isinstance(d, dict)}
     return "docker-compose" in pkg_paths
 
@@ -449,7 +515,7 @@ def matching_service_names(manifest, kind):
     Public (no leading underscore) so external callers import it rather
     than re-deriving the alias table."""
     aliases = SERVICE_KIND_ALIASES.get(kind, (kind,))
-    services = manifest.get("services", {}) or {}
+    services = _table(manifest, "services")
     matches = []
     for name, descriptor in services.items():
         haystack = str(name).lower()
@@ -503,7 +569,7 @@ def check_leaf_datastore_services(detect, manifest):
     (those manifests carried a [vars] endpoint alongside the client).
     """
     violations = []
-    for client in (detect or {}).get("service_clients", []):
+    for client in _facts_list(detect, "service_clients"):
         seen_kinds = set()
         for term in client.get("search_terms", []):
             kind = LEAF_DATASTORE_DISPLAY.get(term)
@@ -603,7 +669,7 @@ def check_vars_endpoints(detect, manifest):
     """
     violations = []
     client_scopes = _client_kinds_by_scope(detect)
-    for key, value in (manifest.get("vars", {}) or {}).items():
+    for key, value in _table(manifest, "vars").items():
         if not isinstance(value, str):
             continue
         m = _CONN_STRING_RE.search(value)
@@ -671,7 +737,7 @@ _VARS_EXPANSION_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Z][A-Z0-9_]*
 
 def check_vars_literal(manifest):
     violations = []
-    for key, value in (manifest.get("vars", {}) or {}).items():
+    for key, value in _table(manifest, "vars").items():
         if isinstance(value, str) and _VARS_EXPANSION_RE.search(value):
             violations.append(violation(
                 "vars-not-literal",
@@ -747,7 +813,7 @@ def check_hook_no_mutation(manifest):
     statement exempts it (`git apply --check` validates without mutating).
     """
     violations = []
-    hook = manifest.get("hook", {}) or {}
+    hook = _table(manifest, "hook")
     script = hook.get("on-activate")
     if not isinstance(script, str):
         return violations
@@ -822,7 +888,7 @@ def check_hook_network(manifest):
     discipline as check_hook_no_mutation.
     """
     violations = []
-    hook = manifest.get("hook", {}) or {}
+    hook = _table(manifest, "hook")
     script = hook.get("on-activate")
     if not isinstance(script, str):
         return violations
@@ -902,6 +968,30 @@ def _pinned_version_match(declared, catalog_versions):
         if cv.split(".")[:len(declared_parts)] == declared_parts:
             return cv
     return None
+
+
+def _coerce_systems(value, default, on_malformed=None):
+    """A manifest `systems` value ([options].systems or an [install]
+    entry's own .systems) coerced to a set of strings (AI-485 F4). TOML
+    lets `systems` be declared as any scalar (`systems = 4`) or a
+    mixed-type array (`systems = [1, "x86_64-linux"]`) -- neither is a
+    valid systems declaration, but `set(value or default)` used to crash
+    with TypeError the moment a non-iterable scalar reached it.
+
+    An absent or empty value (`None`, `[]`) falls back to `default`
+    SILENTLY -- this preserves the pre-485 `value or default` semantics
+    for "not declared", which is not an error. A PRESENT, non-empty, but
+    malformed value calls `on_malformed()` (if given) before falling
+    back, so a garbage declaration is reported rather than silently
+    honored as if it were a legitimate default.
+    """
+    if not value:
+        return set(default)
+    if isinstance(value, list) and all(isinstance(s, str) for s in value):
+        return set(value)
+    if on_malformed:
+        on_malformed()
+    return set(default)
 
 
 def _run_show_command(pkg_path, flox_bin, timeout):
@@ -1008,10 +1098,18 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
 
     violations = []
     unknown = []
-    options = manifest.get("options", {}) or {}
-    default_systems = set(options.get("systems") or ALL_SYSTEMS)
+    options = _table(manifest, "options")
+    raw_default_systems = options.get("systems")
+    default_systems = _coerce_systems(
+        raw_default_systems, ALL_SYSTEMS,
+        on_malformed=lambda: violations.append(violation(
+            "malformed-systems",
+            f"[options].systems = {raw_default_systems!r} is not a list "
+            f"of system strings -- using all systems as the default",
+        )),
+    )
 
-    for install_id, descriptor in (manifest.get("install", {}) or {}).items():
+    for install_id, descriptor in _table(manifest, "install").items():
         if not isinstance(descriptor, dict):
             continue
         pkg_path = _pkg_path_str(descriptor)
@@ -1028,7 +1126,16 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
             continue
 
         version = descriptor.get("version")
-        entry_systems = set(descriptor.get("systems") or default_systems)
+        raw_entry_systems = descriptor.get("systems")
+        entry_systems = _coerce_systems(
+            raw_entry_systems, default_systems,
+            on_malformed=lambda iid=install_id, raw=raw_entry_systems: violations.append(violation(
+                "malformed-systems",
+                f"[install] {iid}.systems = {raw!r} is not a list of "
+                f"system strings -- using the manifest default",
+                pkg_path=pkg_path, install_id=iid,
+            )),
+        )
 
         if version and _is_pinned_version(version):
             matched = _pinned_version_match(version, show["versions"].keys())
@@ -1089,14 +1196,14 @@ def check_outputs_heuristic(detect, manifest):
     no `dev` output at all when nothing links against libpq.
     """
     candidates = {}
-    for hint in (detect or {}).get("native_hints", []):
+    for hint in _facts_list(detect, "native_hints"):
         for term in hint.get("search_terms", []):
             candidates.setdefault(term, hint.get("source", "detected"))
     if not candidates:
         return []
 
     violations = []
-    for install_id, descriptor in (manifest.get("install", {}) or {}).items():
+    for install_id, descriptor in _table(manifest, "install").items():
         if not isinstance(descriptor, dict):
             continue
         pkg_path = _pkg_path_str(descriptor)
@@ -1175,7 +1282,7 @@ def check_native_group_coherence(detect, manifest):
     coverage gap for check_runtimes_installed / a human to notice, not a
     group-split this heuristic can speak to.
     """
-    install = manifest.get("install", {}) or {}
+    install = _table(manifest, "install")
 
     def _runtime_entry(ecosystem):
         pattern = RUNTIME_PKG_PATTERNS.get(ecosystem)
@@ -1199,7 +1306,7 @@ def check_native_group_coherence(detect, manifest):
 
     violations = []
     seen = set()
-    for client in (detect or {}).get("service_clients", []):
+    for client in _facts_list(detect, "service_clients"):
         native_terms = set(client.get("search_terms", [])) & NATIVE_LINK_TERMS
         if not native_terms:
             continue
@@ -1275,7 +1382,7 @@ def check_group_fragmentation(manifest):
     before isolating further), not a violation.
     """
     groups = {}
-    for install_id, descriptor in (manifest.get("install", {}) or {}).items():
+    for install_id, descriptor in _table(manifest, "install").items():
         if not isinstance(descriptor, dict):
             continue
         group = descriptor.get("pkg-group", DEFAULT_PKG_GROUP)
@@ -1321,8 +1428,13 @@ def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
     NEITHER violations NOR confirmed-clean; a caller claiming "every
     pkg-path was confirmed" (e.g. the harness's judge note) must exclude
     them from that claim.
+
+    `detect` that parses but isn't a JSON object (AI-485 F5 — a stale or
+    corrupted detect.json) degrades exactly like `detect=None`: the
+    cross-check invariants see no facts and skip, rather than crashing on
+    a non-dict `.get()` call.
     """
-    detect = detect or {}
+    detect = detect if isinstance(detect, dict) else {}
     manifest, parse_error = parse_manifest(manifest_text)
     if manifest is None:
         return {
@@ -1334,6 +1446,7 @@ def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
         }
 
     violations = []
+    violations += check_malformed_sections(manifest)
     violations += check_runtimes_installed(detect, manifest)
     violations += check_leaf_datastore_services(detect, manifest)
     violations += check_vars_endpoints(detect, manifest)
