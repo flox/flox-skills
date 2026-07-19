@@ -1,0 +1,998 @@
+{
+  "summary": {
+    "skill": "flox-plugin@bill/ai-442-efficiency-evidence",
+    "model": "claude-opus-4-8",
+    "arm": "skills",
+    "reps": 8,
+    "n_tasks": 8,
+    "n_errors": 1,
+    "n": 7,
+    "hard_pass_rate": 1.0,
+    "avg_judge_score": 4.29,
+    "judge_correct_rate": 1.0,
+    "activation_ok": 6,
+    "activation_skipped": 0,
+    "verify_checked": 7,
+    "verify_clean": 7,
+    "verify_hard_violation_rate": 0.0,
+    "by_tier": {
+      "should": {
+        "n": 7,
+        "hard_pass_rate": 1.0,
+        "avg_judge_score": 4.29,
+        "judge_correct_rate": 1.0,
+        "activation_ok": 6,
+        "activation_skipped": 0,
+        "verify_checked": 7,
+        "verify_clean": 7,
+        "verify_hard_violation_rate": 0.0
+      }
+    },
+    "cost": {
+      "total_usd": 8.9501,
+      "agent_usd": 7.561,
+      "judge_usd": 1.3891,
+      "mean_per_task_usd": 1.2786,
+      "n_costed_tasks": 7
+    },
+    "efficiency": {
+      "script-started-postgres": {
+        "skills": {
+          "reps": 8,
+          "env_skipped": 0,
+          "agent_errors": 1,
+          "other_disposition": 0,
+          "verify_rate": 0.714,
+          "turns_to_verify": {
+            "median": 14,
+            "p25": 13.0,
+            "p75": 18.0,
+            "n": 5
+          },
+          "tool_calls_to_verify": {
+            "median_total": 13,
+            "median_flox_search": 1,
+            "median_flox_show": 1,
+            "n": 5
+          },
+          "tokens_to_verify": {
+            "median_output": 14938,
+            "median_cache_read": 810077,
+            "n": 5
+          },
+          "cost_to_verify": {
+            "median_usd": 1.1695,
+            "n": 5
+          },
+          "unverified_spend": {
+            "median_usd": 1.109,
+            "n": 2
+          }
+        }
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "script-started-postgres",
+      "tier": "should",
+      "ecosystem": "javascript",
+      "arm": "skills",
+      "rep": 1,
+      "hard_checks": {
+        "manifest_created": true,
+        "valid_toml": true,
+        "has_install_section": true,
+        "has_services_section": true,
+        "no_abs_paths": true,
+        "no_fake_install_url": true,
+        "pins_postgres": true
+      },
+      "hard_pass": true,
+      "activation": {
+        "ok": false,
+        "skipped": false,
+        "notes": "TIMEOUT: activation exceeded 120s. This is a finding, not a skip \u2014 the environment may work but is too slow to verify at this budget. Raise --activation-timeout if the budget is wrong."
+      },
+      "verify": {
+        "violations": [],
+        "hard_count": 0,
+        "advisory_count": 0,
+        "catalog_checked": true
+      },
+      "judge": {
+        "score": 5,
+        "correct": true,
+        "issues": [
+          "Correctly ignored the scripts/start_dev_db.sh / docker launcher trap and wired a native [services.postgres] block instead of deferring the datastore",
+          "postgresql_16 installed and version-pinned to match the postgres:16-alpine signal; nodejs_22 matches engines.node",
+          "Hook uses $FLOX_ENV_CACHE/postgres for PGDATA with a proper one-time initdb+createdb bootstrap; npm-install guard is idiomatic",
+          "[vars] localhost:5432 is backed by a real service, so no dangling DATABASE_URL",
+          "Minor: service command depends on PGDATA exported only in the hook (correct in practice since [vars] can't shell-expand $FLOX_ENV_CACHE and Flox runs the hook before services), so acceptable"
+        ]
+      },
+      "verified": false,
+      "verify_method": "services",
+      "terminal_disposition": "failed-verify",
+      "cost": {
+        "agent_usd": 0.1666375,
+        "judge_usd": 0.1819635,
+        "total_usd": 0.348601
+      },
+      "usage": {
+        "agent": {
+          "input_tokens": 6,
+          "cache_creation_input_tokens": 3106,
+          "cache_read_input_tokens": 144795,
+          "output_tokens": 2498,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 3106,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 1700,
+              "cache_read_input_tokens": 48685,
+              "cache_creation_input_tokens": 2476,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 2476
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        },
+        "judge": {
+          "input_tokens": 2,
+          "cache_creation_input_tokens": 9181,
+          "cache_read_input_tokens": 17437,
+          "output_tokens": 3257,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 9181,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 3257,
+              "cache_read_input_tokens": 17437,
+              "cache_creation_input_tokens": 9181,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 9181
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        }
+      },
+      "num_turns": {
+        "agent": 3,
+        "judge": 1
+      },
+      "duration_ms": {
+        "agent": 37510,
+        "judge": 45410
+      },
+      "tool_calls": {
+        "agent": {
+          "total": 2,
+          "flox_search": 0,
+          "flox_show": 0
+        }
+      },
+      "stream_file": {
+        "agent": "efficiency-b2-ssp-opus-skills/script-started-postgres__skills__rep1__agent.jsonl"
+      },
+      "manifest": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n[install]\nnodejs_22.pkg-path = \"nodejs_22\"          # engines.node >=22.0.0 (package.json)\npostgresql_16.pkg-path = \"postgresql_16\"  # pg client (package.json) + .env.example DATABASE_URL\n\n[vars]\n# Matches .env.example so pg / psql / pg_dump reach the Flox-managed cluster.\nPGHOST = \"127.0.0.1\"\nPGPORT = \"5432\"\nPGUSER = \"orders\"\nPGDATABASE = \"orders_development\"\nDATABASE_URL = \"postgres://orders:orders@127.0.0.1:5432/orders_development\"\n\n[hook]\non-activate = \"\"\"\n  # Node deps (bridges npm \u2014 one `flox activate`, full environment)\n  if [ ! -d node_modules ] || { [ -f package-lock.json ] && [ package-lock.json -nt node_modules ]; }; then\n    npm install --silent\n  fi\n\n  # PostgreSQL cluster lives in the local cache (not the repo tree), initialized once.\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" \\\n      --username=\"$PGUSER\" \\\n      --auth=trust \\\n      --no-locale \\\n      --encoding=UTF8 >&2\n    pg_ctl -D \"$PGDATA\" -o \"-p $PGPORT -k /tmp\" \\\n      -l \"$PGDATA/init.log\" start\n    until pg_isready -h 127.0.0.1 -p \"$PGPORT\" -q; do sleep 0.2; done\n    createdb -h 127.0.0.1 -p \"$PGPORT\" -U \"$PGUSER\" \"$PGDATABASE\"\n    # Load the checked-in schema snapshot (start_dev_db.sh loads this via psql -f).\n    if [ -f db/schema.sql ]; then\n      psql -h 127.0.0.1 -p \"$PGPORT\" -U \"$PGUSER\" -d \"$PGDATABASE\" -q -f db/schema.sql >&2\n    fi\n    pg_ctl -D \"$PGDATA\" stop -m fast\n  fi\n\"\"\"\n\n[services.postgres]\ncommand = \"\"\"\n  exec postgres \\\n    -D \"$PGDATA\" \\\n    -p \"$PGPORT\" \\\n    -k /tmp \\\n    -c listen_addresses=\"$PGHOST\"\n\"\"\"\n\n[options]\nsystems = [\n  \"aarch64-darwin\",\n  \"aarch64-linux\",\n  \"x86_64-darwin\",\n  \"x86_64-linux\",\n]\n",
+      "manifest_excerpt": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n[install]\nnodejs_22.pkg-path = \"nodejs_22\"          # engines.node >=22.0.0 (package.json)\npostgresql_16.pkg-path = \"postgresql_16\"  # pg client (package.json) + .env.example DATABASE_URL\n\n[vars]\n# Matches .env.example so pg / psql / pg_dump reach the Flox-managed cluster.\nPGHOST = \"127.0.0.1\"\nPGPORT = \"5432\"\nPGUSER = \"orders\"\nPGDATABASE = \"orders_development\"\nDATABASE_URL = \"postgres://orders:orders@127.0.0.1:5432/orders_development\"\n\n[hook]\non-activate = \"\"\"\n  # Node deps (bridges npm \u2014 one `flox activate`, full environment)\n  if [ ! -d node_modules ] || { [ -f package-lock.json ] && [ package-lock.json -nt node_modules ]; }; then\n    npm install --silent\n  fi\n\n  # PostgreSQL cluster lives in the local cache (not the repo tree), initialized once.\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" \\\n      --username=\"$PGUSER\" \\\n      --auth=trust \\\n      --no-locale \\\n      --encoding=UTF8 >&2\n    pg_ctl -D \"$PGDATA\" -o \"-p $PGPORT -k /tmp\" \\\n      -l \"$PGDATA/init.log\" start\n    until pg_isready -h 127.0.0.1 -p \"$PGPORT\" -q; do sleep 0.2; done\n    createdb -h 127.0.0.1 -p \"$PGPORT\" -U \"$PGUSER\" \"$PGDATABASE\"\n    # Load the checked-in schema snapshot (start_dev_db.sh loads this via psql -f).\n    if [ -f db/schema.sql ]; then\n      psql -h 127.0.0.1 -p \"$PGPORT\" -U \"$PGUSER\" -d \"$PGDATABASE\" -q -f db/schema.sql >&2\n    fi\n    pg_ctl -D \"$PGDATA\" stop -m fast\n  fi\n\"\"\"\n\n[services.postgres]\ncommand = \"\"\"\n  exec postgres \\\n    -D \"$PGDATA\" \\\n    -p \"$PGPORT\" \\\n    -k /tmp \\\n    -c listen_addresses=\"$PGHOST\"\n\"\"\"\n\n[options]\nsystems = [\n  \"aarch64-darwin\",\n  \"aarch64-linux\",\n  \"x86_64-darwin\",\n  \"x86_64-linux\",\n]\n",
+      "agent_output_excerpt": "This project already has a Flox environment, so I'm in **audit mode** \u2014 I'll analyze gaps without touching the existing manifest.\n\n`floxify-eval-script-started-postgres-1d_mde57/` already uses Flox. Running gap analysis...\n\nI scanned the dep files and compared them against the existing `.flox/env/manifest.toml`:\n\n```\norders-api \u2014 Flox gap analysis\n\nAlready in manifest.toml (2 packages):\n  nodejs_22       \u2190 package.json engines.node >=22.0.0\n  postgresql_16   \u2190 pg client (package.json) + .env.example DATABASE_URL\n\nDetected in dep files:\n  Node >=22.0.0   \u2190 package.json (engines.node)\n  express \u00b7 pg \u00b7 dotenv \u2192 npm install (503\u2192 3 runtime deps + jest)\n  PostgreSQL      \u2190 pg client + DATABASE_URL + db/schema.sql\n\nPossibly missing (detected, not in manifest):\n  \u2014 none. Every runtime and service"
+    },
+    {
+      "id": "script-started-postgres",
+      "tier": "should",
+      "ecosystem": "javascript",
+      "arm": "skills",
+      "rep": 2,
+      "hard_checks": {
+        "manifest_created": true,
+        "valid_toml": true,
+        "has_install_section": true,
+        "has_services_section": true,
+        "no_abs_paths": true,
+        "no_fake_install_url": true,
+        "pins_postgres": true
+      },
+      "hard_pass": true,
+      "activation": {
+        "ok": true,
+        "skipped": false,
+        "notes": ""
+      },
+      "verify": {
+        "violations": [],
+        "hard_count": 0,
+        "advisory_count": 0,
+        "catalog_checked": true
+      },
+      "judge": {
+        "score": 4,
+        "correct": true,
+        "issues": [
+          "Meets all core requirements: postgresql_16 in [install], [services.postgres] wired with $FLOX_ENV_CACHE state + initdb bootstrap, no deferral to docker/start_dev_db.sh, no localhost:5432 [vars] \u2014 the regression trap is avoided",
+          "Hook comments fabricate repo details that contradict the fixture: claims the upstream launcher is 'socket-only (listen_addresses='')' when start_dev_db.sh actually runs `docker run postgres:16-alpine` (TCP on 5432), and invents `npm run db:dump`/`pg_dump -h target/dev-db-socket` to justify a socket-in-repo path",
+          "PGUSER='orders' / PGDATABASE='orders_development' and the db/schema.sql load are not derivable from the described fixture (DATABASE_URL in .env.example) \u2014 likely invented values that may not match .env.example",
+          "Elaborate socket-in-repo + jq @uri percent-encoding scheme adds unjustified complexity versus the simpler TCP/socket-on-cache setup gold would use; drops fidelity from a 5"
+        ]
+      },
+      "verified": true,
+      "verify_method": "services",
+      "terminal_disposition": "verified",
+      "cost": {
+        "agent_usd": 1.4652395,
+        "judge_usd": 0.2086425,
+        "total_usd": 1.673882
+      },
+      "usage": {
+        "agent": {
+          "input_tokens": 33,
+          "cache_creation_input_tokens": 54915,
+          "cache_read_input_tokens": 1038869,
+          "output_tokens": 15832,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 54915,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [
+            {
+              "input_tokens": 1,
+              "output_tokens": 1051,
+              "cache_read_input_tokens": 69464,
+              "cache_creation_input_tokens": 696,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 696
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        },
+        "judge": {
+          "input_tokens": 2,
+          "cache_creation_input_tokens": 11586,
+          "cache_read_input_tokens": 15245,
+          "output_tokens": 3406,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 11586,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 3406,
+              "cache_read_input_tokens": 15245,
+              "cache_creation_input_tokens": 11586,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 11586
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        }
+      },
+      "num_turns": {
+        "agent": 18,
+        "judge": 1
+      },
+      "duration_ms": {
+        "agent": 259333,
+        "judge": 45364
+      },
+      "tool_calls": {
+        "agent": {
+          "total": 17,
+          "flox_search": 2,
+          "flox_show": 1
+        }
+      },
+      "stream_file": {
+        "agent": "efficiency-b2-ssp-opus-skills/script-started-postgres__skills__rep2__agent.jsonl"
+      },
+      "manifest": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n[install]\nnodejs.pkg-path = \"nodejs_22\"\npostgresql.pkg-path = \"postgresql_16\"\n# jq 1.8.2 (latest) has no x86_64-darwin build; 1.8.1 covers all four platforms.\njq.pkg-path = \"jq\"\njq.version = \"1.8.1\"\n\n[vars]\nPGUSER = \"orders\"\nPGDATABASE = \"orders_development\"\n\n[hook]\non-activate = \"\"\"\n  # --- Node dependencies -------------------------------------------------\n  if [ ! -d node_modules ] || { [ -f package-lock.json ] && [ package-lock.json -nt node_modules ]; }; then\n    npm install --silent\n  fi\n\n  # --- PostgreSQL dev cluster --------------------------------------------\n  # Ports scripts/start_dev_db.sh into Flox. The cluster DATA is machine-local\n  # (kept in the cache, not the repo), but the SOCKET stays in the repo tree at\n  # target/dev-db-socket because `npm run db:dump` connects with\n  # `pg_dump -h target/dev-db-socket`. The upstream script is socket-only\n  # (listen_addresses = ''), so we honor that here too.\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  export PGSOCKET=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"\n  mkdir -p \"$PGSOCKET\"\n\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" --username=\"$PGUSER\" --auth=trust --no-locale --encoding=UTF8 >&2\n    pg_ctl -D \"$PGDATA\" -o \"-k $PGSOCKET -c listen_addresses=''\" -l \"$PGDATA/init.log\" start >&2\n    until pg_isready -h \"$PGSOCKET\" -q; do sleep 0.2; done\n    createdb -h \"$PGSOCKET\" -U \"$PGUSER\" \"$PGDATABASE\" >&2\n    # Load the checked-in schema snapshot, same as start_dev_db.sh.\n    [ -f db/schema.sql ] && psql -h \"$PGSOCKET\" -U \"$PGUSER\" -d \"$PGDATABASE\" -q -f db/schema.sql >&2\n    pg_ctl -D \"$PGDATA\" stop -m fast >&2\n  fi\n\n  # The socket dir contains '/' characters, so percent-encode it before\n  # embedding it in the libpq connection URI as the host component.\n  ENCODED_SOCKET=\"$(printf '%s' \"$PGSOCKET\" | jq -sRr @uri)\"\n  export PGHOST=\"$PGSOCKET\"\n  export DATABASE_URL=\"postgres://${PGUSER}@${ENCODED_SOCKET}/${PGDATABASE}\"\n\"\"\"\n\n[services.postgres]\ncommand = \"\"\"\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  export PGSOCKET=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"\n  exec postgres -D \"$PGDATA\" -k \"$PGSOCKET\" -c listen_addresses=''\n\"\"\"\n",
+      "manifest_excerpt": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n[install]\nnodejs.pkg-path = \"nodejs_22\"\npostgresql.pkg-path = \"postgresql_16\"\n# jq 1.8.2 (latest) has no x86_64-darwin build; 1.8.1 covers all four platforms.\njq.pkg-path = \"jq\"\njq.version = \"1.8.1\"\n\n[vars]\nPGUSER = \"orders\"\nPGDATABASE = \"orders_development\"\n\n[hook]\non-activate = \"\"\"\n  # --- Node dependencies -------------------------------------------------\n  if [ ! -d node_modules ] || { [ -f package-lock.json ] && [ package-lock.json -nt node_modules ]; }; then\n    npm install --silent\n  fi\n\n  # --- PostgreSQL dev cluster --------------------------------------------\n  # Ports scripts/start_dev_db.sh into Flox. The cluster DATA is machine-local\n  # (kept in the cache, not the repo), but the SOCKET stays in the repo tree at\n  # target/dev-db-socket because `npm run db:dump` connects with\n  # `pg_dump -h target/dev-db-socket`. The upstream script is socket-only\n  # (listen_addresses = ''), so we honor that here too.\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  export PGSOCKET=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"\n  mkdir -p \"$PGSOCKET\"\n\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" --username=\"$PGUSER\" --auth=trust --no-locale --encoding=UTF8 >&2\n    pg_ctl -D \"$PGDATA\" -o \"-k $PGSOCKET -c listen_addresses=''\" -l \"$PGDATA/init.log\" start >&2\n    until pg_isready -h \"$PGSOCKET\" -q; do sleep 0.2; done\n    createdb -h \"$PGSOCKET\" -U \"$PGUSER\" \"$PGDATABASE\" >&2\n    # Load the checked-in schema snapshot, same as start_dev_db.sh.\n    [ -f db/schema.sql ] && psql -h \"$PGSOCKET\" -U \"$PGUSER\" -d \"$PGDATABASE\" -q -f db/schema.sql >&2\n    pg_ctl -D \"$PGDATA\" stop -m fast >&2\n  fi\n\n  # The socket dir contains '/' characters, so percent-encode it before\n  # embedding it in the libpq connection URI as the host component.\n  ENCODED_SOCKET=\"$(printf '%s' \"$PGSOCKET\" | jq -sRr @uri)\"\n  export PGHOST=\"$PGSOCKET\"\n  export DATABASE_URL=\"postgres://${PGUSER}@${ENCODED_SOCKET}/${PGDATABASE}\"\n\"\"\"\n\n[services.postgres]\ncommand = \"\"\"\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  export PGSOCKET=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"\n  exec postgres -D \"$PGDATA\" -k \"$PGSOCKET\" -c listen_addresses=''\n\"\"\"\n",
+      "agent_output_excerpt": "All four gates pass. jq now 1.8.1, verify.py clean.\n\n```\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502  orders-api  is now Flox-enabled                                \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n\u2713  Flox manages  (3 packages \u2014 pinned, same on every machine)\n   node 22.23.1       \u2190 package.json (engines.node >=22.0.0)\n   postgresql 16.14   \u2190 pg client + DATABASE_URL in .env.example / README\n   jq 1.8.1           \u2190 used to percent-encode the DB socket path\n                        (pinned: 1.8.2 lacks an x86_64-darwin build)\n\n\u2713  Installs automatically on activate\n   npm install       \u2192 express, pg, dotenv, jest\n\n\u2713  Services  (Postgres \u2014 starts with `flox activate --start-services`)\n   postgres  16.14   unix socket at target/dev"
+    },
+    {
+      "id": "script-started-postgres",
+      "tier": "should",
+      "ecosystem": "javascript",
+      "arm": "skills",
+      "rep": 3,
+      "hard_checks": {
+        "manifest_created": true,
+        "valid_toml": true,
+        "has_install_section": true,
+        "has_services_section": true,
+        "no_abs_paths": true,
+        "no_fake_install_url": true,
+        "pins_postgres": true
+      },
+      "hard_pass": true,
+      "activation": {
+        "ok": true,
+        "skipped": false,
+        "notes": ""
+      },
+      "verify": {
+        "violations": [],
+        "hard_count": 0,
+        "advisory_count": 0,
+        "catalog_checked": true
+      },
+      "judge": {
+        "score": 3,
+        "correct": true,
+        "issues": [
+          "Stores the Postgres data cluster and socket under $FLOX_ENV_PROJECT/target (repo tree) instead of $FLOX_ENV_CACHE \u2014 puts mutable DB state in the project directory, the exact anti-pattern the hook-quality criterion warns against",
+          "[services.postgres] command depends on $PGDATA/$PGSOCKET being exported only from the on-activate hook rather than a stable cache-derived path; fragile coupling between hook and service",
+          "Comment narrative claims the cluster convention was 'ported from scripts/start_dev_db.sh', but that launcher actually runs `docker run postgres:16-alpine` \u2014 the socket-only target/dev-db layout is invented, not ported",
+          "Long socket path under the repo tree risks exceeding the unix-socket path length limit in deeply nested checkouts"
+        ]
+      },
+      "verified": true,
+      "verify_method": "services",
+      "terminal_disposition": "verified",
+      "cost": {
+        "agent_usd": 1.8753654999999998,
+        "judge_usd": 0.23454850000000002,
+        "total_usd": 2.109914
+      },
+      "usage": {
+        "agent": {
+          "input_tokens": 47,
+          "cache_creation_input_tokens": 58775,
+          "cache_read_input_tokens": 1574343,
+          "output_tokens": 19981,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 58775,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 1214,
+              "cache_read_input_tokens": 74845,
+              "cache_creation_input_tokens": 1367,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 1367
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        },
+        "judge": {
+          "input_tokens": 2,
+          "cache_creation_input_tokens": 9522,
+          "cache_read_input_tokens": 17437,
+          "output_tokens": 5224,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 9522,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 5224,
+              "cache_read_input_tokens": 17437,
+              "cache_creation_input_tokens": 9522,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 9522
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        }
+      },
+      "num_turns": {
+        "agent": 25,
+        "judge": 1
+      },
+      "duration_ms": {
+        "agent": 304510,
+        "judge": 66754
+      },
+      "tool_calls": {
+        "agent": {
+          "total": 24,
+          "flox_search": 1,
+          "flox_show": 2
+        }
+      },
+      "stream_file": {
+        "agent": "efficiency-b2-ssp-opus-skills/script-started-postgres__skills__rep3__agent.jsonl"
+      },
+      "manifest": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n[install]\nnodejs_22.pkg-path = \"nodejs_22\"\npostgresql_16.pkg-path = \"postgresql_16\"\n# Pinned: jq@1.8.2 (Latest) has no x86_64-darwin build; 1.8.1 covers all four platforms.\njq.pkg-path = \"jq\"\njq.version = \"1.8.1\"\n\n[vars]\nPGUSER = \"orders\"\nPGDATABASE = \"orders_development\"\n\n[hook]\non-activate = \"\"\"\n  # --- Node dependencies (pg / express / dotenv) ---\n  if [ ! -d node_modules ] || { [ -f package-lock.json ] && [ package-lock.json -nt node_modules ]; }; then\n    npm install --silent\n  fi\n\n  # --- PostgreSQL dev cluster ------------------------------------------\n  # Ported from scripts/start_dev_db.sh: the cluster lives under the repo\n  # tree (target/dev-db) and postgres listens ONLY on a unix socket inside\n  # the repo (target/dev-db-socket), never TCP, so several checkouts can run\n  # side by side. `npm run db:dump` also connects via -h target/dev-db-socket.\n  export PGDATA=\"$FLOX_ENV_PROJECT/target/dev-db\"\n  export PGSOCKET=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"\n  export PGHOST=\"$PGSOCKET\"\n  mkdir -p \"$PGSOCKET\"\n\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" \\\n      --username=\"$PGUSER\" \\\n      --auth=trust \\\n      --no-locale \\\n      --encoding=UTF8 >&2\n    # Socket-only cluster, matching the repo's convention.\n    echo \"listen_addresses = ''\" >> \"$PGDATA/postgresql.conf\"\n    echo \"unix_socket_directories = '$PGSOCKET'\" >> \"$PGDATA/postgresql.conf\"\n\n    pg_ctl -D \"$PGDATA\" -o \"-k $PGSOCKET\" -l \"$PGDATA/postgres.log\" start >&2\n    until pg_isready -h \"$PGSOCKET\" -q; do sleep 0.2; done\n    createdb -h \"$PGSOCKET\" -U \"$PGUSER\" \"$PGDATABASE\" 2>/dev/null || true\n    # Load the checked-in schema snapshot.\n    [ -f db/schema.sql ] && psql -h \"$PGSOCKET\" -U \"$PGUSER\" -d \"$PGDATABASE\" -q -f db/schema.sql >&2\n    pg_ctl -D \"$PGDATA\" stop -m fast >&2\n  fi\n\n  # The socket dir holds '/' characters, so percent-encode it before embedding\n  # it as the host component of the libpq connection URI (as the repo does).\n  ENCODED_SOCKET=\"$(printf '%s' \"$PGSOCKET\" | jq -sRr @uri)\"\n  export DATABASE_URL=\"postgres://${PGUSER}@${ENCODED_SOCKET}/${PGDATABASE}\"\n\"\"\"\n\n[profile]\nbash = 'export PGHOST=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"'\nzsh  = 'export PGHOST=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"'\n\n[services.postgres]\ncommand = \"\"\"\n  exec postgres \\\n    -D \"$PGDATA\" \\\n    -k \"$PGSOCKET\" \\\n    -c listen_addresses=''\n\"\"\"\n",
+      "manifest_excerpt": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n[install]\nnodejs_22.pkg-path = \"nodejs_22\"\npostgresql_16.pkg-path = \"postgresql_16\"\n# Pinned: jq@1.8.2 (Latest) has no x86_64-darwin build; 1.8.1 covers all four platforms.\njq.pkg-path = \"jq\"\njq.version = \"1.8.1\"\n\n[vars]\nPGUSER = \"orders\"\nPGDATABASE = \"orders_development\"\n\n[hook]\non-activate = \"\"\"\n  # --- Node dependencies (pg / express / dotenv) ---\n  if [ ! -d node_modules ] || { [ -f package-lock.json ] && [ package-lock.json -nt node_modules ]; }; then\n    npm install --silent\n  fi\n\n  # --- PostgreSQL dev cluster ------------------------------------------\n  # Ported from scripts/start_dev_db.sh: the cluster lives under the repo\n  # tree (target/dev-db) and postgres listens ONLY on a unix socket inside\n  # the repo (target/dev-db-socket), never TCP, so several checkouts can run\n  # side by side. `npm run db:dump` also connects via -h target/dev-db-socket.\n  export PGDATA=\"$FLOX_ENV_PROJECT/target/dev-db\"\n  export PGSOCKET=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"\n  export PGHOST=\"$PGSOCKET\"\n  mkdir -p \"$PGSOCKET\"\n\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" \\\n      --username=\"$PGUSER\" \\\n      --auth=trust \\\n      --no-locale \\\n      --encoding=UTF8 >&2\n    # Socket-only cluster, matching the repo's convention.\n    echo \"listen_addresses = ''\" >> \"$PGDATA/postgresql.conf\"\n    echo \"unix_socket_directories = '$PGSOCKET'\" >> \"$PGDATA/postgresql.conf\"\n\n    pg_ctl -D \"$PGDATA\" -o \"-k $PGSOCKET\" -l \"$PGDATA/postgres.log\" start >&2\n    until pg_isready -h \"$PGSOCKET\" -q; do sleep 0.2; done\n    createdb -h \"$PGSOCKET\" -U \"$PGUSER\" \"$PGDATABASE\" 2>/dev/null || true\n    # Load the checked-in schema snapshot.\n    [ -f db/schema.sql ] && psql -h \"$PGSOCKET\" -U \"$PGUSER\" -d \"$PGDATABASE\" -q -f db/schema.sql >&2\n    pg_ctl -D \"$PGDATA\" stop -m fast >&2\n  fi\n\n  # The socket dir holds '/' characters, so percent-encode it before embedding\n  # it as the host component of the libpq connection URI (as the repo does).\n  ENCODED_SOCKET=\"$(printf '%s' \"$PGSOCKET\" | jq -sRr @uri)\"\n  export DATABASE_URL=\"postgres://${PGUSER}@${ENCODED_SOCKET}/${PGDATABASE}\"\n\"\"\"\n\n[profile]\nbash = 'export PGHOST=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"'\nzsh  = 'export PGHOST=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"'\n\n[services.postgres]\ncommand = \"\"\"\n  exec postgres \\\n    -D \"$PGDATA\" \\\n    -k \"$PGSOCKET\" \\\n    -c listen_addresses=''\n\"\"\"\n",
+      "agent_output_excerpt": "All four verification steps pass and the environment works end-to-end. Report:\n\n```\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502  orders-api  is now Flox-enabled                                \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n\u2713  Flox manages  (3 packages \u2014 pinned, same on every machine)\n   node 22.23.1        \u2190 package.json engines.node (>=22.0.0)\n   postgresql 16.14    \u2190 pg client in package.json\n   jq 1.8.1            \u2190 percent-encodes the DB socket path (pinned: 1.8.2 has no x86_64-darwin build)\n\n\u2713  Installs automatically on activate\n   npm install         \u2192 express, pg, dotenv (+ jest) \u2014 272 packages\n\n\u2713  Services  (flox activate --start-services)\n   postgres            unix socket at target/dev-db-socket, cluster at target/"
+    },
+    {
+      "id": "script-started-postgres",
+      "tier": "should",
+      "ecosystem": "javascript",
+      "arm": "skills",
+      "rep": 4,
+      "hard_checks": {
+        "manifest_created": true,
+        "valid_toml": true,
+        "has_install_section": true,
+        "has_services_section": true,
+        "no_abs_paths": true,
+        "no_fake_install_url": true,
+        "pins_postgres": true
+      },
+      "hard_pass": true,
+      "activation": {
+        "ok": true,
+        "skipped": false,
+        "notes": ""
+      },
+      "verify": {
+        "violations": [],
+        "hard_count": 0,
+        "advisory_count": 0,
+        "catalog_checked": true
+      },
+      "judge": {
+        "score": 5,
+        "correct": true,
+        "issues": [
+          "PGDATA is exported in [hook] rather than declared in [vars] alongside the other PG* vars; the service's `postgres -D \"$PGDATA\"` relies on Flox propagating hook exports into the service environment \u2014 works, but less explicit than the other vars",
+          "PGUSER=orders / PGDATABASE=orders_development are inferred credentials; correctness depends on .env.example's DATABASE_URL actually using these (unverifiable here), though trust auth makes the password moot"
+        ]
+      },
+      "verified": true,
+      "verify_method": "services",
+      "terminal_disposition": "verified",
+      "cost": {
+        "agent_usd": 0.6588184999999999,
+        "judge_usd": 0.1959535,
+        "total_usd": 0.8547719999999999
+      },
+      "usage": {
+        "agent": {
+          "input_tokens": 21,
+          "cache_creation_input_tokens": 14038,
+          "cache_read_input_tokens": 602243,
+          "output_tokens": 8661,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 14038,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 942,
+              "cache_read_input_tokens": 61449,
+              "cache_creation_input_tokens": 668,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 668
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        },
+        "judge": {
+          "input_tokens": 2,
+          "cache_creation_input_tokens": 9485,
+          "cache_read_input_tokens": 17437,
+          "output_tokens": 3695,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 9485,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 3695,
+              "cache_read_input_tokens": 17437,
+              "cache_creation_input_tokens": 9485,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 9485
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        }
+      },
+      "num_turns": {
+        "agent": 11,
+        "judge": 1
+      },
+      "duration_ms": {
+        "agent": 156790,
+        "judge": 52137
+      },
+      "tool_calls": {
+        "agent": {
+          "total": 10,
+          "flox_search": 1,
+          "flox_show": 1
+        }
+      },
+      "stream_file": {
+        "agent": "efficiency-b2-ssp-opus-skills/script-started-postgres__skills__rep4__agent.jsonl"
+      },
+      "manifest": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n## Install Packages --------------------------------------------------\n[install]\n# Node runtime \u2014 package.json engines.node >=22.0.0\nnodejs_22.pkg-path = \"nodejs_22\"\n# PostgreSQL \u2014 leaf datastore the app requires (pg client + DATABASE_URL);\n# wired as a Flox service below, replacing scripts/start_dev_db.sh\npostgresql_16.pkg-path = \"postgresql_16\"\n\n\n## Environment Variables ---------------------------------------------\n## Match .env.example so the app's DATABASE_URL resolves against this service.\n[vars]\nPGHOST = \"127.0.0.1\"\nPGPORT = \"5432\"\nPGUSER = \"orders\"\nPGDATABASE = \"orders_development\"\n\n\n## Activation Hook ---------------------------------------------------\n[hook]\non-activate = \"\"\"\n  # --- Node dependencies (installed inside the Flox env, not by Flox) ---\n  if [ ! -d node_modules ] || { [ -f package-lock.json ] && [ package-lock.json -nt node_modules ]; }; then\n    npm install --silent\n  fi\n\n  # --- App config: seed .env from the checked-in example on first run ---\n  if [ ! -f .env ]; then\n    cp .env.example .env >&2\n  fi\n\n  # --- PostgreSQL cluster (dev-only trust auth) ---\n  # Cluster lives in the per-project Flox cache; the socket is kept in the\n  # repo's target/dev-db-socket so `npm run db:dump` (pg_dump -h that path)\n  # still works. The service also listens on TCP 127.0.0.1:5432 to match\n  # .env.example's DATABASE_URL.\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  SOCKET_DIR=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"\n  mkdir -p \"$SOCKET_DIR\"\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" \\\n      --username=\"$PGUSER\" \\\n      --auth=trust \\\n      --no-locale \\\n      --encoding=UTF8 >&2\n    pg_ctl -D \"$PGDATA\" \\\n      -o \"-p $PGPORT -k $SOCKET_DIR -c listen_addresses=$PGHOST\" \\\n      -l \"$PGDATA/init.log\" start >&2\n    until pg_isready -h \"$PGHOST\" -p \"$PGPORT\" -q; do sleep 0.2; done\n    createdb -h \"$PGHOST\" -p \"$PGPORT\" -U \"$PGUSER\" \"$PGDATABASE\" >&2\n    if [ -f db/schema.sql ]; then\n      psql -h \"$PGHOST\" -p \"$PGPORT\" -U \"$PGUSER\" -d \"$PGDATABASE\" -q -f db/schema.sql >&2\n    fi\n    pg_ctl -D \"$PGDATA\" stop -m fast >&2\n  fi\n\"\"\"\n\n\n## Services ---------------------------------------------------------\n[services.postgres]\ncommand = \"\"\"\n  exec postgres \\\n    -D \"$PGDATA\" \\\n    -p \"$PGPORT\" \\\n    -k \"$FLOX_ENV_PROJECT/target/dev-db-socket\" \\\n    -c listen_addresses=\"$PGHOST\"\n\"\"\"\n\n\n[options]\nsystems = [\n  \"aarch64-darwin\",\n  \"aarch64-linux\",\n  \"x86_64-darwin\",\n  \"x86_64-linux\",\n]\n",
+      "manifest_excerpt": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n## Install Packages --------------------------------------------------\n[install]\n# Node runtime \u2014 package.json engines.node >=22.0.0\nnodejs_22.pkg-path = \"nodejs_22\"\n# PostgreSQL \u2014 leaf datastore the app requires (pg client + DATABASE_URL);\n# wired as a Flox service below, replacing scripts/start_dev_db.sh\npostgresql_16.pkg-path = \"postgresql_16\"\n\n\n## Environment Variables ---------------------------------------------\n## Match .env.example so the app's DATABASE_URL resolves against this service.\n[vars]\nPGHOST = \"127.0.0.1\"\nPGPORT = \"5432\"\nPGUSER = \"orders\"\nPGDATABASE = \"orders_development\"\n\n\n## Activation Hook ---------------------------------------------------\n[hook]\non-activate = \"\"\"\n  # --- Node dependencies (installed inside the Flox env, not by Flox) ---\n  if [ ! -d node_modules ] || { [ -f package-lock.json ] && [ package-lock.json -nt node_modules ]; }; then\n    npm install --silent\n  fi\n\n  # --- App config: seed .env from the checked-in example on first run ---\n  if [ ! -f .env ]; then\n    cp .env.example .env >&2\n  fi\n\n  # --- PostgreSQL cluster (dev-only trust auth) ---\n  # Cluster lives in the per-project Flox cache; the socket is kept in the\n  # repo's target/dev-db-socket so `npm run db:dump` (pg_dump -h that path)\n  # still works. The service also listens on TCP 127.0.0.1:5432 to match\n  # .env.example's DATABASE_URL.\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  SOCKET_DIR=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"\n  mkdir -p \"$SOCKET_DIR\"\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" \\\n      --username=\"$PGUSER\" \\\n      --auth=trust \\\n      --no-locale \\\n      --encoding=UTF8 >&2\n    pg_ctl -D \"$PGDATA\" \\\n      -o \"-p $PGPORT -k $SOCKET_DIR -c listen_addresses=$PGHOST\" \\\n      -l \"$PGDATA/init.log\" start >&2\n    until pg_isready -h \"$PGHOST\" -p \"$PGPORT\" -q; do sleep 0.2; done\n    createdb -h \"$PGHOST\" -p \"$PGPORT\" -U \"$PGUSER\" \"$PGDATABASE\" >&2\n    if [ -f db/schema.sql ]; then\n      psql -h \"$PGHOST\" -p \"$PGPORT\" -U \"$PGUSER\" -d \"$PGDATABASE\" -q -f db/schema.sql >&2\n    fi\n    pg_ctl -D \"$PGDATA\" stop -m fast >&2\n  fi\n\"\"\"\n\n\n## Services ---------------------------------------------------------\n[services.postgres]\ncommand = \"\"\"\n  exec postgres \\\n    -D \"$PGDATA\" \\\n    -p \"$PGPORT\" \\\n    -k \"$FLOX_ENV_PROJECT/target/dev-db-socket\" \\\n    -c listen_addresses=\"$PGHOST\"\n\"\"\"\n\n\n[options]\nsystems = [\n  \"aarch64-darwin\",\n  \"aarch64-linux\",\n  \"x86_64-darwin\",\n  \"x86_64-linux\",\n]\n",
+      "agent_output_excerpt": "All four validation gates pass. The manifest is correct and validated.\n\n```\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502  orders-api  is now Flox-enabled                                \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n\u2713  Flox manages  (2 packages \u2014 pinned, same on every machine)\n   node 22.23.1        \u2190 package.json engines.node >=22.0.0\n   postgresql 16.14    \u2190 pg client + DATABASE_URL (leaf datastore)\n\n\u2713  Installs automatically on activate\n   npm install    \u2192 express, pg, dotenv (+ jest dev dep)\n   .env seeded from .env.example on first activate\n\n\u2713  Services  (start with `flox activate --start-services`)\n   postgres 16.14   \u2192 reproduces scripts/start_dev_db.sh:\n                      \u00b7 cluster in $FLOX_ENV_CACHE (not the repo "
+    },
+    {
+      "id": "script-started-postgres",
+      "tier": "should",
+      "ecosystem": "javascript",
+      "arm": "skills",
+      "rep": 5,
+      "terminal_disposition": "agent-error",
+      "error": "TIMEOUT",
+      "num_turns": {
+        "agent": 0
+      },
+      "tool_calls": {
+        "agent": {
+          "total": 0,
+          "flox_search": 0,
+          "flox_show": 0
+        }
+      },
+      "stream_file": {
+        "agent": null
+      }
+    },
+    {
+      "id": "script-started-postgres",
+      "tier": "should",
+      "ecosystem": "javascript",
+      "arm": "skills",
+      "rep": 6,
+      "hard_checks": {
+        "manifest_created": true,
+        "valid_toml": true,
+        "has_install_section": true,
+        "has_services_section": true,
+        "no_abs_paths": true,
+        "no_fake_install_url": true,
+        "pins_postgres": true
+      },
+      "hard_pass": true,
+      "activation": {
+        "ok": true,
+        "skipped": false,
+        "notes": ""
+      },
+      "verify": {
+        "violations": [],
+        "hard_count": 0,
+        "advisory_count": 0,
+        "catalog_checked": true
+      },
+      "judge": {
+        "score": 4,
+        "correct": true,
+        "issues": [
+          "Correctly ignores scripts/start_dev_db.sh and docker; wires [services.postgres] with initdb bootstrap instead of deferring \u2014 the core regression check passes",
+          "State location misses the idiom: PGDATA and socket live in $FLOX_ENV_PROJECT/target/dev-db (inside the repo tree, akin to the ./venv anti-pattern) rather than $FLOX_ENV_CACHE as the rubric and criterion 2 require",
+          "No [vars] pointing at localhost:5432; DATABASE_URL is derived and exported from the hook \u2014 good",
+          "Packages correct: nodejs_22, postgresql_16, jq (pinned) all installed",
+          "Minor: db/schema.sql and 'npm run db:dump' storyline are embellishments not established by the node-postgres substance, but they don't break anything"
+        ]
+      },
+      "verified": false,
+      "verify_method": "services",
+      "terminal_disposition": "failed-verify",
+      "cost": {
+        "agent_usd": 1.6722915,
+        "judge_usd": 0.19703349999999997,
+        "total_usd": 1.869325
+      },
+      "usage": {
+        "agent": {
+          "input_tokens": 41,
+          "cache_creation_input_tokens": 57628,
+          "cache_read_input_tokens": 1308545,
+          "output_tokens": 17634,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 57628,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 1042,
+              "cache_read_input_tokens": 74547,
+              "cache_creation_input_tokens": 518,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 518
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        },
+        "judge": {
+          "input_tokens": 2,
+          "cache_creation_input_tokens": 9538,
+          "cache_read_input_tokens": 17437,
+          "output_tokens": 3717,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 9538,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 3717,
+              "cache_read_input_tokens": 17437,
+              "cache_creation_input_tokens": 9538,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 9538
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        }
+      },
+      "num_turns": {
+        "agent": 22,
+        "judge": 1
+      },
+      "duration_ms": {
+        "agent": 271770,
+        "judge": 46982
+      },
+      "tool_calls": {
+        "agent": {
+          "total": 21,
+          "flox_search": 1,
+          "flox_show": 3
+        }
+      },
+      "stream_file": {
+        "agent": "efficiency-b2-ssp-opus-skills/script-started-postgres__skills__rep6__agent.jsonl"
+      },
+      "manifest": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n[install]\nnodejs_22.pkg-path = \"nodejs_22\"       # engines.node >=22.0.0 (package.json)\npostgresql_16.pkg-path = \"postgresql_16\"  # backing datastore; provides postgres, psql, pg_dump, initdb\njq.pkg-path = \"jq\"                     # percent-encodes the repo-tree socket path into DATABASE_URL\n# 2026-07-18: jq@1.8.2 dropped the x86_64-darwin build; pin 1.8.1, the newest jq built on all target systems.\njq.version = \"1.8.1\"\n\n[vars]\nPGUSER = \"orders\"\nPGDATABASE = \"orders_development\"\nPORT = \"3000\"\n\n[hook]\n# Reproduces scripts/start_dev_db.sh: a socket-only postgres cluster living in\n# the repo tree (target/dev-db), reachable via a unix socket in target/dev-db-socket.\n# The socket path contains '/', so it is percent-encoded into DATABASE_URL \u2014 the\n# same convention the repo documents and `npm run db:dump` relies on.\non-activate = \"\"\"\n  PGDATA=\"$FLOX_ENV_PROJECT/target/dev-db\"\n  SOCKET_DIR=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"\n  mkdir -p \"$SOCKET_DIR\"\n\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" \\\n      --username=\"$PGUSER\" \\\n      --auth=trust \\\n      --no-locale \\\n      --encoding=UTF8 >&2\n    # Socket-only cluster so multiple checkouts don't fight over TCP port 5432.\n    echo \"listen_addresses = ''\" >> \"$PGDATA/postgresql.conf\"\n    echo \"unix_socket_directories = '$SOCKET_DIR'\" >> \"$PGDATA/postgresql.conf\"\n    pg_ctl -D \"$PGDATA\" -l \"$PGDATA/init.log\" start\n    until pg_isready -h \"$SOCKET_DIR\" -q; do sleep 0.2; done\n    createdb -h \"$SOCKET_DIR\" -U \"$PGUSER\" \"$PGDATABASE\"\n    # Load the checked-in schema snapshot (db/schema.sql).\n    [ -f db/schema.sql ] && psql -h \"$SOCKET_DIR\" -U \"$PGUSER\" -d \"$PGDATABASE\" -q -f db/schema.sql >&2\n    pg_ctl -D \"$PGDATA\" stop -m fast\n  fi\n\n  # Percent-encode the socket dir so it can be the host component of a libpq URI.\n  ENCODED_SOCKET=\"$(printf '%s' \"$SOCKET_DIR\" | jq -sRr @uri)\"\n  export DATABASE_URL=\"postgres://${PGUSER}@${ENCODED_SOCKET}/${PGDATABASE}\"\n\n  # Node dependencies (no lockfile committed; install when node_modules is absent).\n  if [ ! -d node_modules ]; then\n    npm install --silent >&2\n  fi\n\"\"\"\n\n[services.postgres]\n# Serves the same socket-only cluster the hook initialized. auth=trust is dev-only.\ncommand = \"\"\"\n  exec postgres \\\n    -D \"$FLOX_ENV_PROJECT/target/dev-db\" \\\n    -k \"$FLOX_ENV_PROJECT/target/dev-db-socket\"\n\"\"\"\n\n[options]\nsystems = [\n  \"aarch64-darwin\",\n  \"aarch64-linux\",\n  \"x86_64-darwin\",\n  \"x86_64-linux\",\n]\n",
+      "manifest_excerpt": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n[install]\nnodejs_22.pkg-path = \"nodejs_22\"       # engines.node >=22.0.0 (package.json)\npostgresql_16.pkg-path = \"postgresql_16\"  # backing datastore; provides postgres, psql, pg_dump, initdb\njq.pkg-path = \"jq\"                     # percent-encodes the repo-tree socket path into DATABASE_URL\n# 2026-07-18: jq@1.8.2 dropped the x86_64-darwin build; pin 1.8.1, the newest jq built on all target systems.\njq.version = \"1.8.1\"\n\n[vars]\nPGUSER = \"orders\"\nPGDATABASE = \"orders_development\"\nPORT = \"3000\"\n\n[hook]\n# Reproduces scripts/start_dev_db.sh: a socket-only postgres cluster living in\n# the repo tree (target/dev-db), reachable via a unix socket in target/dev-db-socket.\n# The socket path contains '/', so it is percent-encoded into DATABASE_URL \u2014 the\n# same convention the repo documents and `npm run db:dump` relies on.\non-activate = \"\"\"\n  PGDATA=\"$FLOX_ENV_PROJECT/target/dev-db\"\n  SOCKET_DIR=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"\n  mkdir -p \"$SOCKET_DIR\"\n\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" \\\n      --username=\"$PGUSER\" \\\n      --auth=trust \\\n      --no-locale \\\n      --encoding=UTF8 >&2\n    # Socket-only cluster so multiple checkouts don't fight over TCP port 5432.\n    echo \"listen_addresses = ''\" >> \"$PGDATA/postgresql.conf\"\n    echo \"unix_socket_directories = '$SOCKET_DIR'\" >> \"$PGDATA/postgresql.conf\"\n    pg_ctl -D \"$PGDATA\" -l \"$PGDATA/init.log\" start\n    until pg_isready -h \"$SOCKET_DIR\" -q; do sleep 0.2; done\n    createdb -h \"$SOCKET_DIR\" -U \"$PGUSER\" \"$PGDATABASE\"\n    # Load the checked-in schema snapshot (db/schema.sql).\n    [ -f db/schema.sql ] && psql -h \"$SOCKET_DIR\" -U \"$PGUSER\" -d \"$PGDATABASE\" -q -f db/schema.sql >&2\n    pg_ctl -D \"$PGDATA\" stop -m fast\n  fi\n\n  # Percent-encode the socket dir so it can be the host component of a libpq URI.\n  ENCODED_SOCKET=\"$(printf '%s' \"$SOCKET_DIR\" | jq -sRr @uri)\"\n  export DATABASE_URL=\"postgres://${PGUSER}@${ENCODED_SOCKET}/${PGDATABASE}\"\n\n  # Node dependencies (no lockfile committed; install when node_modules is absent).\n  if [ ! -d node_modules ]; then\n    npm install --silent >&2\n  fi\n\"\"\"\n\n[services.postgres]\n# Serves the same socket-only cluster the hook initialized. auth=trust is dev-only.\ncommand = \"\"\"\n  exec postgres \\\n    -D \"$FLOX_ENV_PROJECT/target/dev-db\" \\\n    -k \"$FLOX_ENV_PROJECT/target/dev-db-socket\"\n\"\"\"\n\n[options]\nsystems = [\n  \"aarch64-darwin\",\n  \"aarch64-linux\",\n  \"x86_64-darwin\",\n  \"x86_64-linux\",\n]\n",
+      "agent_output_excerpt": "All four verification steps pass. Here's the report.\n\n```\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502  orders-api  is now Flox-enabled                                \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n\u2713  Flox manages  (3 packages \u2014 pinned, same on every machine)\n   node 22.23.1      \u2190 package.json (engines.node >=22.0.0)\n   postgresql 16.14  \u2190 .env.example \u00b7 db/schema.sql (backing datastore)\n   jq 1.8.1          \u2190 used to percent-encode the repo socket path\n                       (1.8.2 dropped the x86_64-darwin build; pinned 1.8.1)\n\n\u2713  Installs automatically on activate\n   npm install       \u2192 express, pg, dotenv (+ jest)\n\n\u26a0  Services  (start with `flox activate --start-services`, or `flox services start`)\n   postgres   socket-o"
+    },
+    {
+      "id": "script-started-postgres",
+      "tier": "should",
+      "ecosystem": "javascript",
+      "arm": "skills",
+      "rep": 7,
+      "hard_checks": {
+        "manifest_created": true,
+        "valid_toml": true,
+        "has_install_section": true,
+        "has_services_section": true,
+        "no_abs_paths": true,
+        "no_fake_install_url": true,
+        "pins_postgres": true
+      },
+      "hard_pass": true,
+      "activation": {
+        "ok": true,
+        "skipped": false,
+        "notes": ""
+      },
+      "verify": {
+        "violations": [],
+        "hard_count": 0,
+        "advisory_count": 0,
+        "catalog_checked": true
+      },
+      "judge": {
+        "score": 5,
+        "correct": true,
+        "issues": [
+          "Minor: PGDATA is exported in the on-activate hook (relies on Flox propagating hook exports to the service) rather than sitting in [vars]; correct because it derives from $FLOX_ENV_CACHE, but slightly less explicit"
+        ]
+      },
+      "verified": true,
+      "verify_method": "services",
+      "terminal_disposition": "verified",
+      "cost": {
+        "agent_usd": 1.0156584999999998,
+        "judge_usd": 0.15386350000000001,
+        "total_usd": 1.1695219999999997
+      },
+      "usage": {
+        "agent": {
+          "input_tokens": 26,
+          "cache_creation_input_tokens": 23636,
+          "cache_read_input_tokens": 810077,
+          "output_tokens": 14938,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 23636,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 1817,
+              "cache_read_input_tokens": 69488,
+              "cache_creation_input_tokens": 2203,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 2203
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        },
+        "judge": {
+          "input_tokens": 2,
+          "cache_creation_input_tokens": 9416,
+          "cache_read_input_tokens": 17437,
+          "output_tokens": 2039,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 9416,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 2039,
+              "cache_read_input_tokens": 17437,
+              "cache_creation_input_tokens": 9416,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 9416
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        }
+      },
+      "num_turns": {
+        "agent": 14,
+        "judge": 1
+      },
+      "duration_ms": {
+        "agent": 294325,
+        "judge": 28484
+      },
+      "tool_calls": {
+        "agent": {
+          "total": 13,
+          "flox_search": 1,
+          "flox_show": 1
+        }
+      },
+      "stream_file": {
+        "agent": "efficiency-b2-ssp-opus-skills/script-started-postgres__skills__rep7__agent.jsonl"
+      },
+      "manifest": "## Flox Environment Manifest -----------------------------------------\n##\n##   _Everything_ you need to know about the _manifest_ is here:\n##\n##   https://flox.dev/docs/reference/command-reference/manifest.toml/\n##\n## -------------------------------------------------------------------\n# Flox manifest version managed by Flox CLI\nschema-version = \"1.13.0\"\n# Generated by /floxify\n\n[install]\nnodejs_22.pkg-path = \"nodejs_22\"          # package.json engines.node >=22.0.0\npostgresql_16.pkg-path = \"postgresql_16\"  # pg client + .env.example DATABASE_URL\n\n[vars]\n# Matches .env.example so `flox activate` + `npm run dev` works without a .env.\n# dotenv won't override these if the developer later creates their own .env.\nPGHOST = \"127.0.0.1\"\nPGPORT = \"5432\"\nPGUSER = \"orders\"\nPGDATABASE = \"orders_development\"\nDATABASE_URL = \"postgres://orders:orders@127.0.0.1:5432/orders_development\"\n\n[hook]\non-activate = \"\"\"\n  # --- Node deps ---\n  if [ ! -d node_modules ] || { [ -f package-lock.json ] && [ package-lock.json -nt node_modules ]; }; then\n    npm install --silent\n  fi\n\n  # --- PostgreSQL cluster (first activation only) ---\n  # Ported from scripts/start_dev_db.sh: creates the orders_development\n  # database and loads db/schema.sql. Unlike the repo script (which uses an\n  # in-repo unix socket + percent-encoded DATABASE_URL), this cluster listens\n  # on TCP 127.0.0.1:5432 to match .env.example, and its data lives in the\n  # machine-local Flox cache.\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" \\\n      --username=\"$PGUSER\" \\\n      --auth=trust \\\n      --no-locale \\\n      --encoding=UTF8 >&2\n    pg_ctl -D \"$PGDATA\" -o \"-p $PGPORT -k /tmp\" \\\n      -l \"$PGDATA/init.log\" start\n    until pg_isready -h 127.0.0.1 -p \"$PGPORT\" -q; do sleep 0.2; done\n    createdb -h 127.0.0.1 -p \"$PGPORT\" -U \"$PGUSER\" \"$PGDATABASE\"\n    if [ -f \"$FLOX_ENV_PROJECT/db/schema.sql\" ]; then\n      psql -h 127.0.0.1 -p \"$PGPORT\" -U \"$PGUSER\" -d \"$PGDATABASE\" \\\n        -q -f \"$FLOX_ENV_PROJECT/db/schema.sql\" >&2\n    fi\n    pg_ctl -D \"$PGDATA\" stop -m fast\n  fi\n\"\"\"\n\n[services.postgres]\ncommand = \"\"\"\n  exec postgres \\\n    -D \"$PGDATA\" \\\n    -p \"$PGPORT\" \\\n    -k /tmp \\\n    -c listen_addresses=\"$PGHOST\"\n\"\"\"\n\n[options]\nsystems = [\n  \"aarch64-darwin\",\n  \"aarch64-linux\",\n  \"x86_64-darwin\",\n  \"x86_64-linux\",\n]\n",
+      "manifest_excerpt": "## Flox Environment Manifest -----------------------------------------\n##\n##   _Everything_ you need to know about the _manifest_ is here:\n##\n##   https://flox.dev/docs/reference/command-reference/manifest.toml/\n##\n## -------------------------------------------------------------------\n# Flox manifest version managed by Flox CLI\nschema-version = \"1.13.0\"\n# Generated by /floxify\n\n[install]\nnodejs_22.pkg-path = \"nodejs_22\"          # package.json engines.node >=22.0.0\npostgresql_16.pkg-path = \"postgresql_16\"  # pg client + .env.example DATABASE_URL\n\n[vars]\n# Matches .env.example so `flox activate` + `npm run dev` works without a .env.\n# dotenv won't override these if the developer later creates their own .env.\nPGHOST = \"127.0.0.1\"\nPGPORT = \"5432\"\nPGUSER = \"orders\"\nPGDATABASE = \"orders_development\"\nDATABASE_URL = \"postgres://orders:orders@127.0.0.1:5432/orders_development\"\n\n[hook]\non-activate = \"\"\"\n  # --- Node deps ---\n  if [ ! -d node_modules ] || { [ -f package-lock.json ] && [ package-lock.json -nt node_modules ]; }; then\n    npm install --silent\n  fi\n\n  # --- PostgreSQL cluster (first activation only) ---\n  # Ported from scripts/start_dev_db.sh: creates the orders_development\n  # database and loads db/schema.sql. Unlike the repo script (which uses an\n  # in-repo unix socket + percent-encoded DATABASE_URL), this cluster listens\n  # on TCP 127.0.0.1:5432 to match .env.example, and its data lives in the\n  # machine-local Flox cache.\n  export PGDATA=\"$FLOX_ENV_CACHE/postgres\"\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" \\\n      --username=\"$PGUSER\" \\\n      --auth=trust \\\n      --no-locale \\\n      --encoding=UTF8 >&2\n    pg_ctl -D \"$PGDATA\" -o \"-p $PGPORT -k /tmp\" \\\n      -l \"$PGDATA/init.log\" start\n    until pg_isready -h 127.0.0.1 -p \"$PGPORT\" -q; do sleep 0.2; done\n    createdb -h 127.0.0.1 -p \"$PGPORT\" -U \"$PGUSER\" \"$PGDATABASE\"\n    if [ -f \"$FLOX_ENV_PROJECT/db/schema.sql\" ]; then\n      psql -h 127.0.0.1 -p \"$PGPORT\" -U \"$PGUSER\" -d \"$PGDATABASE\" \\\n        -q -f \"$FLOX_ENV_PROJECT/db/schema.sql\" >&2\n    fi\n    pg_ctl -D \"$PGDATA\" stop -m fast\n  fi\n\"\"\"\n\n[services.postgres]\ncommand = \"\"\"\n  exec postgres \\\n    -D \"$PGDATA\" \\\n    -p \"$PGPORT\" \\\n    -k /tmp \\\n    -c listen_addresses=\"$PGHOST\"\n\"\"\"\n\n[options]\nsystems = [\n  \"aarch64-darwin\",\n  \"aarch64-linux\",\n  \"x86_64-darwin\",\n  \"x86_64-linux\",\n]\n",
+      "agent_output_excerpt": "Confirmed: the cluster initializes and loads `db/schema.sql` correctly \u2014 `customers` and `orders` tables materialize. The manifest's postgres path is functionally sound; the only failure was the foreign postgres occupying `5432` on this shared machine (environmental, not the manifest).\n\nAll four validation gates passed. Here's the result.\n\n```\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502  orders-api  is now Flox-enabled                                 \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n\u2713  Flox manages  (2 packages \u2014 pinned, same on every machine)\n   node 22.23.1        \u2190 package.json engines.node (>=22.0.0)\n   postgresql 16.14    \u2190 pg client + .env.example DATABASE_URL\n\n\u2713  Installs automatically on activate\n   npm install        "
+    },
+    {
+      "id": "script-started-postgres",
+      "tier": "should",
+      "ecosystem": "javascript",
+      "arm": "skills",
+      "rep": 8,
+      "hard_checks": {
+        "manifest_created": true,
+        "valid_toml": true,
+        "has_install_section": true,
+        "has_services_section": true,
+        "no_abs_paths": true,
+        "no_fake_install_url": true,
+        "pins_postgres": true
+      },
+      "hard_pass": true,
+      "activation": {
+        "ok": true,
+        "skipped": false,
+        "notes": ""
+      },
+      "verify": {
+        "violations": [],
+        "hard_count": 0,
+        "advisory_count": 0,
+        "catalog_checked": true
+      },
+      "judge": {
+        "score": 4,
+        "correct": true,
+        "issues": [
+          "DB cluster state placed in $FLOX_ENV_PROJECT/target/dev-db instead of $FLOX_ENV_CACHE \u2014 writes datastore state into the repo working tree and deviates from the node-postgres cache-state idiom the rubric expects",
+          "Socket dir also lives under $FLOX_ENV_PROJECT/target rather than the cache",
+          "Passes the regression trap correctly: postgresql_16 installed, [services.postgres] wired with initdb bootstrap, does NOT defer to scripts/start_dev_db.sh or docker, and no dangling localhost:5432 [vars]"
+        ]
+      },
+      "verified": true,
+      "verify_method": "services",
+      "terminal_disposition": "verified",
+      "cost": {
+        "agent_usd": 0.7070299999999999,
+        "judge_usd": 0.21708349999999998,
+        "total_usd": 0.9241134999999999
+      },
+      "usage": {
+        "agent": {
+          "input_tokens": 24,
+          "cache_creation_input_tokens": 13611,
+          "cache_read_input_tokens": 721780,
+          "output_tokens": 8369,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 13611,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 936,
+              "cache_read_input_tokens": 60949,
+              "cache_creation_input_tokens": 741,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 741
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        },
+        "judge": {
+          "input_tokens": 2,
+          "cache_creation_input_tokens": 9538,
+          "cache_read_input_tokens": 17437,
+          "output_tokens": 4519,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 9538,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [
+            {
+              "input_tokens": 2,
+              "output_tokens": 4519,
+              "cache_read_input_tokens": 17437,
+              "cache_creation_input_tokens": 9538,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 9538
+              },
+              "type": "message"
+            }
+          ],
+          "speed": "standard"
+        }
+      },
+      "num_turns": {
+        "agent": 13,
+        "judge": 1
+      },
+      "duration_ms": {
+        "agent": 135951,
+        "judge": 58147
+      },
+      "tool_calls": {
+        "agent": {
+          "total": 12,
+          "flox_search": 1,
+          "flox_show": 2
+        }
+      },
+      "stream_file": {
+        "agent": "efficiency-b2-ssp-opus-skills/script-started-postgres__skills__rep8__agent.jsonl"
+      },
+      "manifest": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n## orders-api \u2014 Express API backed by PostgreSQL.\n## Node runtime + a socket-only Postgres dev cluster, wired to match\n## scripts/start_dev_db.sh (cluster + socket under ./target, schema loaded\n## from db/schema.sql, percent-encoded socket path in DATABASE_URL).\n\n[install]\nnodejs_22.pkg-path = \"nodejs_22\"          # engines.node >=22.0.0 (package.json)\npostgresql_16.pkg-path = \"postgresql_16\"  # leaf datastore \u2014 pg client + .env.example + start_dev_db.sh\njq.pkg-path = \"jq\"                        # percent-encode the unix socket path into DATABASE_URL\n# 2026-07-18: jq@1.8.2 (Latest) has no x86_64-darwin build; pin 1.8.1, which\n# covers all four systems in options.systems (per-system availability hold).\njq.version = \"1.8.1\"\n\n[vars]\nPGUSER = \"orders\"\nPGDATABASE = \"orders_development\"\nPORT = \"3000\"\n\n[hook]\non-activate = '''\n  # --- Node deps ---\n  if [ ! -d node_modules ] || { [ -f package-lock.json ] && [ package-lock.json -nt node_modules ]; }; then\n    npm install --silent\n  fi\n\n  # --- Postgres dev cluster (socket-only, in the repo tree, per scripts/start_dev_db.sh) ---\n  export PGDATA=\"$FLOX_ENV_PROJECT/target/dev-db\"\n  export SOCKET_DIR=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"\n  mkdir -p \"$SOCKET_DIR\"\n\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" \\\n      --username=\"$PGUSER\" \\\n      --auth=trust \\\n      --no-locale \\\n      --encoding=UTF8 >&2\n    pg_ctl -D \"$PGDATA\" \\\n      -o \"-k $SOCKET_DIR -c listen_addresses=''\" \\\n      -l \"$PGDATA/init.log\" start\n    until pg_isready -h \"$SOCKET_DIR\" -q; do sleep 0.2; done\n    createdb -h \"$SOCKET_DIR\" -U \"$PGUSER\" \"$PGDATABASE\"\n    if [ -f db/schema.sql ]; then\n      psql -h \"$SOCKET_DIR\" -U \"$PGUSER\" -d \"$PGDATABASE\" -q -f db/schema.sql >&2\n    fi\n    pg_ctl -D \"$PGDATA\" stop -m fast\n  fi\n\n  # --- Connection env for the app (pg reads DATABASE_URL) ---\n  # The socket dir contains '/' characters, so percent-encode it before\n  # embedding it as the host component of the libpq connection URI.\n  ENCODED_SOCKET=\"$(printf '%s' \"$SOCKET_DIR\" | jq -sRr @uri)\"\n  export PGHOST=\"$SOCKET_DIR\"\n  export DATABASE_URL=\"postgres://${PGUSER}@${ENCODED_SOCKET}/${PGDATABASE}\"\n'''\n\n[services.postgres]\ncommand = '''\n  exec postgres \\\n    -D \"$FLOX_ENV_PROJECT/target/dev-db\" \\\n    -k \"$FLOX_ENV_PROJECT/target/dev-db-socket\" \\\n    -c listen_addresses=\"\"\n'''\n\n[options]\nsystems = [\"aarch64-darwin\", \"aarch64-linux\", \"x86_64-darwin\", \"x86_64-linux\"]\n",
+      "manifest_excerpt": "schema-version = \"1.13.0\"\n# Generated by /floxify\n\n## orders-api \u2014 Express API backed by PostgreSQL.\n## Node runtime + a socket-only Postgres dev cluster, wired to match\n## scripts/start_dev_db.sh (cluster + socket under ./target, schema loaded\n## from db/schema.sql, percent-encoded socket path in DATABASE_URL).\n\n[install]\nnodejs_22.pkg-path = \"nodejs_22\"          # engines.node >=22.0.0 (package.json)\npostgresql_16.pkg-path = \"postgresql_16\"  # leaf datastore \u2014 pg client + .env.example + start_dev_db.sh\njq.pkg-path = \"jq\"                        # percent-encode the unix socket path into DATABASE_URL\n# 2026-07-18: jq@1.8.2 (Latest) has no x86_64-darwin build; pin 1.8.1, which\n# covers all four systems in options.systems (per-system availability hold).\njq.version = \"1.8.1\"\n\n[vars]\nPGUSER = \"orders\"\nPGDATABASE = \"orders_development\"\nPORT = \"3000\"\n\n[hook]\non-activate = '''\n  # --- Node deps ---\n  if [ ! -d node_modules ] || { [ -f package-lock.json ] && [ package-lock.json -nt node_modules ]; }; then\n    npm install --silent\n  fi\n\n  # --- Postgres dev cluster (socket-only, in the repo tree, per scripts/start_dev_db.sh) ---\n  export PGDATA=\"$FLOX_ENV_PROJECT/target/dev-db\"\n  export SOCKET_DIR=\"$FLOX_ENV_PROJECT/target/dev-db-socket\"\n  mkdir -p \"$SOCKET_DIR\"\n\n  if [ ! -d \"$PGDATA\" ]; then\n    initdb -D \"$PGDATA\" \\\n      --username=\"$PGUSER\" \\\n      --auth=trust \\\n      --no-locale \\\n      --encoding=UTF8 >&2\n    pg_ctl -D \"$PGDATA\" \\\n      -o \"-k $SOCKET_DIR -c listen_addresses=''\" \\\n      -l \"$PGDATA/init.log\" start\n    until pg_isready -h \"$SOCKET_DIR\" -q; do sleep 0.2; done\n    createdb -h \"$SOCKET_DIR\" -U \"$PGUSER\" \"$PGDATABASE\"\n    if [ -f db/schema.sql ]; then\n      psql -h \"$SOCKET_DIR\" -U \"$PGUSER\" -d \"$PGDATABASE\" -q -f db/schema.sql >&2\n    fi\n    pg_ctl -D \"$PGDATA\" stop -m fast\n  fi\n\n  # --- Connection env for the app (pg reads DATABASE_URL) ---\n  # The socket dir contains '/' characters, so percent-encode it before\n  # embedding it as the host component of the libpq connection URI.\n  ENCODED_SOCKET=\"$(printf '%s' \"$SOCKET_DIR\" | jq -sRr @uri)\"\n  export PGHOST=\"$SOCKET_DIR\"\n  export DATABASE_URL=\"postgres://${PGUSER}@${ENCODED_SOCKET}/${PGDATABASE}\"\n'''\n\n[services.postgres]\ncommand = '''\n  exec postgres \\\n    -D \"$FLOX_ENV_PROJECT/target/dev-db\" \\\n    -k \"$FLOX_ENV_PROJECT/target/dev-db-socket\" \\\n    -c listen_addresses=\"\"\n'''\n\n[options]\nsystems = [\"aarch64-darwin\", \"aarch64-linux\", \"x86_64-darwin\", \"x86_64-linux\"]\n",
+      "agent_output_excerpt": "All gates pass. Node 22.23.1, PostgreSQL 16.14, jq 1.8.1 all live inside the environment, and verify.py reports zero violations.\n\n```\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502  orders-api  is now Flox-enabled                                \u2502\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\n\n\u2713  Flox manages  (3 packages \u2014 pinned, same on every machine)\n   node 22.23.1      \u2190 engines.node >=22.0.0 (package.json)\n   postgresql 16.14  \u2190 pg client \u00b7 .env.example \u00b7 scripts/start_dev_db.sh\n   jq 1.8.1          \u2190 percent-encodes the unix socket path into DATABASE_URL\n\n\u2713  Installs automatically on activate\n   npm install       \u2192 express, pg, dotenv (+ jest)\n\n\u2713  Services  (start with `flox services start` / on activate)\n   postgres          socket-only "
+    }
+  ]
+}
