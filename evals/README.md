@@ -237,9 +237,12 @@ No separate weaker-model arm.
 
 `screen.py` is not yet wired into `.github/workflows/evals.yml`; it remains
 a pre-promotion tool run manually or by an agent before a candidate is added
-to `tasks.jsonl` (which *is* gated, per Gate policy above). The choice
-between reps-per-task gating and aggregate pass-rate gating (framed as
-Option A / Option B below) is now decided:
+to `tasks.jsonl` (which *is* gated, per Gate policy above). This decision
+governs the future stretch tier when one is created; no agent-eval CI tier
+exists or is being added now — agent evals stay out of CI, free
+deterministic tests only. The choice between reps-per-task gating and
+aggregate pass-rate gating (framed as Option A / Option B below) is now
+decided:
 
 - **Gate on aggregate pass-rate** (`mean_skills_hard_pass_rate`), not on any
   single candidate's `hard_pass_rate` cell — Option B's shape. A per-task
@@ -254,9 +257,10 @@ Option A / Option B below) is now decided:
 - **The numeric threshold is deferred.** How far `mean_skills_hard_pass_rate`
   may drop before the gate fails is not decided here — it needs a baseline
   of real screening runs on the stretch tier to calibrate against, which
-  does not exist yet. CI wiring may land with the threshold check disabled
-  or report-only until that baseline exists; see AI-483 for the wiring work
-  itself.
+  does not exist yet. Wiring this gate is future work, once a stretch tier
+  exists. It is not part of AI-483: that ticket wires three existing
+  deterministic, API-less unit suites into the current free CI tier and
+  does not implement this gate or add any model-calling tier.
 
 The option analysis this decision was made from, kept as a rationale record:
 
