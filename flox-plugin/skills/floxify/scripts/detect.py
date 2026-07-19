@@ -259,8 +259,10 @@ def _add_clients(dep_names, source, acc, scope="runtime"):
                         "source": source, "scope": scope})
 
 
-# intentional self-contained copy — keep aligned with the twin
-# (parse_manifest) in verify.py
+# related helper: verify.parse_manifest fills the same role (parse
+# manifest TOML) with a deliberately different contract — it returns
+# (dict, error) with no empty-text guard; this one returns dict|None
+# and swallows errors. Not a byte-aligned copy.
 def _parse_toml(text):
     if not text or tomllib is None:
         return None
