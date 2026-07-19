@@ -102,8 +102,10 @@ def advisory_violations(violations_or_result):
 # manifest parsing
 # ---------------------------------------------------------------------------
 
-# intentional self-contained copy — keep aligned with the twin
-# (_parse_toml) in detect.py
+# related helper: detect._parse_toml fills the same role (parse TOML
+# text) with a deliberately different contract — it returns dict|None
+# and swallows errors; this one returns (dict, error) and surfaces the
+# parse failure. Not a byte-aligned copy.
 def parse_manifest(text):
     """Parse manifest.toml text. Returns (manifest_dict, error) — one is None."""
     if tomllib is None:
