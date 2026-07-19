@@ -161,6 +161,31 @@ jobs:
           python3 -m unittest test_run_floxify -v
           echo "::endgroup::"
 
+      - name: Free deterministic unit tests -- eval harness (run.py, screen.py)
+        working-directory: evals
+        run: |
+          set -euo pipefail
+          # Same discipline as the step above: no flox, no credentials, no
+          # network, no API spend. These suites test the harness itself
+          # (run.py, screen.py) rather than the /floxify skill, and import
+          # their modules by bare name (`import run`, `import screen`), so
+          # they need evals/ as their sys.path root -- a separate step
+          # rather than folding them into the evals/floxify step above,
+          # which needs evals/floxify/ instead. test_skill_module_loader.py
+          # is a regression test for those floxify suites' own module
+          # loading and belongs with them, so it runs from evals/floxify/
+          # via `cd` rather than a path hack.
+          echo "::group::run.py deterministic pieces (test_run)"
+          python3 -m unittest test_run -v
+          echo "::endgroup::"
+          echo "::group::screen.py deterministic pieces (test_screen)"
+          python3 -m unittest test_screen -v
+          echo "::endgroup::"
+          echo "::group::_skill_module_loader.py sys.modules collision regression (test_skill_module_loader)"
+          cd floxify
+          python3 -m unittest test_skill_module_loader -v
+          echo "::endgroup::"
+
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         if: steps.changes.outputs.run == 'true'
         with:
