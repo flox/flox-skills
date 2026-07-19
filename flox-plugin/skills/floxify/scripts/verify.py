@@ -253,19 +253,32 @@ def _socket_endpoint_kind(key, value):
     shape the skill now emits by default.
 
     Three recognized shapes:
-      - a `PG*`-named var (libpq convention: PGHOST, PGSOCKET, ...) whose
-        value is an absolute path — unambiguously postgres regardless of
-        what the path itself contains, since PG* is a fixed libpq prefix;
+      - the exact `PGHOST` var (case-insensitive) holding an absolute
+        path — the ONLY libpq var whose absolute-path value denotes a
+        Unix socket DIRECTORY. Every other `PG*` var that also holds an
+        absolute path is a file/dir reference, not an endpoint: `PGDATA`
+        (server-side data dir), `PGSSLCERT`/`PGSSLKEY`/`PGSSLROOTCERT`
+        (TLS material — commonly present on a manifest connecting to a
+        non-local managed postgres over TLS, which must stay clean or
+        ADVISORY, not HARD), `PGPASSFILE`, `PGSERVICEFILE`,
+        `PGSYSCONFDIR`. Matching the bare `PG*` prefix here previously
+        HARD-fired on all of those (code review finding, AI-482 PR #65
+        C1) — narrowed to the exact var name deliberately, not a prefix;
       - a `*_SOCKET`-named var, or any value ending in `.sock`;
       - a `unix://` scheme value.
     For the latter two, kind is read off the combined var name + value
     against `SERVICE_KIND_ALIASES` (the same alias table
     `matching_service_names` uses) — so an unrelated socket path (e.g.
     `DOCKER_HOST=unix:///var/run/docker.sock`) matches no kind and is
-    left alone rather than mis-flagged as a datastore.
+    left alone rather than mis-flagged as a datastore. This is substring
+    matching, inherited from `matching_service_names`' own approach — a
+    non-datastore socket whose path happens to contain a datastore name
+    (e.g. a `redis_exporter` socket at `/run/redis_exporter.sock`) reads
+    as that datastore. Known, accepted inherited behavior on this HARD
+    gate; not tightened here to keep parity with the existing matcher.
     """
     key_lower = key.lower()
-    if key_lower.startswith("pg") and value.startswith("/"):
+    if key_lower == "pghost" and value.startswith("/"):
         return "postgres"
 
     looks_like_socket = (
@@ -564,11 +577,12 @@ def _looks_local(host):
 
 def check_vars_endpoints(detect, manifest):
     """A [vars] value that advertises a datastore connection string, OR a
-    Unix-domain socket (AI-482 — see `_socket_endpoint_kind`: socket-dir
-    `PG*` vars, `*_SOCKET`/`.sock` values, `unix://` URLs), must be backed
-    by a matching [services.*], or by a hook that genuinely starts it via
-    `docker-compose up` (see `_manifest_wires_compose` — repo-side compose
-    FILE presence alone does not count, AI-466 Hole 1).
+    Unix-domain socket (AI-482 — see `_socket_endpoint_kind`: `PGHOST`
+    holding an absolute path, `*_SOCKET`/`.sock` values, `unix://` URLs),
+    must be backed by a matching [services.*], or by a hook that
+    genuinely starts it via `docker-compose up` (see
+    `_manifest_wires_compose` — repo-side compose FILE presence alone
+    does not count, AI-466 Hole 1).
 
     Connection strings: HARD when the host looks local (a Flox service
     could plausibly be the thing missing); ADVISORY when the host doesn't

@@ -1021,6 +1021,32 @@ on-activate = """
         manifest = '[vars]\nDOCKER_HOST = "unix:///var/run/docker.sock"\n'
         self.assertEqual(_violations({}, manifest), [])
 
+    # --- Code review finding (AI-482 PR #65 C1): the bare `PG*`-prefix
+    # rule HARD-fired on standard libpq file/dir-path vars that are not
+    # endpoints -- narrowed to the exact `PGHOST` var name. These lock
+    # the narrowing in. ---
+
+    def test_pgdata_absolute_path_is_not_socket_shaped(self):
+        # PGDATA is the server-side data directory, not a socket -- the
+        # exact false positive the review reproduced.
+        self.assertEqual(
+            _violations({}, '[vars]\nPGDATA = "/var/lib/postgresql/data"\n'), [],
+        )
+
+    def test_pgsslrootcert_absolute_path_is_not_socket_shaped(self):
+        # A TLS cert path for an external managed postgres connection --
+        # the worst-case reproduction: this var alongside a correctly
+        # ADVISORY non-local DATABASE_URL must not itself turn HARD.
+        manifest = '''
+[vars]
+DATABASE_URL = "postgres://prod.rds.amazonaws.com:5432/app?sslmode=verify-full"
+PGSSLROOTCERT = "/etc/ssl/certs/rds-ca.pem"
+'''
+        v = _violations({}, manifest)
+        self.assertEqual(_hard(v), [])
+        rules = _rules(v)
+        self.assertEqual(rules, {"vars-endpoint-not-served"})
+
 
 # ---------------------------------------------------------------------------
 # invariant 4 — [vars] are literal, never `$`-expanded
