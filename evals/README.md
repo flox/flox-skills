@@ -233,13 +233,32 @@ No separate weaker-model arm.
   so this needs no model calls. `evals/test_screen.py` does this for every
   check above.
 
-### CI-gate policy — PROPOSED, not yet decided
+### CI-gate policy — DECIDED (Bill, 2026-07-18)
 
-`screen.py` is not wired into `.github/workflows/evals.yml`; it is a
-pre-promotion tool run manually or by an agent before a candidate is added to
-`tasks.jsonl` (which *is* gated, per Gate policy above). Whether — and how —
-to eventually gate CI on `screen.py` output directly is an open question this
-section only frames; it needs a human decision, not an agent one:
+`screen.py` is not yet wired into `.github/workflows/evals.yml`; it remains
+a pre-promotion tool run manually or by an agent before a candidate is added
+to `tasks.jsonl` (which *is* gated, per Gate policy above). The choice
+between reps-per-task gating and aggregate pass-rate gating (framed as
+Option A / Option B below) is now decided:
+
+- **Gate on aggregate pass-rate** (`mean_skills_hard_pass_rate`), not on any
+  single candidate's `hard_pass_rate` cell — Option B's shape. A per-task
+  gate at the harness's own documented n≥5 reliability floor is too
+  expensive to run on every PR, and at a cheaper n=3 (Option A) it
+  reintroduces the flakiness that floor exists to avoid (see Multi-rep
+  policy above).
+- **Report per-task results alongside the gate.** Only the aggregate blocks
+  the build, but a regression on one candidate must stay visible in CI
+  output (e.g. the step summary), the same way `run.py` reports `by_tier`
+  breakdowns as advisory detail next to its binding gate.
+- **The numeric threshold is deferred.** How far `mean_skills_hard_pass_rate`
+  may drop before the gate fails is not decided here — it needs a baseline
+  of real screening runs on the stretch tier to calibrate against, which
+  does not exist yet. CI wiring may land with the threshold check disabled
+  or report-only until that baseline exists; see AI-483 for the wiring work
+  itself.
+
+The option analysis this decision was made from, kept as a rationale record:
 
 - **Option A: gate at `--reps` ≥ 3 per task.** Run screening at reduced `n=3`
   (cheaper than the documented `n=5` promotion bar) on every PR that touches
@@ -258,8 +277,7 @@ section only frames; it needs a human decision, not an agent one:
   a real regression on one candidate can be masked by noise/improvement on
   others; slower feedback (schedule, not per-PR); needs a committed
   `results/screen.json` golden to diff against, which does not yet exist.
-- **Neither is implemented.** This tier currently gates nothing; discriminator
-  promotion into `tasks.jsonl` is a manual/agent-reviewed step, and *that*
-  promoted task is what `run.py --gate` binds on. Pick one (or a hybrid: A
-  scoped to changed candidates, B as a scheduled backstop) on this PR before
-  wiring either into CI.
+- **Chosen: Option B**, with per-task visibility folded in from Option A's
+  strength (fast localization of *which* candidate regressed) so that
+  advantage isn't lost — gate on the aggregate, but always report the
+  per-task breakdown next to it.
