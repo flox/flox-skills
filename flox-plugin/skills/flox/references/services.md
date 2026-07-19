@@ -148,10 +148,13 @@ machine.
 
 **TCP** — for a client that parses `DATABASE_URL` itself instead of
 resolving `PGHOST` (Prisma and similar ORMs), or when nothing else in
-the environment needs the socket. If something else still expects the
-socket (`psql` invoked without `-h`), keep `-k "$PGHOST"` alongside the
-TCP bind instead of dropping it — TCP is additive here, not a
-replacement.
+the environment needs the socket. Same `PGHOST`/`PGPORT` vars as the
+socket form above — libpq inspects the value and treats a leading `/`
+as a socket directory, anything else as a hostname, so a plain
+hostname here is what makes this the TCP form. If something else
+still expects the socket (`psql` invoked without `-h`), set `PGHOST`
+back to a directory and add `-k "$PGHOST"` alongside the TCP bind
+instead of dropping it — TCP is additive here, not a replacement.
 
 ```toml
 [services.postgres]
@@ -161,16 +164,16 @@ command = '''
     initdb -D "$FLOX_ENV_CACHE/postgres/data"
   fi
   exec postgres -D "$FLOX_ENV_CACHE/postgres/data" \
-    -h "$POSTGRES_HOST" \
-    -p "$POSTGRES_PORT"
+    -h "$PGHOST" \
+    -p "$PGPORT"
 '''
 is-daemon = true
 
 [vars]
-POSTGRES_HOST = "localhost"
-POSTGRES_PORT = "5432"
-POSTGRES_USER = "myuser"
-POSTGRES_DB = "mydb"
+PGHOST = "127.0.0.1"
+PGPORT = "5432"
+PGUSER = "myuser"
+PGDATABASE = "mydb"
 ```
 
 ### Redis
@@ -259,7 +262,11 @@ MONGODB_PORT = "27017"
 **TCP + Unix socket** — `mongod` opens a socket automatically unless
 `--nounixsocket` is passed, but its default directory is a bare
 `/tmp` — scope it to the project with `--unixSocketPrefix`, the same
-way the Postgres and Redis patterns above scope their socket paths:
+way the Postgres and Redis patterns above scope their socket paths.
+The prefix below yields a socket file at
+`/tmp/myapp-mongodb/mongodb-27017.sock` — the filename is always
+`mongodb-<port>.sock`, the same "name it after the project" discipline
+as the Redis `.sock` file above.
 
 ```toml
 [services.mongodb]
@@ -276,6 +283,15 @@ is-daemon = true
 [vars]
 MONGODB_HOST = "127.0.0.1"
 MONGODB_PORT = "27017"
+```
+
+Mongo drivers are URL-driven by convention (`mongodb://` connection
+strings), unlike libpq's `PGHOST` auto-detection — so consuming the
+socket here is the deliberate, advanced case: percent-encode the
+socket path into the URI's host segment:
+
+```
+mongodb://%2Ftmp%2Fmyapp-mongodb%2Fmongodb-27017.sock
 ```
 
 ## Web Server Examples
@@ -322,19 +338,21 @@ WEB_PORT = "8000"
 
 ## Environment Variable Convention
 
-Use variables like `POSTGRES_HOST`, `POSTGRES_PORT` to define where services run.
+Use variables like `REDIS_HOST`, `REDIS_PORT` to define where services run.
 
 These store connection details *separately*:
 - `*_HOST` is the hostname or IP address (e.g., `localhost`, `db.example.com`)
 - `*_PORT` is the network port number (e.g., `5432`, `6379`)
 
-Postgres's socket form (see PostgreSQL above) is the one exception:
-`PGHOST` holds a socket **directory**, not a hostname — that's standard
-libpq behavior, and any driver built on it resolves it automatically.
+Postgres is the one exception: it uses libpq's own `PGHOST`/`PGPORT`
+names instead of the generic `POSTGRES_HOST`/`POSTGRES_PORT` shape, and
+`PGHOST` can hold either a hostname (TCP form) or a socket
+**directory** (socket form) — libpq inspects the value and picks the
+transport automatically. See PostgreSQL above for both forms.
 
 This pattern ensures users can override them at runtime:
 ```bash
-POSTGRES_HOST=db.internal POSTGRES_PORT=6543 flox activate -s
+REDIS_HOST=cache.internal REDIS_PORT=6380 flox activate -s
 ```
 
 Use consistent naming across services so the meaning is clear to any system or person reading the variables.
@@ -353,14 +371,15 @@ command = '''myapp stop'''
 ## Dependent Services
 
 Services can wait for other services to be ready. This example uses
-the Unix-socket Postgres form above (`$PGHOST` is a directory); swap in
-`$POSTGRES_HOST`/`$POSTGRES_PORT` here if this environment uses the TCP
-form instead:
+the Unix-socket Postgres form above (`$PGHOST` is a directory); set
+`PGHOST` to a hostname instead (and drop `-k`) if this environment uses
+the TCP form instead — see PostgreSQL above.
 
 ```toml
 [services.db]
 command = '''
   exec postgres -D "$FLOX_ENV_CACHE/postgres" \
+    -p "$PGPORT" \
     -k "$PGHOST" \
     -c listen_addresses=""
 '''
@@ -423,6 +442,8 @@ flox activate
 ```
 
 ### Check if Service is Listening
+
+TCP:
 ```bash
 # Check if port is open
 lsof -i :8000
@@ -431,6 +452,20 @@ netstat -an | grep 8000
 # Test connection
 curl http://localhost:8000
 nc -zv localhost 8000
+```
+
+Unix socket — the port-based checks above don't apply; check the
+socket file itself:
+```bash
+# Confirm the socket file exists
+test -S /tmp/myapp-postgres/.s.PGSQL.5432 && echo "socket present"
+
+# See what's listening on it
+lsof -U | grep myapp-postgres
+ss -x | grep myapp-postgres
+
+# Test connection (Postgres example — PGHOST as a directory)
+psql -h /tmp/myapp-postgres -p 5432 -U postgres -c 'select 1'
 ```
 
 ## Common Pitfalls
