@@ -1,0 +1,101 @@
+name: "CI"
+
+# Builds and publishes the `skills-flox` Flox package (defined as
+# [build.skills-flox] in .flox/env/manifest.toml) to the flox catalog.
+#
+# Modeled on flox/flox-ai's ci.yml and the floxenvs skills-* packages:
+#   - PRs (and a dispatch with publish=false) only BUILD, per system.
+#   - Pushes to main (and a dispatch with publish=true) PUBLISH to
+#     `flox/skills-flox` for every system.
+#
+# Cross-system builds run on ubuntu runners via remote builders reached
+# over Tailscale, with the private R2 cache configured through
+# flox/configure-nix-action — exactly as flox-ai builds its four systems.
+# Publishing needs FLOX_FLOXHUB_TOKEN (repo/org secret, provisioned
+# outside deltaops, same as flox-ai). The MANAGED_* secrets/vars are
+# provisioned to this repo by deltaops (packages/sync-secrets-to-github.nix).
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish skills-flox to the flox catalog"
+        type: boolean
+        default: false
+  push:
+    branches:
+      - main
+    paths:
+      - "flox-plugin/**"
+      - ".flox/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "flox-plugin/**"
+      - ".flox/**"
+      - ".github/workflows/ci.yml"
+
+concurrency:
+  group: "ci-${{ github.ref }}"
+  cancel-in-progress: true
+
+env:
+  FLOX_DISABLE_METRICS: "true"
+
+jobs:
+  build-and-publish:
+    name: "Build and Publish (${{ matrix.system }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        system:
+          - x86_64-linux
+          - aarch64-linux
+          - x86_64-darwin
+          - aarch64-darwin
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: "Setup Tailscale"
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
+        if: ${{ vars.MANAGED_TAILSCALE_URL != '' }}
+        with:
+          oauth-secret: ${{ secrets.MANAGED_TAILSCALE_AUTH_KEY }}
+          tags: "tag:ci"
+          timeout: "30s"
+          use-cache: true
+
+      - name: "Install Flox"
+        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
+
+      - name: "Configure Nix"
+        uses: flox/configure-nix-action@1ee58d63463cb1870ab73d9df0acfd9d8ba671f8 # main
+        with:
+          github-access-token: ${{ secrets.MANAGED_FLOXBOT_GITHUB_ACCESS_TOKEN_REPO_SCOPE }}
+          substituter: ${{ vars.MANAGED_CACHE_PRIVATE_R2_BUCKET }}
+          substituter-key: ${{ secrets.MANAGED_CACHE_PRIVATE_SECRET_KEY }}
+          aws-access-key-id: ${{ secrets.MANAGED_CACHE_PRIVATE_R2_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.MANAGED_CACHE_PRIVATE_R2_SECRET_ACCESS_KEY }}
+          ssh-key: ${{ secrets.MANAGED_FLOXBOT_SSH_KEY }}
+          remote-builders: ${{ vars.MANAGED_REMOTE_BUILDERS }}
+
+      - name: "Build package"
+        if: >-
+          ${{ github.event_name == 'pull_request'
+            || (github.event_name == 'workflow_dispatch'
+                && inputs.publish == false) }}
+        run: flox build skills-flox --system ${{ matrix.system }}
+
+      - name: "Publish package"
+        if: >-
+          ${{ github.event_name == 'push'
+            || (github.event_name == 'workflow_dispatch'
+                && inputs.publish == true) }}
+        run: flox publish -o flox skills-flox --system ${{ matrix.system }}
+        env:
+          FLOX_FLOXHUB_TOKEN: ${{ secrets.FLOX_FLOXHUB_TOKEN }}
