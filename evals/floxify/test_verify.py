@@ -1444,6 +1444,34 @@ on-activate = """
         self.assertEqual(_violations({}, "[install]\n"), [])
 
 
+class TestMalformedHookNeverRaises(unittest.TestCase):
+    """AI-484: manifest_wires_compose, check_hook_no_mutation, and
+    check_hook_network share a single tokenizer (_hook_statements). A
+    `hook` section declared as a non-table TOML value (F1/F2 shape,
+    same fragility class AI-485 covers for install/vars) is valid TOML
+    but not a dict -- must degrade to "no hook" for all three callers,
+    the same never-raises contract AI-485 established elsewhere,
+    rather than raising AttributeError on `.get("on-activate")`.
+    """
+
+    def _manifest(self, hook_text):
+        manifest, error = verify_mod.parse_manifest(hook_text)
+        self.assertIsNone(error, error)
+        return manifest
+
+    def test_scalar_hook_never_raises_across_all_three_checks(self):
+        manifest = self._manifest('hook = "echo hi"\n')
+        self.assertFalse(verify_mod.manifest_wires_compose(manifest))
+        self.assertEqual(verify_mod.check_hook_no_mutation(manifest), [])
+        self.assertEqual(verify_mod.check_hook_network(manifest), [])
+
+    def test_array_hook_never_raises_across_all_three_checks(self):
+        manifest = self._manifest('hook = ["x"]\n')
+        self.assertFalse(verify_mod.manifest_wires_compose(manifest))
+        self.assertEqual(verify_mod.check_hook_no_mutation(manifest), [])
+        self.assertEqual(verify_mod.check_hook_network(manifest), [])
+
+
 # ---------------------------------------------------------------------------
 # invariant 6 — catalog resolution (mocked flox show, no network)
 # ---------------------------------------------------------------------------
