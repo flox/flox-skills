@@ -58,7 +58,8 @@ DevBox and Flox both use the Nix catalog — package names map almost 1:1.
    - No match → add to ✗ section.
 
 3. If `postgresql`, `redis`, or `mysql` appear in packages AND no `docker-compose.yml` exists:
-   apply the PostgreSQL-as-service / Redis-as-service patterns from Phase 3.
+   apply the PostgreSQL-as-service / Redis-as-service patterns from
+   `references/service-patterns.md`.
 
 4. Skip Phase 1 — go straight to Phase 3 with the packages you've extracted.
 
