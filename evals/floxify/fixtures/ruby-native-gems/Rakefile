@@ -1,0 +1,6 @@
+require "nokogiri"
+require "pg"
+
+task :default do
+  puts "nokogiri #{Nokogiri::VERSION}, pg loaded"
+end

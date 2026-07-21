@@ -905,3 +905,91 @@ credentials and is too slow for per-PR gating; unlike Tier 1, it isn't
 on the weekly schedule either — these are large repos and 4 full runs
 would be expensive on every scheduled tick. Run manually via `--only`
 per repo until there's a cheaper subset or a case for scheduling it.
+
+## Tier 3: known-hard & conversion-mode fixtures (`tier3.jsonl`, stretch — report-only)
+
+Tier 3 (AI-431) adds the fixtures where the skill is *expected* to
+struggle, plus one per dedicated conversion mode. Its whole purpose is
+**trend visibility, not a pass/fail bar** — it is tracked and reported but
+**never gates the build, in any mode**. It reuses the Tier-1 runner
+(`run_floxify.py`) verbatim — same synthetic `fixtures/<id>/` + `gold/<id>.toml`
+layout, same hard-checks, same judge — driven by a separate registry so it
+stays out of the default/weekly gated run:
+
+```bash
+# Report-only run (NO --gate — every entry is stretch-tier):
+python3 run_floxify.py --tasks tier3.jsonl
+
+# One fixture:
+python3 run_floxify.py --tasks tier3.jsonl --only ruby-native-gems
+```
+
+### Why it never gates (structural, not a flag)
+
+`run_floxify.py`'s `--gate` binds **only `should`-tier** tasks
+(`binding = [r for r in scored if r["tier"] == "should"]`). Every Tier-3
+entry is **`stretch`**, so none of them can ever bind the gate — the tier
+is report-only by construction, and `by_tier.stretch` in the run summary is
+where its hard-pass rate and judge score land for trend-watching. (Passing
+`--gate` with only `tier3.jsonl` is a vacuous-gate error by design — there
+are no should-tier tasks to gate; run it without `--gate`.) There is no
+committed baseline and no rate-refresh batch, same posture as Tier 2:
+record one once the skill has a run worth diffing against.
+
+### Fixtures
+
+| id | class | files | what the skill must handle |
+|----|-------|-------|----------------------------|
+| `ruby-native-gems` | known-hard | `Gemfile`, `Gemfile.lock`, `.ruby-version`, `Rakefile` | Ruby 3.3.4 + native-extension gems: nokogiri (libxml2/libxslt), pg (libpq), `unset CPATH`, `$GEM_HOME`/`BUNDLE_PATH` vendoring under `$FLOX_ENV_CACHE` |
+| `mixed-monorepo` | known-hard | `services/{web,api,worker}` + `pnpm-workspace.yaml` | Phase-1 multi-ecosystem detection: Node 20 (pnpm) + Python 3.12 (uv) + Go 1.22, all three at once |
+| `devbox-convert` | conversion-mode | `devbox.json`, `package.json` | DevBox → Flox: `nodejs@20`/`python@3.12`/`jq@latest` map ~1:1; `env`→`[vars]`, `init_hook`→`[hook]` |
+| `mise-convert` | conversion-mode | `.mise.toml`, `README.md` | Mise `[tools]` → Flox: node/python/go/terraform independent resolutions; patch pins may sit ahead of the catalog |
+| `brewfile-convert` | conversion-mode | `Brewfile`, `README.md` | Brewfile → Flox: `brew "…"` → catalog (`awscli`→`awscli2`); `tap` dropped; Brewfile left in place |
+| `devcontainer-convert` | conversion-mode | `.devcontainer/devcontainer.json`, `requirements.txt`, `package.json` | Dev Container full conversion: runtimes from image (`python:3.12`) **and** feature (`node:20`); `containerEnv`→`[vars]`, `postCreateCommand`→`[hook]` (pip into a `$FLOX_ENV_CACHE` venv) |
+
+Same "fixtures ship no `.flox/`" discipline as Tier 1 — the skill writes it.
+
+### Gold manifests
+
+`gold/<id>.toml` — hand-authored, and **every catalog claim
+live-verified via `flox show` on 2026-07-21** (nixpkgs) per the skill's
+Phase-2 reading discipline: each `pkg-path` resolves, and the
+whole manifest co-resolves (`flox list -c`) on the three declared systems
+`["x86_64-linux", "aarch64-linux", "aarch64-darwin"]`. `x86_64-darwin` is
+dropped from `[options].systems` because several of these packages
+(python3, uv, jq, ripgrep, terraform, …) currently have no `x86_64-darwin`
+build in the catalog — the same drop the Tier-2 goldens make. No fixture
+was skipped: all six goldens authored and verified clean.
+
+### Deterministic gates (the only things that DO gate — via `python3 -m unittest`)
+
+Two fast, no-`claude` test modules, mirroring the two-tier shape the rest
+of this suite uses:
+
+- **`test_tier3.py`** — harness plumbing (pure stdlib, no network): the
+  registry is well-formed, every entry is `stretch` (so the tier can never
+  gate), ids don't collide with Tier 1, every declared check is a real
+  `run_floxify.CHECKS` key, and each id has a non-`.flox/` fixture + a
+  parseable gold with `[install]`.
+
+  ```bash
+  python3 -m unittest test_tier3 -v
+  ```
+
+- **`test_tier3_golden_lint.py`** — golden lint over the six Tier-3
+  goldens: `verify.py`'s manifest-only checks (`[vars]` literalness,
+  hook-mutation, catalog resolution) plus the whole-manifest lock leg,
+  reusing `test_golden_lint.py`'s `_attempt_lock` and sharing its
+  `FLOXIFY_GOLDEN_LINT_LIVE_CATALOG` switch. Unlike the Tier-2 goldens
+  there is **no `KNOWN_VIOLATIONS` allowlist** — a Tier-3 gold must be
+  clean.
+
+  ```bash
+  python3 -m unittest test_tier3_golden_lint -v
+  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_tier3_golden_lint -v  # no network
+  ```
+
+The agentic outcome run (`run_floxify.py --tasks tier3.jsonl`) is
+report-only and manual, exactly like Tier 1's `floxify-evals` job and
+Tier 2's `--only` runs — it needs live `flox` + network + Claude
+credentials and is never a per-PR gate.

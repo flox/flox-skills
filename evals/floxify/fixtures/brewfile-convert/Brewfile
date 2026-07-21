@@ -1,0 +1,7 @@
+# Developer CLI tooling, managed with `brew bundle`.
+tap "homebrew/bundle"
+
+brew "jq"
+brew "ripgrep"
+brew "git-lfs"
+brew "awscli"

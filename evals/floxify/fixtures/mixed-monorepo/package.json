@@ -1,0 +1,19 @@
+{
+  "name": "acme-platform",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": "20.x"
+  },
+  "packageManager": "pnpm@9.7.0",
+  "scripts": {
+    "build": "vite build web"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "vite": "^5.3.0"
+  }
+}
