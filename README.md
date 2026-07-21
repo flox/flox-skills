@@ -125,6 +125,30 @@ claude plugin install flox@flox-skills
 Once installed, the plugin automatically activates. Claude Code will use the appropriate skill based on your task:
 - Creating a new project, setting up services/databases, building, containerizing, or publishing? The **flox** skill activates first
 
+#### Codex
+
+The Flox plugin for Codex is defined in `flox-plugin/.codex-plugin/plugin.json`.
+It provides the same skill library as the Claude Code plugin, as native Codex
+skills.
+
+Install the plugin from a clone of this repository:
+
+```bash
+codex plugin marketplace add . # in the top-level directory for this repo
+codex plugin add flox@flox-skills
+```
+
+This registers the local marketplace in your Codex user configuration and
+enables the plugin for new Codex sessions. Verify with:
+
+```bash
+codex plugin list
+```
+
+Once installed, Codex loads the **flox** skill for environment, service,
+build, container, publishing, and CUDA work, and the **floxify** skill for
+onboarding an existing repository to Flox.
+
 #### Other Agents (Cursor, Copilot, Windsurf, Gemini, and more)
 
 For agents that support the [skills.sh](https://skills.sh) standard, you

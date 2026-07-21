@@ -1,0 +1,36 @@
+{
+  "name": "flox",
+  "version": "1.0.0",
+  "description": "Flox development environment and deployment plugin. Includes expert guidance for package management, services, builds and package distribution, containerization, environment composition and layering.",
+  "author": {
+    "name": "Flox",
+    "url": "https://flox.dev/"
+  },
+  "homepage": "https://flox.dev/",
+  "repository": "https://github.com/flox/flox-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "flox",
+    "nix",
+    "developer-environments",
+    "builds",
+    "containers"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Flox",
+    "shortDescription": "Build and manage reproducible Flox development environments.",
+    "longDescription": "Use Flox skills to create reproducible environments, manage packages and services, build and publish packages, containerize environments, share environment layers, and configure CUDA workflows.",
+    "developerName": "Flox",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://flox.dev/",
+    "defaultPrompt": [
+      "Set up a reproducible Flox environment for this project."
+    ],
+    "brandColor": "#0B7F75"
+  }
+}
