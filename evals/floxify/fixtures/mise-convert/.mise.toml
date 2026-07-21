@@ -1,0 +1,8 @@
+[tools]
+node = "20"
+python = "3.12"
+go = "1.22"
+terraform = "1.9"
+
+[env]
+APP_ENV = "development"

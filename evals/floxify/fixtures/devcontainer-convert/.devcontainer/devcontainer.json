@@ -1,0 +1,15 @@
+{
+  "name": "acme-service",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    }
+  },
+  "containerEnv": {
+    "APP_ENV": "development",
+    "PYTHONUNBUFFERED": "1"
+  },
+  "postCreateCommand": "pip install -r requirements.txt && npm install",
+  "forwardPorts": [8000, 5173]
+}
