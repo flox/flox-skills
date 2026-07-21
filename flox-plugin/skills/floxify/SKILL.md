@@ -29,118 +29,10 @@ Input: `$ARGUMENTS`
 
 ---
 
-## Delegating this skill to a cheaper model
-
-**If you are the delegated subagent, skip this section and start at
-Phase 0.** This section is written for the parent session deciding
-whether to delegate — not for the subagent doing the conversion.
-
-A session running a capable model that has been asked to floxify a repo
-may delegate the conversion itself to a cheaper-model subagent —
-provided that subagent has this skill loaded, and its result is gated on
-the skill's own deterministic verify leg rather than trusted on the
-delegate's say-so.
-
-**The verify gate carries correctness, not the model.** Phase 3c grounds
-both ends of the conversion outside the model's own judgment:
-`detect.py` reads the repo's pin files and lockfiles into `$DETECT_JSON`
-before a single manifest line is written, and `verify.py` checks the
-finished manifest against those same grounded facts before the report is
-allowed to appear. A subagent that reaches Phase 4 has therefore passed
-the identical four-step gate a frontier-model run has to pass — there is
-no separate, lower bar for a delegated run. That closed loop is what
-makes delegating to a cheaper model viable here: the skill has already
-moved the source of truth outside the model, so the model only has to
-execute the recipe faithfully, not reason its way to correctness
-unaided.
-
-**The skill is the enabling component — the model alone is not enough.**
-Measured across five fixture repos (Go, Ruby, Rust, Python/uv,
-Node+Postgres), n=8 per cell: claude-haiku-4-5-20251001 running WITHOUT
-this skill is not viable to delegate to — verify rate 0.25 on the
-service-wiring fixture, a 0.80 hard-violation rate across the batch.
-The same model WITH this skill loaded reached 40/40 verified, 40/40
-verify.py-clean, zero hard violations, and 100% of the golden
-hard-checks, at a median $0.21–0.26 per verified conversion — total
-cost including the LLM-judge leg, not agent spend alone; agent-only
-cost is lower — 4–6× under an Opus-plus-skill run against the identical
-gates, at roughly 1.3–1.7× the turns (measured: flox-skills commits
-6521466, c11e02b on `bill/ai-442-efficiency-evidence`). Delegate the
-skill along with the model — a cheap model without it produced
-conversions the batch above would not verify.
-
-**The guarantee is the verify gate, not prose-quality parity.** The
-deterministic checks above are equal across models — verified rate,
-verify.py-clean rate, and hard-pass rate all match between the Haiku
-and Opus arms. The advisory LLM-judge score does not: Haiku-plus-skill
-averaged 2.92/5 against Opus-plus-skill's 4.33/5 on the same rubric
-(same commits as above). Delegating gets you a manifest that clears
-the identical hard bar, not one that reads identically to what a
-frontier model would have written.
-
-**Escalate to the parent model on any verify failure — never ship
-unverified cheap-model output.** If Phase 3c Step 4 still reports a
-violation after a reasonable number of fix-and-recheck cycles, or Steps
-1–3 never reach a clean activation, the subagent's job is to stop and
-report the failure, not loosen the gate, skip straight to the Phase 4
-report, or hand back a manifest nothing has verified. The calling
-session then either retries with its own model or surfaces the failure
-to the developer. This is not optional: the measured numbers above
-describe VERIFIED conversions, not attempted ones, and that distinction
-only holds if every delegated run is actually gated.
-
-**Read the measured numbers as a floor, not a guarantee.** The batch
-above is real — n=8 per cell, five fixture families, two models — but it
-covers one repo shape per ecosystem, not an exhaustive survey. Read
-"measured on five fixture families" as the actual scope of this
-evidence, not "works on any repo." The measured escalation rate for the
-skill-guided cheap-model arm was 0/40 (rule-of-three 95% upper bound
-7.5%) — zero escalations were observed in this batch, not zero possible.
-The verify gate, not this paragraph, is what decides whether any
-individual delegated run shipped correctly.
-
-### Agent-tool recipe
-
-For a Claude Code session with the Agent/Task tool available, the shape
-below spawns a haiku-tier subagent with this skill and applies the
-verify-gate-then-escalate loop above. Confirmed live: a haiku-tier Task
-subagent lists `flox:floxify` in its available skills and can invoke it
-normally through the Skill tool — the premise below holds in practice,
-not just in principle. This is the one recipe this skill recommends —
-adapt the target and model tier, but keep the verify-or-stop
-instruction intact:
-
-```
-Task(
-  subagent_type: "general-purpose",
-  model: "haiku",
-  description: "Floxify <target> — cheap-model delegation, verify-gated",
-  prompt: """
-    Before starting, confirm `flox:floxify` appears in your available
-    skills listing. If it doesn't, stop immediately and report back to
-    the parent session — do not attempt the conversion without it.
-
-    Use the `flox:floxify` skill to set up a Flox environment for
-    <target>. Follow every phase in this skill's SKILL.md exactly,
-    including Phase 3c's verify.py gate (Step 4) — do not skip it.
-
-    If Step 4 still reports a violation after a reasonable number of
-    fix-and-recheck cycles, or Steps 1-3 never reach a clean
-    `flox activate`, STOP: do not print the Phase 4 report. Return the
-    verify.py output (or activation error) and the manifest as written
-    so far, and say plainly that the conversion did not verify.
-
-    Only on a clean verify.py run and clean activation, proceed to the
-    Phase 4 report and return it in full.
-  """
-)
-```
-
-On return: a verified result relays straight to the developer as the
-Phase 4 report. An escalation is not a retry target for the same
-subagent — either run floxify directly with the parent session's own
-model, or, if a partial manifest came back, resume from it rather than
-starting over.
+**Delegating to a cheaper model?** If you are the parent session deciding
+whether to hand this conversion to a cheaper-model subagent, read
+`references/delegation.md` first. **If you are the delegated subagent, skip
+straight to Phase 0** — the verify gate, not this note, carries correctness.
 
 ---
 
@@ -216,11 +108,11 @@ Scanning <project-name>/  detecting runtimes, services, and build tools...
 test -d "$TARGET_DIR/.flox" && echo "HAS_FLOX" || echo "CLEAN"
 ```
 
-**If `HAS_FLOX`:** Switch to audit mode. Do NOT initialize or modify anything.
-See "Audit Mode" below.
+**If `HAS_FLOX`:** Switch to audit mode — do NOT initialize or modify anything.
+Read `references/conversion-modes.md` § Audit Mode and follow it.
 
 **If `devbox.json` exists (and no .flox/):** Switch to DevBox conversion mode.
-See "DevBox Conversion Mode" below.
+Read `references/conversion-modes.md` § DevBox Conversion Mode and follow it.
 
 **If `flake.nix` or `shell.nix` exists (and no .flox/):**
 Ask:
@@ -234,114 +126,6 @@ Which? (default: 1)
 ```
 
 **If clean (.flox/ absent, no Nix files):** Continue to Phase 1.
-
----
-
-## Audit Mode (when .flox/ already exists)
-
-Print: `<project-name>/ already uses Flox. Running gap analysis...`
-
-1. Read `.flox/env/manifest.toml` — note installed packages, whether an
-   `on-activate` hook exists, and whether a `[profile]` section activates the venv.
-2. Run the Phase 1 scan to detect runtimes and services from dep files.
-3. Compare: what do dep files imply vs. what's in the manifest?
-4. Print:
-
-```
-<project-name>/ — Flox gap analysis
-
-Already in manifest.toml (<N> packages):
-  python311       ← .python-version
-  nodejs_20       ← .nvmrc
-  postgresql_16   ← docker-compose.yml
-
-Possibly missing (detected in dep files, not in manifest):
-  redis           → detected via requirements.txt (redis package)
-  pkg-config      → detected via requirements.txt (psycopg2 non-binary)
-
-on-activate hook: [present / missing]
-```
-
-If the hook is missing, suggest:
-```
-No on-activate hook found. To auto-run pip install on activate:
-  flox edit
-  # Add in [hook] section:
-  # on-activate = '''
-  #   pip install --quiet -r requirements.txt
-  # '''
-```
-
-Stop here. **Never modify an existing manifest.**
-
----
-
-## DevBox Conversion Mode
-
-Print: `<project-name>/ uses DevBox. Converting devbox.json → Flox manifest...`
-
-DevBox and Flox both use the Nix catalog — package names map almost 1:1.
-
-1. Read `devbox.json`. Extract:
-   - `packages` — DevBox uses `name@version` syntax; search `"name version"` (e.g. `python@3.12` → search `"python 3.12"`)
-   - `shell.init_hook` → maps to `[hook] on-activate` (copy verbatim — it's already Bash)
-   - `shell.env` / `env` → maps to `[vars]` (copy key/value pairs directly)
-
-2. Resolve each package via `search_packages`. Name quirks:
-   - `rust` / `rustup` → search `"cargo"` and `"rustc"` separately
-   - `mysql` or `mysql@8` → search `"mariadb"`
-   - `pkgconfig` → search `"pkg-config"`
-   - `mongodb` → search `"mongodb"` (community edition shows as `mongodb-ce`)
-   - No match → add to ✗ section.
-
-3. If `postgresql`, `redis`, or `mysql` appear in packages AND no `docker-compose.yml` exists:
-   apply the PostgreSQL-as-service / Redis-as-service patterns from Phase 3.
-
-4. Skip Phase 1 — go straight to Phase 3 with the packages you've extracted.
-
-In the report: `devbox.json → .flox/env/manifest.toml  ·  devbox.json left untouched`
-
----
-
-## Brewfile Conversion Mode
-
-A `Brewfile` signals `brew bundle` is in use — treat it as a high-priority source in
-Phase 1 (not a separate mode).
-
-For each `brew "name"` or `brew "name@version"` line, call `search_packages`:
-- `brew "postgresql@16"` → search `"postgresql 16"`
-- Skip: `cask "..."` (GUI apps), `tap "..."` (package sources), and system utils:
-  `git`, `vim`, `bash`, `grep`, `coreutils`, `wget`, `curl`, `make`
-- Naming quirks: `libpq` → `"postgresql"`, `mysql-client` → `"mariadb"`, `openssl@3` → `"openssl"`
-
-No match → add to ✗ section.
-
----
-
-## Dev Container Full Conversion
-
-When `.devcontainer/devcontainer.json` is present, extract all of:
-
-**`image` field** → parse image name + tag for a runtime hint.
-- `devcontainers/python:3.12` → search `"python 3.12"`, `devcontainers/node:22` → search `"nodejs 22"`
-- Strip suffixes: `node:22-alpine`, `python:3.12-slim` → strip suffix, search runtime + version
-- `ubuntu:22.04`, `debian:bookworm` → base OS only; no runtime to extract
-- Rust: search `"cargo"` + `"rustc"`
-
-**`features` field** → for each entry, take the last URI path segment as the tool name;
-include `"version"` if present.
-- `features/github-cli:1` → search `"gh"`, `features/aws-cli:1` → search `"awscli"`
-- `features/kubectl-helm-minikube:1` → search `"kubectl"` + `"helm"` separately
-- `features/dotnet:1` with `{"version": "8"}` → search `"dotnet sdk 8"`
-
-**`postCreateCommand`** → copy verbatim into `[hook] on-activate` (it's already shell).
-If it's a script reference (e.g. `"scripts/setup.sh"`), note it in the report — don't inline it.
-
-**`containerEnv`** → copy each key/value into `[vars]` directly.
-
-**`forwardPorts`** → note in report as context only; don't configure anything.
-
-**`remoteUser` / `mounts`** → skip (container-specific, no Flox equivalent).
 
 ---
 
@@ -421,9 +205,9 @@ their own project as each line appears. **Do not buffer — print as each file i
 
 **Files to scan** (priority order — higher sources win for version numbers):
 
-1. `.devcontainer/devcontainer.json` — full conversion: `image`, `features`, `postCreateCommand`, `containerEnv` (see Dev Container Full Conversion above)
-2. `devbox.json` — if present, handled via DevBox Conversion Mode (skip to Phase 3)
-3. `Brewfile` — `brew "name"` lines mapped to Flox catalog (see Brewfile Conversion Mode above)
+1. `.devcontainer/devcontainer.json` — full conversion: `image`, `features`, `postCreateCommand`, `containerEnv` (see `references/conversion-modes.md` § Dev Container Full Conversion)
+2. `devbox.json` — if present, handled via `references/conversion-modes.md` § DevBox Conversion Mode (skip to Phase 3)
+3. `Brewfile` — `brew "name"` lines mapped to Flox catalog (see `references/conversion-modes.md` § Brewfile Conversion Mode)
 4. `.github/workflows/*.yml` — `setup-node`/`setup-python`/`setup-go` action version
    values; `services:` blocks with image names and versions; `apt-get install -y` lines
 5. `.gitlab-ci.yml` — `image:` field for runtime hints; `before_script` apt-get installs
@@ -1537,7 +1321,10 @@ Wait for the user's response, then:
   Then say: "That's your environment working. Run `flox activate` any time to enter it.
   When you're ready to commit this, say **migrate** — but only in this conversation,
   since that's where the context lives."
-- **2 (Migrate):** Proceed directly to Phase 5.
+- **2 (Migrate):** The user chose migrate — or said "migrate", "I'm
+  ready", "commit it", "let's go", "do it", or any clear affirmation
+  after the report. Read `references/migration.md` and follow it. Never run
+  migration automatically — only on this explicit request.
 - **3 (Leave it):** Say: "No problem — run `flox activate` whenever you're ready. Say 'migrate' to commit it."
 - **4 (Remove it):** Run `rm -rf "$TARGET_DIR/.flox/"`, confirm it's gone:
   "Done. Zero trace — nothing else was touched."
@@ -1567,139 +1354,3 @@ Never pretend a package was added if search returned no results.
 **Docker-compose-managed services (ClickHouse, Kafka, Temporal, etc.):**
 Wire via the docker-compose pattern in Phase 2. List in ⚠ Services section only —
 not in ✓ Runtime or ✓ Installs. Never claim these are managed by Flox directly.
-
----
-
-## Phase 5: Migration (triggered on demand)
-
-**Trigger:** User says "migrate", "I'm ready", "commit it", "let's go", "yes migrate",
-"do it", or any clear affirmation after the Phase 4 report.
-
-**Do NOT run automatically.** Only execute when explicitly requested.
-
-### Steps
-
-**1. Create a branch**
-
-```bash
-cd "$TARGET_DIR"
-# Check if branch already exists
-git show-ref --verify --quiet refs/heads/add-flox-environment \
-  && echo "BRANCH_EXISTS" || echo "BRANCH_NEW"
-```
-
-- `BRANCH_NEW` → `git checkout -b add-flox-environment`
-- `BRANCH_EXISTS` → ask the user: "Branch `add-flox-environment` already exists. Switch to it
-  and continue, or use a different name?" Do not switch automatically.
-
-**2. Update the README**
-
-Find the README: `README.md` → `README.rst` → `docs/CONTRIBUTING.md` → `CONTRIBUTING.md`
-(first one found). If none exist, create a minimal `README.md` with just the Flox section.
-
-**Most repos already have a README — read it first, then make the smallest possible change.**
-
-Look for a heading containing any of these words (case-insensitive):
-"getting started", "development", "setup", "local development", "contributing", "install",
-"quickstart", "prerequisites", "usage"
-
-- **Section found**: INSERT these two lines at the top of that section's content,
-  before any existing text. Do not remove or rewrite existing instructions.
-
-  ```markdown
-  Run `flox activate` to set up your development environment — it installs all runtimes
-  and dependencies automatically. ([Install Flox](https://flox.dev/docs/install-flox/install))
-  ```
-
-  If the old tool (DevBox, Mise, etc.) has a specific install command in that section,
-  replace just that command line. Leave everything else untouched.
-
-- **No matching section found**: INSERT a new `## Getting started` section after the
-  first paragraph (after the project description, before any other sections).
-
-  ```markdown
-  ## Getting started
-
-  Run `flox activate` to set up your development environment — it installs all runtimes
-  and dependencies automatically. ([Install Flox](https://flox.dev/docs/install-flox/install))
-  ```
-
-Never rewrite or restructure the README beyond the single insertion point.
-
-**3. Remove old tool config** (context-dependent — never auto-remove, always confirm)
-
-| Detected tool | Action |
-|---------------|--------|
-| `devbox.json` | Ask: "Remove devbox.json? Flox replaces it completely." If yes: `git rm devbox.json`; also remove `.devbox/` if present |
-| `.mise.toml` | Ask: "Remove .mise.toml?" If yes: `git rm .mise.toml` |
-| `.tool-versions` | Ask: "Remove .tool-versions? (asdf/mise pin file)" If yes: `git rm .tool-versions` |
-| `Brewfile` | Do NOT remove — Homebrew is system-wide. Note: "Brewfile left in place (Homebrew is system-wide; Flox handles project deps)" |
-| `.devcontainer/` | Do NOT remove — serves Codespaces/cloud CI. Note: ".devcontainer/ left in place for cloud/Codespaces use" |
-| None | Nothing to remove |
-
-**4. Update .gitignore**
-
-Check whether `.flox/cache/` is already gitignored:
-```bash
-grep -q 'flox/cache' "$TARGET_DIR/.gitignore" 2>/dev/null && echo "ALREADY_IGNORED" || echo "NEEDS_ENTRY"
-```
-
-If `NEEDS_ENTRY`: append to `.gitignore`:
-```
-# Flox local cache (venvs, build artifacts — not shared)
-.flox/cache/
-```
-
-The `.flox/env/` directory (manifest, lockfile) IS committed — that's the point.
-The `.flox/cache/` directory (venvs, cargo target, etc.) is machine-local and should not be.
-
-**5. Stage and commit**
-
-```bash
-cd "$TARGET_DIR"
-git add .flox/env/
-git add .gitignore
-git add README.md   # (or README.rst, CONTRIBUTING.md — whichever was modified)
-# If old tool files were git rm'd, they're already staged
-git commit -m "Add Flox development environment"
-```
-
-**6. Print migration summary**
-
-```
-─────────────────────────────────────────────────────────────────
-
-✓  Committed  (branch: add-flox-environment)
-
-   Modified:  README.md  ← updated dev setup section
-   Added:     .flox/env/manifest.toml
-   Removed:   devbox.json        ← (or "left in place" for Brewfile / devcontainer)
-
-   Commit:    "Add Flox development environment"
-
-Next steps:
-  git push -u origin add-flox-environment
-  → open a PR — teammates can try it before it merges
-
-  flox push
-  → share environment on FloxHub (optional)
-  → teammates: flox activate -r <you>/<project-name>
-  → first time? flox auth login
-
-  In CI (GitHub Actions, etc.):
-  → install Flox, then: flox activate -- <your-test-command>
-  → see: https://flox.dev/docs/install-flox/install
-
-─────────────────────────────────────────────────────────────────
-```
-
-Then ask: "Ready to push to origin? I can run `git push -u origin add-flox-environment`."
-
-### Migration rules
-
-- Never `git push` without explicit user confirmation
-- Never remove Brewfile or `.devcontainer/` — they serve different purposes
-- Always confirm before `git rm` on any file
-- If git is not initialized (`git status` fails): skip branch creation, just update
-  the README and note: "No git repo found — commit manually when ready"
-- Commit message is always exactly `"Add Flox development environment"` — no variations
