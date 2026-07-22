@@ -121,8 +121,8 @@ authoritative; use them inline without opening a reference file.
 ## Working Style & Structure
 
 - Use **modular, idempotent bash functions** in hooks
-- Never, ever use absolute paths. Flox environments are designed to be reproducible. Use Flox's environment variables instead
-- I REPEAT: NEVER, EVER USE ABSOLUTE PATHS. Don't do it. Use `$FLOX_ENV` for environment-specific runtime dependencies; use `$FLOX_ENV_PROJECT` for the project directory
+- Don't hardcode machine-specific absolute paths in a manifest or hook — they break reproducibility on the next machine. Reach for Flox's environment variables instead: `$FLOX_ENV` for environment-specific runtime dependencies, `$FLOX_ENV_PROJECT` for the project directory, `$FLOX_ENV_CACHE` for persistent local data
+- The exception is a deliberate, project-scoped path that isn't machine-specific state — e.g. a short Unix-socket path like `/tmp/<project>-postgres` (see `references/services.md`), or paths inside a container's own filesystem
 - Name functions descriptively (e.g., `setup_postgres()`)
 - Consider using **gum** for styled output when creating environments for interactive use; this is an anti-pattern in CI
 - Put persistent data/configs in `$FLOX_ENV_CACHE`
@@ -165,12 +165,12 @@ flox --version
 
 ## Flox Basics
 
-- Flox is built on Nix; fully Nix-compatible
+- Flox is built on Nix and can consume Nix flakes and expressions
 - Flox uses nixpkgs as its upstream; packages are _usually_ named the same; unlike nixpkgs, Flox Catalog has millions of historical package-version combinations
 - Key paths:
   - `.flox/env/manifest.toml`: Environment definition
   - `.flox/env.json`: Environment metadata
-  - `$FLOX_ENV_CACHE`: Persistent, local-only storage (survives `flox delete`)
+  - `$FLOX_ENV_CACHE`: Persistent, local-only storage under `.flox/cache` (survives `flox activate` and rebuilds; removed by `flox delete`)
   - `$FLOX_ENV_PROJECT`: Project root directory (where .flox/ lives)
   - `$FLOX_ENV`: basically the path to `/usr`: contains all the libs, includes, bins, configs, etc. available to a specific flox environment
 - Always use `flox init` to create environments
@@ -198,7 +198,7 @@ many versions:
 
 - **Search first, and clarify if there are multiple matches.** Names don't
   always match upstream expectations (e.g. `python3` vs `python39`), and search
-  is case-sensitive.
+  is case-insensitive.
 - **Never guess — verify before you pin.** Pin only to a name and version that
   `flox show <pkg>` actually lists; if the exact version isn't there, pick the
   closest available (or override — see below). Do not invent a version string.
@@ -400,8 +400,8 @@ Profile code runs for each layered/composed environment; keep auto-run display l
 ### Manifest Syntax Errors
 Manifest syntax errors prevent ALL flox commands from working
 
-### Package Search Case Sensitivity
-Package search is case-sensitive; use `flox search --all` for broader results
+### Package Search Is Case-Insensitive
+Package search matches case-insensitively; use `flox search --all` for broader results
 
 ## Troubleshooting Tips
 
