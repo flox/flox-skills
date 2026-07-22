@@ -19,7 +19,21 @@ Two skills covering the Flox lifecycle, from a blank directory to a published bu
   starting any new project.
 - **`floxify`** — Onboard an *existing* repo to Flox. It detects your runtimes,
   services, and build tools, then writes `.flox/env/manifest.toml` so that
-  `flox activate` becomes the only setup command a new developer needs.
+  `flox activate` becomes the only setup command a new developer needs. It
+  handles a broad range of project shapes:
+  - **Languages & runtimes** — Python, Node, Ruby, Go, Rust, PHP, Elixir, .NET,
+    Deno, Bun, and more, pinned from the files already in your repo
+    (`.python-version`, `.nvmrc`, `go.mod`, `rust-toolchain.toml`, …).
+  - **Existing tool configs** — converts DevBox (`devbox.json`), Dev Containers
+    (`.devcontainer/`), Homebrew `Brewfile`s, and `asdf`/`mise` pins, and
+    coexists with `flake.nix`/`shell.nix`.
+  - **Package managers** — wires up uv, Poetry, npm, pnpm, Yarn, Bundler, Cargo,
+    Composer, and Mix to install dependencies automatically on activation.
+  - **Services** — stands up PostgreSQL, Redis, MySQL/MariaDB, and MongoDB as
+    managed Flox services, and hands `docker-compose`, Tilt, or Sentry
+    devservices topologies back to their own orchestrator.
+  - **Re-runs safely** — on a repo that already uses Flox, it audits for gaps
+    instead of overwriting your manifest.
 
 Each skill keeps a lean core and loads detailed reference material only when your
 task calls for it — so the agent stays fast and focused.
