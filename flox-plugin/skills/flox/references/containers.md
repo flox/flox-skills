@@ -168,7 +168,6 @@ command = '''
   fi
   exec postgres -D /data/postgres/pgdata -h 0.0.0.0
 '''
-is-daemon = true
 
 [containerize.config]
 exposed-ports = ["5432/tcp"]
@@ -230,11 +229,9 @@ docker run -it team-python-ml:latest
 ```toml
 [services.db]
 command = '''exec postgres -D "$FLOX_ENV_CACHE/postgres"'''
-is-daemon = true
 
 [services.cache]
 command = '''exec redis-server'''
-is-daemon = true
 
 [services.api]
 command = '''exec python -m uvicorn main:app --host 0.0.0.0'''

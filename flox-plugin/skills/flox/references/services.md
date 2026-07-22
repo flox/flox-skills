@@ -3,8 +3,8 @@
 ## Running Services in Flox Environments
 
 - Start with `flox activate --start-services` or `flox activate -s`
-- Define `is-daemon`, `shutdown.command` for background processes
-- Keep services running using `tail -f /dev/null`
+- Run the service in the foreground with `exec` (the default) — Flox manages it; a foreground process needs neither `is-daemon` nor `shutdown.command`
+- Only a process that *daemonizes itself* (forks and exits) needs `is-daemon = true`, and it then **requires** a `shutdown.command`
 - Use `flox services status/logs/restart` to manage (must be in activated env)
 - Service commands don't inherit hook activations; explicitly source/activate what you need
 
@@ -167,7 +167,6 @@ command = '''
     -h "$PGHOST" \
     -p "$PGPORT"
 '''
-is-daemon = true
 
 [vars]
 PGHOST = "127.0.0.1"
@@ -195,7 +194,6 @@ command = '''
     --port "$REDIS_PORT" \
     --dir "$FLOX_ENV_CACHE/redis"
 '''
-is-daemon = true
 
 [vars]
 REDIS_HOST = "127.0.0.1"
@@ -252,7 +250,6 @@ command = '''
     --port "$MONGODB_PORT" \
     --nounixsocket
 '''
-is-daemon = true
 
 [vars]
 MONGODB_HOST = "127.0.0.1"
@@ -278,7 +275,6 @@ command = '''
     --port "$MONGODB_PORT" \
     --unixSocketPrefix /tmp/myapp-mongodb
 '''
-is-daemon = true
 
 [vars]
 MONGODB_HOST = "127.0.0.1"
@@ -361,7 +357,9 @@ Use consistent naming across services so the meaning is clear to any system or p
 
 ```toml
 [services.myapp]
-command = '''exec myapp start'''
+# `myapp start` forks a background daemon and returns — that's why this needs
+# is-daemon + a shutdown command (a foreground `exec` service needs neither).
+command = '''myapp start'''
 is-daemon = true
 
 [services.myapp.shutdown]
@@ -383,7 +381,6 @@ command = '''
     -k "$PGHOST" \
     -c listen_addresses=""
 '''
-is-daemon = true
 
 [services.api]
 command = '''
@@ -421,7 +418,7 @@ command = '''
 - Always make host/port configurable via vars for network services
 - Use `exec` to replace the shell process with the service command
 - Services must activate venv inside service command, not rely on hook activation
-- Use `is-daemon = true` for background processes that should detach
+- Run services in the foreground with `exec` (the default); only set `is-daemon = true` — which then requires a `shutdown.command` — for a command that daemonizes itself
 
 ## Debugging Service Issues
 

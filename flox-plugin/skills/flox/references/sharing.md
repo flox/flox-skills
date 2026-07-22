@@ -135,13 +135,15 @@ POSTGRES_PORT = "5433"   # non-standard port
 - Avoid auto-run/display logic in `[profile]` (runs once per composed env)
 - Test each environment standalone (`flox activate`) before composing
 
-Pin or float included versions:
+Included environments are captured at their current version when you add
+them — there is no inline version field. Pull later changes in with `flox
+include upgrade` (all includes) or `flox include upgrade <name>` (one):
 
 ```toml
 [include]
 environments = [
-    { remote = "team/base", version = "v1.2.3" },   # pinned
-    { remote = "team/tools" }                         # latest
+    { remote = "team/base" },
+    { remote = "team/tools" }
 ]
 ```
 
@@ -203,7 +205,6 @@ command = '''
   exec postgres -D "$FLOX_ENV_CACHE/postgres/data" \
     -h "$POSTGRES_HOST" -p "$POSTGRES_PORT"
 '''
-is-daemon = true
 
 [vars]
 POSTGRES_HOST = "localhost"
