@@ -270,6 +270,18 @@ def main():
             "pass-rates — single runs have a high cell-level flip rate."
         ),
     )
+    ap.add_argument(
+        "--setting-sources",
+        default="project,local",
+        help=(
+            "value passed to `claude --setting-sources` for every arm (default "
+            "'project,local'). Dropping 'user' suppresses globally-enabled "
+            "plugins so the baseline is a true bare model even on hosts where "
+            "the Flox plugin is enabled in ~/.claude/settings.json. Pass "
+            "'all' (or '') to load all sources — only correct where no Flox "
+            "plugin is globally enabled, e.g. clean CI."
+        ),
+    )
     args = ap.parse_args()
 
     # Propagate model override into run.py's module-level constant so that
@@ -277,6 +289,11 @@ def main():
     _run.MODEL = args.model
     if args.plugin_dir:
         _run.PLUGIN_DIR = Path(args.plugin_dir).resolve()
+    # Setting-source isolation (see run.py SETTING_SOURCES). 'all'/'' -> None
+    # (load every source, run.py's original behavior).
+    _run.SETTING_SOURCES = (
+        None if args.setting_sources.lower() in ("", "all") else args.setting_sources
+    )
 
     # Skill and Read tools allowed; for the baseline arm no plugin is loaded
     # so the Skill tool is effectively unavailable — passing it is harmless.
@@ -336,6 +353,7 @@ def main():
     summary = {
         "model": args.model,
         "reps": args.reps,
+        "setting_sources": _run.SETTING_SOURCES or "all",
         "mean_baseline_hard_pass_rate": mean_rate("baseline"),
         "mean_skills_hard_pass_rate": mean_rate("skills"),
         "total_cost_usd": total_cost_usd,

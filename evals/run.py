@@ -23,6 +23,19 @@ HERE = Path(__file__).resolve().parent
 PLUGIN_DIR = HERE.parent / "flox-plugin"
 MODEL = "claude-opus-4-8"  # pinned for reproducible scores; override with --model
 
+# Setting-source isolation (screening only). When set (e.g. "project,local"),
+# each `claude` call is invoked with `--setting-sources <value>`, which drops
+# USER-level settings — most importantly `enabledPlugins`. On a machine where
+# the Flox plugin is globally enabled in ~/.claude/settings.json (as it is on
+# the dev/night-shift hosts), the plain baseline arm would otherwise load that
+# plugin and stop being a bare model — the baseline answers "Based on the Flox
+# guide" and the discrimination signal collapses to zero. Excluding "user"
+# suppresses the global plugin while OAuth credentials (a separate file) still
+# load, so `flox run`/`flox activate allow` etc. are only known to the skills
+# arm (which re-adds exactly one plugin via --plugin-dir). None = load all
+# sources (run.py's original behavior; the gate is unaffected by default).
+SETTING_SOURCES = None
+
 ANSWER_SUFFIX = (
     "\n\nProvide the COMPLETE solution as your written answer: the manifest "
     "(in a ```toml code block) and the exact flox commands, with a brief "
@@ -124,6 +137,11 @@ def run_claude(prompt, mode, allow_tools, timeout=420, retries=3):
     cmd = ["claude", "-p", prompt, "--model", MODEL, "--output-format", "json"]
     if allow_tools:
         cmd += ["--allowedTools", *allow_tools]
+    # Isolate from globally-enabled plugins so the baseline stays a bare model
+    # (see SETTING_SOURCES above). Applies to every arm — baseline, skills, and
+    # judge — so the only Flox context in the skills arm is the --plugin-dir one.
+    if SETTING_SOURCES:
+        cmd += ["--setting-sources", SETTING_SOURCES]
     if mode == "skills":
         cmd += ["--plugin-dir", str(PLUGIN_DIR), "--strict-mcp-config"]
     elif mode == "baseline":
