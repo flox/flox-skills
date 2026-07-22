@@ -3,7 +3,7 @@
 ## Core Commands
 
 ```bash
-flox publish                    # Publish all packages
+flox publish                    # Publish the sole build (only when one is defined)
 flox publish my_package         # Publish single package
 flox publish -o myorg package   # Publish to organization
 flox publish -o myuser package  # Publish to personal namespace
@@ -44,7 +44,7 @@ flox build myapp
 flox publish -o myorg myapp
 ```
 
-The published package contains BINARIES/ARTIFACTS (what's in `$out/`), NOT source code.
+The published package contains BINARIES/ARTIFACTS (what's in `$out/`) — not source code, unless the build copies it into `$out/`.
 
 **Phase 3: Runtime Environment**
 ```toml
@@ -81,7 +81,7 @@ flox auth login
 # Publish single package
 flox publish my_package
 
-# Publish all packages
+# Publish the single defined build (errors if there are several — name one)
 flox publish
 
 # Publish to organization
