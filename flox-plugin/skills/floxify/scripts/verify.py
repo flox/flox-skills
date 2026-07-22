@@ -1024,7 +1024,7 @@ def _pinned_version_match(declared, catalog_versions):
 
     Confirmed against a live `flox edit` (not just the doc): a declared
     version with FEWER dot-segments than a catalog version is a prefix
-    wildcard — "14" matches "14.9" (flox.md: "partial versions act as
+    wildcard — "14" matches "14.9" (flox SKILL.md: "partial versions act as
     wildcards ... latest 1.2.X"); a full-length declaration must match a
     catalog version segment-for-segment, which also catches a package
     whose catalog scheme carries a name prefix the manifest omitted

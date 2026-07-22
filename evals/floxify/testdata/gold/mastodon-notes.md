@@ -109,7 +109,7 @@ isolated `ruby_4_0` and `nodejs_24` each into their own separate
 libraries its own gems compile against (`postgresql_14` for `pg`, `vips`
 for ruby-vips, `icu` for charlock_holmes, `libidn` for idn-ruby) --
 exactly the kind of split a pkg-group's "upgrade together to maintain
-compatibility" contract (flox.md §5) exists to prevent. Tried one
+compatibility" contract (flox skill, [install]) exists to prevent. Tried one
 restructure instead: `ruby_4_0` sharing a single group with
 `postgresql_14`/`vips`/`icu`/`libidn` (keeping `nodejs_24` in its own
 separate group, since Node has no native-gem coupling to those
