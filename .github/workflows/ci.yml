@@ -125,30 +125,32 @@ jobs:
           echo "One or more systems failed."
           exit 1
 
-  # Slack #pod-ai only when a main build/publish actually failed — PRs
-  # surface failures in the checks UI and shouldn't page the channel.
+  # Slack #pod-ai only when a main publish actually failed — PRs surface
+  # failures in the checks UI and shouldn't page the channel. Reuses the
+  # org MANAGED_SLACK_WEBHOOK with a SLACK_CHANNEL override, same as
+  # claude-plugins.
   report-failure:
     name: "Report Failure"
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: ["build-and-publish"]
+    needs: ["summary"]
     if: >-
       always()
-      && github.ref_name == 'main'
       && github.event_name == 'push'
-      && needs.build-and-publish.result == 'failure'
+      && github.ref_name == 'main'
+      && needs.summary.result == 'failure'
     steps:
       - name: "Slack Notification"
         uses: rtCamp/action-slack-notify@33ca3be66c6f378fe1610fd1d5258632dbed5e58 # v2
         env:
           SLACK_CHANNEL: "pod-ai"
+          SLACK_WEBHOOK: "${{ secrets.MANAGED_SLACK_WEBHOOK }}"
           SLACK_TITLE: "flox-skills publish failed on main"
-          SLACK_FOOTER: "Thanks for looking at it."
-          SLACK_WEBHOOK: "${{ secrets.MANAGED_POD_AI_SLACK_WEBHOOK }}"
+          SLACK_MESSAGE: >-
+            skills-flox failed to publish
+            (<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|run>).
+          SLACK_FOOTER: "flox-skills"
           SLACK_USERNAME: "GitHub"
           SLACK_ICON_EMOJI: ":poop:"
           SLACK_COLOR: "#ff2800"
           SLACK_LINK_NAMES: true
-          SLACK_MESSAGE: >-
-            skills-flox failed to publish
-            (<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|run>).
