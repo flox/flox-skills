@@ -10,19 +10,6 @@ provided that subagent has this skill loaded, and its result is gated on
 the skill's own deterministic verify leg rather than trusted on the
 delegate's say-so.
 
-**The verify gate carries correctness, not the model.** Phase 3c grounds
-both ends of the conversion outside the model's own judgment:
-`detect.py` reads the repo's pin files and lockfiles into `$DETECT_JSON`
-before a single manifest line is written, and `verify.py` checks the
-finished manifest against those same grounded facts before the report is
-allowed to appear. A subagent that reaches Phase 4 has therefore passed
-the identical four-step gate a frontier-model run has to pass — there is
-no separate, lower bar for a delegated run. That closed loop is what
-makes delegating to a cheaper model viable here: the skill has already
-moved the source of truth outside the model, so the model only has to
-execute the recipe faithfully, not reason its way to correctness
-unaided.
-
 **The skill is the enabling component — the model alone is not enough.**
 Measured across five fixture repos (Go, Ruby, Rust, Python/uv,
 Node+Postgres), n=8 per cell: claude-haiku-4-5-20251001 running WITHOUT
@@ -38,14 +25,23 @@ gates, at roughly 1.3–1.7× the turns (measured: flox-skills commits
 skill along with the model — a cheap model without it produced
 conversions the batch above would not verify.
 
-**The guarantee is the verify gate, not prose-quality parity.** The
-deterministic checks above are equal across models — verified rate,
-verify.py-clean rate, and hard-pass rate all match between the Haiku
-and Opus arms. The advisory LLM-judge score does not: Haiku-plus-skill
-averaged 2.92/5 against Opus-plus-skill's 4.33/5 on the same rubric
-(same commits as above). Delegating gets you a manifest that clears
-the identical hard bar, not one that reads identically to what a
-frontier model would have written.
+**The verify gate carries correctness, not the model.** Phase 3c grounds
+both ends of the conversion outside the model's own judgment: `detect.py`
+reads the repo's pin files and lockfiles into `$DETECT_JSON` before a
+single manifest line is written, and `verify.py` checks the finished
+manifest against those same grounded facts before the report is allowed
+to appear. A subagent that reaches Phase 4 has therefore passed the
+identical four-step gate a frontier-model run has to pass — there is no
+separate, lower bar for a delegated run, and the deterministic checks
+above bear that out: verified rate, verify.py-clean rate, and hard-pass
+rate all match between the Haiku and Opus arms. That closed loop is what
+makes delegating viable: the skill has moved the source of truth outside
+the model, so the model only executes the recipe rather than reasoning
+its way to correctness unaided. What does NOT match is the advisory
+LLM-judge score — Haiku-plus-skill averaged 2.92/5 against
+Opus-plus-skill's 4.33/5 on the same rubric (same commits as above).
+Delegating gets you a manifest that clears the identical hard bar, not
+one that reads identically to what a frontier model would have written.
 
 **Escalate to the parent model on any verify failure — never ship
 unverified cheap-model output.** If Phase 3c Step 4 still reports a
