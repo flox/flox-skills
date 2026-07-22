@@ -302,11 +302,10 @@ Resolving packages...
 
 ### Reading `flox show` correctly
 
-Every wrong catalog claim found in review (both AI-451's false-hallucination
-accusation and AI-455's per-system misses) traced back to the same root
-cause: reading only the `Latest:` headline and stopping there. `flox show
-<pkg-path>` prints far more than that one line — read all of it before
-asserting anything about a package:
+Wrong catalog claims in review (AI-451's false-hallucination accusation,
+AI-455's per-system misses) all traced to one root cause: reading only the
+`Latest:` headline and stopping. `flox show <pkg-path>` prints far more —
+read all of it before asserting anything about a package:
 
 1. **Read the FULL version list, not just `Latest:`.** The `Other versions:`
    block is the actual catalog, often 20+ entries deep. A version the project
@@ -508,12 +507,9 @@ and belongs in the conversion report rather than `[install]`.
 
 - **CI-only third-party lint/format tooling** (`taplo`, `typos`, `shfmt`,
   `pgformatter`, and similar standalone tools with no toolchain
-  relationship to the runtime you're installing) is opt-in, not a default
-  install — mention it in the conversion report instead of adding it to
-  `[install]`, so the developer can bring it in themselves if they want it.
-  A lint/format tool that ships from the SAME catalog page as the
-  language's own toolchain (`clippy`/`rustfmt` alongside `cargo`/`rustc`
-  for Rust) is a different case — see the carve-out above.
+  relationship to the runtime you're installing) is opt-in per the
+  carve-out above — mention it in the conversion report instead of adding
+  it to `[install]`, so the developer can bring it in themselves.
 - **Don't install `git` as an env dependency** unless a build step
   genuinely shells out to it — a `build.rs` that clones a dependency, or a
   `git+` source in `Cargo.lock`/the lockfile. Lemmy has zero `git+` sources
