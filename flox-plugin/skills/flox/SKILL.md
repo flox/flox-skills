@@ -294,20 +294,19 @@ example.priority = 3                        # Optional: resolve file conflicts (
 ### Practical Examples
 
 ```toml
-# Platform-specific Python
+# Platform-specific Python (constrain per package with <id>.systems)
 [install]
 python.pkg-path = "python311Full"
+python.systems = ["x86_64-linux", "aarch64-linux"]  # Linux only
 uv.pkg-path = "uv"
-systems = ["x86_64-linux", "aarch64-linux"]  # Linux only
+uv.systems = ["x86_64-linux", "aarch64-linux"]
 
-# Version-pinned with custom priority
-[nodejs]
+# Version-pinned with custom priority — every key is <id>.-prefixed under [install]
 nodejs.pkg-path = "nodejs"
-version = "^20.0"
-priority = 1  # Takes precedence in conflicts
+nodejs.version = "^20.0"
+nodejs.priority = 1  # Takes precedence in conflicts
 
-# Multiple package groups to avoid conflicts
-[install]
+# Separate package groups to avoid version conflicts
 gcc.pkg-path = "gcc12"
 gcc.pkg-group = "stable"
 ```
