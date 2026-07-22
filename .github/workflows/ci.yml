@@ -99,3 +99,56 @@ jobs:
         run: flox publish -o flox skills-flox --system ${{ matrix.system }}
         env:
           FLOX_FLOXHUB_TOKEN: ${{ secrets.FLOX_FLOXHUB_TOKEN }}
+
+  # Single required status: collapses the per-system matrix into one
+  # pass/fail. always() so it reports even when a leg fails; it then
+  # fails itself if any leg did, so branch protection can gate on this
+  # one context instead of four shifting matrix names.
+  summary:
+    name: "Summary"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: ["build-and-publish"]
+    if: always()
+    steps:
+      - name: "Check build/publish result"
+        env:
+          RESULT: ${{ needs.build-and-publish.result }}
+        run: |
+          set -euo pipefail
+          echo "build-and-publish: $RESULT"
+          # skipped == no matching paths changed; treat as pass.
+          if [ "$RESULT" = "success" ] || [ "$RESULT" = "skipped" ]; then
+            echo "All systems OK."
+            exit 0
+          fi
+          echo "One or more systems failed."
+          exit 1
+
+  # Slack #pod-ai only when a main build/publish actually failed — PRs
+  # surface failures in the checks UI and shouldn't page the channel.
+  report-failure:
+    name: "Report Failure"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: ["build-and-publish"]
+    if: >-
+      always()
+      && github.ref_name == 'main'
+      && github.event_name == 'push'
+      && needs.build-and-publish.result == 'failure'
+    steps:
+      - name: "Slack Notification"
+        uses: rtCamp/action-slack-notify@33ca3be66c6f378fe1610fd1d5258632dbed5e58 # v2
+        env:
+          SLACK_CHANNEL: "pod-ai"
+          SLACK_TITLE: "flox-skills publish failed on main"
+          SLACK_FOOTER: "Thanks for looking at it."
+          SLACK_WEBHOOK: "${{ secrets.MANAGED_POD_AI_SLACK_WEBHOOK }}"
+          SLACK_USERNAME: "GitHub"
+          SLACK_ICON_EMOJI: ":poop:"
+          SLACK_COLOR: "#ff2800"
+          SLACK_LINK_NAMES: true
+          SLACK_MESSAGE: >-
+            skills-flox failed to publish
+            (<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|run>).
