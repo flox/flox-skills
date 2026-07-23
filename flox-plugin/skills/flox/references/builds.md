@@ -121,6 +121,7 @@ Flox treats a **manifest build** as a short, deterministic Bash script that runs
 ### Build Definition Syntax
 
 ```toml
+# eval: skip fragment - syntax template with <placeholders>
 [build.<name>]
 command      = '''  # required – Bash, multiline string
   <your build steps>                 # e.g. cargo build, npm run build
@@ -279,6 +280,7 @@ runtime-packages = [ "clang" ]    # RIGHT: keep only clang at runtime
 Flox surfaces these fields in `flox search`, `flox show`, and during publication.
 
 ```toml
+# eval: skip fragment - metadata fields only, merge into a [build.<name>] that has a command
 [build.mytool]
 version.command = "git describe --tags"
 description = "High-performance log shipper"
@@ -287,6 +289,7 @@ description = "High-performance log shipper"
 Alternative forms:
 
 ```toml
+# eval: skip fragment - alternative forms of one field
 version = "1.4.2"            # static string
 version.file = "VERSION.txt" # read at build time
 ```

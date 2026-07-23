@@ -339,6 +339,7 @@ fi
 - **Essential Groups**: Separate `compilers`, `build`, `debug`, `testing`, `libraries` groups prevent conflicts
 - **libstdc++ Access**: ALWAYS include `gcc-unwrapped` for C++ stdlib headers/libs (gcc alone doesn't expose them):
 ```toml
+# eval: skip fragment - package descriptors, go under [install]
 gcc-unwrapped.pkg-path = "gcc-unwrapped"
 gcc-unwrapped.priority = 5
 gcc-unwrapped.pkg-group = "libraries"
@@ -353,6 +354,7 @@ gcc-unwrapped.pkg-group = "libraries"
 ### Platform-Specific Patterns
 
 ```toml
+# eval: skip fragment - package descriptors, go under [install]
 # Darwin-specific frameworks
 IOKit.pkg-path = "darwin.apple_sdk.frameworks.IOKit"
 IOKit.systems = ["x86_64-darwin", "aarch64-darwin"]

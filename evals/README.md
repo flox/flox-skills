@@ -152,6 +152,98 @@ chance of an all-green run). So `--gate` is split:
   triggering trends (watch for a sustained drop), not pass/fail gates. `may` and
   `stretch` tasks are advisory by definition.
 
+## Skill TOML snippet guard (`skill_toml_lint.py`)
+
+The eval suites above check manifests the model **generates**. This one checks
+the manifests the skill **ships**: every fenced ` ```toml ` block in
+`flox-plugin/skills/flox/SKILL.md` and `references/*.md` is fed to
+`flox edit -f` inside a throwaway `flox init` environment, so a snippet a user
+would copy-paste is proven to parse.
+
+It exists because AI-494's predecessor (1a8119c) found four classes of snippet
+that failed `flox edit` outright — `is-daemon` with no shutdown command, an
+invented `[include]` version field, bare `systems` under `[install]`, a
+`[nodejs]` table. Running the guard over the whole skill found **five more** the
+manual pass had missed (three CUDA `[hook]` blocks holding bare shell lines
+instead of `on-activate = '''...'''`, a `[profile.common]` shell table, and a
+multi-line inline `labels` table). Reading for parse errors does not scale;
+`flox edit` never misses one.
+
+### Two tiers
+
+| tier | what it requires | binds CI? |
+|---|---|---|
+| `structural` (default) | flox **parses** the snippet — only `Failed to parse manifest` fails | **yes** |
+| `catalog` (`--tier catalog`) | ...and every package resolves against the live catalog (`flox edit` exits 0) | no, advisory |
+
+flox parses the whole manifest before resolving anything, so the structural
+tier catches every bug above **without the catalog** — deterministic, ~25ms per
+snippet, and offline-safe. `--offline` points the proxy vars at a closed port so
+a networked runner behaves exactly like an air-gapped one. The catalog tier is
+report-only by design: it fails for reasons that have nothing to do with the
+skill (catalog outage, a package legitimately renamed).
+
+### Opting a block out
+
+A block that is deliberately partial — package descriptors with no `[install]`
+header, metadata fields meant to be merged into a `[build.<name>]` — cannot
+parse standalone. Mark it **explicitly**; the guard never guesses.
+
+Preferred, a standalone comment line inside the block (keeps ` ```toml `
+highlighting, and forces you to write down *why*):
+
+````markdown
+```toml
+# eval: skip fragment - metadata fields only, merge into a [build.<name>]
+[build.mytool]
+version.command = "git describe --tags"
+```
+````
+
+Or, for a block that isn't a flox manifest at all, the fence info string:
+
+````markdown
+```toml-fragment
+[tool.poetry]
+```
+````
+
+The reason text is mandatory in practice — `test_skill_toml_lint.py` fails any
+block marked without one. **Never add a marker to silence a real parse error:**
+fix the snippet. `KNOWN_PARSE_FAILURES` in the script is the escape hatch for a
+genuine defect too large to fix in the same PR (same discipline as
+`floxify/test_golden_lint.py`'s `KNOWN_VIOLATIONS`); it is currently **empty**
+and meant to stay that way. Entries are keyed by content hash, so a stale one —
+left behind after its snippet was fixed — is itself a failure and can't sit
+there absorbing a future regression.
+
+### Run
+
+```bash
+python3 skill_toml_lint.py                     # structural tier (what CI gates on)
+python3 skill_toml_lint.py --offline           # ...and prove it needs no network
+python3 skill_toml_lint.py --tier catalog      # + live catalog resolution (advisory)
+python3 skill_toml_lint.py --only services.md  # one document
+python3 skill_toml_lint.py --list              # extract only, no flox
+python3 skill_toml_lint.py -v                  # print every block, not just failures
+python3 -m unittest test_skill_toml_lint       # the guard's own tests (no flox)
+```
+
+Exit 0 if every checked snippet passed its tier, 1 otherwise. Pure stdlib.
+
+### CI
+
+Two jobs in `.github/workflows/evals.yml`, split by what they cost:
+
+- `test_skill_toml_lint` runs in the free per-PR unit-test step of the `evals`
+  job — no flox, no network, no API spend. It is what makes the guard itself
+  trustworthy enough to gate on (an extractor that silently drops blocks would
+  report "0 failed" forever).
+- `skill-toml-lint` is a separate per-PR job that installs flox and runs the
+  real `--offline` structural check. Like `golden-lint`, it spawns no `claude`
+  and costs zero Anthropic spend, so it needs no dispatch-only cost gate; it is
+  path-filtered to PRs touching the flox skill or the guard.
+
 ## Screening (`screen.py`)
 
 `screen.py` develops the *discriminating stretch tier*: it runs candidate prompts

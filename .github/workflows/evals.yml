@@ -74,6 +74,7 @@ jobs:
       pull-requests: read
     outputs:
       floxify: ${{ steps.filter.outputs.floxify }}
+      skill_toml: ${{ steps.filter.outputs.skill_toml }}
     steps:
       - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
         id: filter
@@ -83,6 +84,11 @@ jobs:
             floxify:
               - 'evals/floxify/**'
               - 'flox-plugin/skills/**'
+            skill_toml:
+              - 'flox-plugin/skills/flox/**'
+              - 'evals/skill_toml_lint.py'
+              - 'evals/test_skill_toml_lint.py'
+              - '.github/workflows/evals.yml'
 
   evals:
     # REQUIRED status check on main. This job must keep REPORTING on every PR,
@@ -181,6 +187,15 @@ jobs:
           echo "::group::screen.py deterministic pieces (test_screen)"
           python3 -m unittest test_screen -v
           echo "::endgroup::"
+          # skill_toml_lint.py's own logic: fence extraction, skip markers, the
+          # structural/catalog tier split, allowlist staleness. Mocked at the
+          # subprocess boundary, so no flox here -- the live `flox edit` run is
+          # the skill-toml-lint job below. This suite is what makes that guard
+          # trustworthy enough to gate on: an extractor that silently dropped
+          # blocks would report "0 failed" forever.
+          echo "::group::skill_toml_lint.py deterministic pieces (test_skill_toml_lint)"
+          python3 -m unittest test_skill_toml_lint -v
+          echo "::endgroup::"
           echo "::group::_skill_module_loader.py sys.modules collision regression (test_skill_module_loader)"
           cd floxify
           python3 -m unittest test_skill_module_loader -v
@@ -270,6 +285,55 @@ jobs:
           # cross-pkg-group finding the per-package checks above cannot
           # see, not something to allowlist.
           python3 -m unittest test_golden_lint -v
+
+  skill-toml-lint:
+    # Parse-check every fenced ```toml block the flox skill SHIPS (AI-494).
+    # The floxify evals check manifests the model GENERATES; this checks the
+    # ones a user copy-pastes out of SKILL.md / references/*.md, by feeding
+    # each to `flox edit -f` in a throwaway `flox init` env.
+    #
+    # Same cost profile as golden-lint, and gated the same way: it spawns no
+    # `claude` and costs zero Anthropic spend, so it does NOT need the
+    # dispatch-only gate the paid floxify jobs carry. It runs per-PR via the
+    # `changes` filter, plus on manual dispatch.
+    #
+    # --offline points the proxy vars at a closed port, so the structural
+    # tier is proven to need no catalog: it behaves identically here and on
+    # an air-gapped machine, and a catalog outage can never redden this job.
+    # flox parses the whole manifest before resolving anything, so this still
+    # catches every [install] bug. The catalog tier (--tier catalog) is
+    # advisory and deliberately not run in CI.
+    needs: changes
+    if: >-
+      (github.event_name == 'pull_request' && needs.changes.outputs.skill_toml == 'true') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Install flox
+        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
+
+      - name: Parse-check the flox skill's TOML snippets
+        working-directory: evals
+        env:
+          FLOX_DISABLE_METRICS: "true"
+        run: |
+          set -euo pipefail
+          python3 skill_toml_lint.py --offline --verbose \
+            --json results/skill-toml-lint.json
+
+      - name: Upload skill TOML lint results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: skill-toml-lint-results
+          path: evals/results/skill-toml-lint.json
 
   floxify-evals:
     # Tier 1 outcome-based /floxify eval — runs the skill against synthetic
