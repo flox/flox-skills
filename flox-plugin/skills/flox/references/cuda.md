@@ -171,8 +171,10 @@ CUDA_VERSION = "12.8"
 CUDA_HOME = "$FLOX_ENV"
 
 [hook]
-echo "CUDA $CUDA_VERSION environment ready"
-echo "nvcc: $(nvcc --version | grep release)"
+on-activate = '''
+  echo "CUDA $CUDA_VERSION environment ready" >&2
+  echo "nvcc: $(nvcc --version | grep release)" >&2
+'''
 ```
 
 ### Deep Learning with PyTorch
@@ -205,26 +207,28 @@ CUDA_VERSION = "12.8"
 PYTORCH_CUDA_ALLOC_CONF = "max_split_size_mb:128"
 
 [hook]
-setup_pytorch_cuda() {
-  venv="$FLOX_ENV_CACHE/venv"
+on-activate = '''
+  setup_pytorch_cuda() {
+    venv="$FLOX_ENV_CACHE/venv"
 
-  if [ ! -d "$venv" ]; then
-    uv venv "$venv" --python python3
-  fi
+    if [ ! -d "$venv" ]; then
+      uv venv "$venv" --python python3
+    fi
 
-  if [ -f "$venv/bin/activate" ]; then
-    source "$venv/bin/activate"
-  fi
+    if [ -f "$venv/bin/activate" ]; then
+      source "$venv/bin/activate"
+    fi
 
-  if [ ! -f "$FLOX_ENV_CACHE/.deps_installed" ]; then
-    uv pip install --python "$venv/bin/python" \
-      torch torchvision torchaudio \
-      --index-url https://download.pytorch.org/whl/cu129
-    touch "$FLOX_ENV_CACHE/.deps_installed"
-  fi
-}
+    if [ ! -f "$FLOX_ENV_CACHE/.deps_installed" ]; then
+      uv pip install --python "$venv/bin/python" \
+        torch torchvision torchaudio \
+        --index-url https://download.pytorch.org/whl/cu129
+      touch "$FLOX_ENV_CACHE/.deps_installed"
+    fi
+  }
 
-setup_pytorch_cuda
+  setup_pytorch_cuda
+'''
 ```
 
 ### TensorFlow with CUDA
@@ -247,18 +251,20 @@ python313Full.pkg-path = "python313Full"
 uv.pkg-path = "uv"
 
 [hook]
-setup_tensorflow() {
-  venv="$FLOX_ENV_CACHE/venv"
-  [ ! -d "$venv" ] && uv venv "$venv" --python python3
-  [ -f "$venv/bin/activate" ] && source "$venv/bin/activate"
+on-activate = '''
+  setup_tensorflow() {
+    venv="$FLOX_ENV_CACHE/venv"
+    [ ! -d "$venv" ] && uv venv "$venv" --python python3
+    [ -f "$venv/bin/activate" ] && source "$venv/bin/activate"
 
-  if [ ! -f "$FLOX_ENV_CACHE/.tf_installed" ]; then
-    uv pip install --python "$venv/bin/python" tensorflow[and-cuda]
-    touch "$FLOX_ENV_CACHE/.tf_installed"
-  fi
-}
+    if [ ! -f "$FLOX_ENV_CACHE/.tf_installed" ]; then
+      uv pip install --python "$venv/bin/python" tensorflow[and-cuda]
+      touch "$FLOX_ENV_CACHE/.tf_installed"
+    fi
+  }
 
-setup_tensorflow
+  setup_tensorflow
+'''
 ```
 
 ### Multi-GPU Development

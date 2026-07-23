@@ -284,9 +284,9 @@ cmd = ["entrypoint.sh", "python", "app.py"]
 ```toml
 [containerize.config]
 cmd = ["python", "app.py"]
-labels = {
-  "healthcheck" = "curl -f http://localhost:8000/health || exit 1"
-}
+
+[containerize.config.labels]
+healthcheck = "curl -f http://localhost:8000/health || exit 1"
 ```
 
 Then in Docker:

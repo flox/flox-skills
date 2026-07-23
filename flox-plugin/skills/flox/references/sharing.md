@@ -53,10 +53,12 @@ flox activate -r project/main -- flox activate -r utils/network
 MYAPP_PORT = "8080"
 MYAPP_HOST = "localhost"
 
-[profile.common]
+[profile]
 # Use unique, prefixed function names
-myapp_setup() { ... }
-myapp_debug() { ... }
+common = '''
+  myapp_setup() { ... }
+  myapp_debug() { ... }
+'''
 
 [services.myapp-db]  # Prefix service names
 command = "..."
