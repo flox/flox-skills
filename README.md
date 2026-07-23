@@ -1,9 +1,10 @@
 # Flox Skills
 
-Expert [Flox](https://flox.dev) guidance for your AI coding agent. Install this
-plugin and your agent gains a Flox specialist: it builds reproducible, portable
-development environments, onboards existing repos to Flox, and wires up services,
-builds, containers, and package publishing — applying Flox best practices for you.
+This repository provides skills that teach AI coding agents how to use 
+[Flox](https://flox.dev) properly. Install this plugin and your agent gains a 
+Flox specialist: it builds reproducible, portable development environments, 
+onboards existing repos to Flox, and wires up services, builds, containers, 
+and package publishing by applying Flox best practices for you.
 
 Works with **Claude Code**, **Codex**, and any agent that supports the
 [skills.sh](https://skills.sh) standard.
