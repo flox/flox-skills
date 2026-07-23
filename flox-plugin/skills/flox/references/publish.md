@@ -202,6 +202,7 @@ This separation allows you to share built artifacts without exposing source code
 ### Semantic Versioning
 
 ```toml
+# eval: skip fragment - metadata fields only, merge into a [build.<name>] that has a command
 [build.mytool]
 version = "1.2.3"  # Major.Minor.Patch
 description = "My awesome tool"
@@ -210,6 +211,7 @@ description = "My awesome tool"
 ### Git-based Versioning
 
 ```toml
+# eval: skip fragment - metadata fields only, merge into a [build.<name>] that has a command
 [build.mytool]
 version.command = "git describe --tags"
 description = "My awesome tool"
@@ -218,6 +220,7 @@ description = "My awesome tool"
 ### File-based Versioning
 
 ```toml
+# eval: skip fragment - metadata fields only, merge into a [build.<name>] that has a command
 [build.mytool]
 version.file = "VERSION.txt"
 description = "My awesome tool"
@@ -226,6 +229,7 @@ description = "My awesome tool"
 ### Dynamic Versioning from Source
 
 ```toml
+# eval: skip fragment - metadata fields only, merge into a [build.<name>] that has a command
 [build.rustapp]
 version.command = "cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version'"
 ```
@@ -438,6 +442,7 @@ publish:
 ### Good Descriptions
 
 ```toml
+# eval: skip fragment - metadata fields only, merge into a [build.<name>] that has a command
 [build.cli]
 description = "High-performance log shipper with filtering"  # Good: specific, descriptive
 
@@ -458,6 +463,7 @@ description = "High-performance log shipper with filtering"  # Good: specific, d
 Only include what's actually needed at runtime:
 
 ```toml
+# eval: skip fragment - metadata fields only, merge into a [build.<name>] that has a command
 [install]
 # Build-time only
 gcc.pkg-path = "gcc"

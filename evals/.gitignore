@@ -1,1 +1,4 @@
 *_run.log
+# Per-run CI artifact (skill-toml-lint job), not a recorded baseline like the
+# other results/*.json files.
+results/skill-toml-lint.json
