@@ -54,16 +54,43 @@ def docker_cmd(cell: Cell, tag: str, creds_dir: Path, script: Path) -> list[str]
     ]
 
 
+# A flox container has no FHS layout, so /usr/bin/env does not exist — but
+# npx-installed binaries (skills.sh among them) ship `#!/usr/bin/env node`
+# shebangs and die with "bad interpreter". Every ordinary host the skill
+# actually ships to has /usr/bin/env, so shimming it here removes a container
+# artifact rather than papering over a product defect.
+ENV_SHIM = (
+    '[ -e /usr/bin/env ] || { mkdir -p /usr/bin && '
+    'ln -s "$(command -v env)" /usr/bin/env; }'
+)
+
+
+# Tier A must judge ONLY the list command's output. Judging the whole
+# transcript let an installer that merely PRINTS the words "flox" and
+# "floxify" (skills.sh renders a picker listing them) satisfy `expect` while
+# `claude plugin list` was actually saying "No plugins installed" — a false
+# pass. Everything before this marker is discarded before the check.
+LIST_MARKER = "@@@FLOX_HOSTMATRIX_LIST@@@"
+
+
 def cell_script(cell: Cell, include_launch: bool) -> str:
     """Assemble the shell a cell runs inside the container."""
-    parts = ["set -euo pipefail"]
+    parts = ["set -euo pipefail", ENV_SHIM]
     if cell.install:
         parts.append(cell.install)
     if include_launch:
         parts.append(cell.launch.format(prompt=CONTAINER_PROMPT))
     else:
+        parts.append(f"echo {LIST_MARKER}")
         parts.append(cell.list_cmd)
     return "\n".join(parts) + "\n"
+
+
+def list_output(stdout: str) -> str:
+    """The part of stdout the list command produced — nothing earlier."""
+    if LIST_MARKER not in stdout:
+        return ""
+    return stdout.split(LIST_MARKER, 1)[1]
 
 
 def _run(cell: Cell, tag: str, creds_dir: Path, work: Path,
@@ -95,7 +122,8 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
         # credentials, so it still answers when Tier B is blocked.
         a = _run(cell, tag, work, work, include_launch=False, timeout=timeout)
         row["evidence"] = (a.stdout or a.stderr)[-2000:]
-        row["tier_a"] = "pass" if (a.returncode == 0 and cell.expect in a.stdout) else "fail"
+        listed = list_output(a.stdout)
+        row["tier_a"] = "pass" if (a.returncode == 0 and cell.expect in listed) else "fail"
 
         if row["tier_a"] != "pass":
             row["tier_b"] = "skipped"

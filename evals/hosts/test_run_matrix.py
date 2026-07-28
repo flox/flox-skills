@@ -96,10 +96,33 @@ class TestRunCell(unittest.TestCase):
 
     @patch("run_matrix.subprocess.run")
     def test_tier_a_passes_when_list_cmd_prints_expect(self, run):
-        run.return_value = subprocess.CompletedProcess([], 0, stdout="flox@flox-skills", stderr="")
+        run.return_value = subprocess.CompletedProcess(
+            [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr="")
         with TemporaryDirectory() as tmp:
             out = run_matrix.run_cell(CELLS[0], "img:1", Path(tmp))
         self.assertEqual(out["tier_a"], "pass")
+
+    @patch("run_matrix.subprocess.run")
+    def test_installer_chatter_cannot_satisfy_tier_a(self, run):
+        """Regression: skills.sh prints a picker listing 'flox' and 'floxify'
+        while installing nothing. Judging the whole transcript passed the cell
+        even though `claude plugin list` said 'No plugins installed'."""
+        transcript = (
+            "Found 2 skills\n  flox\n  floxify\n"
+            + run_matrix.LIST_MARKER + "\n"
+            + "No plugins installed. Use `claude plugin install` to install a plugin.\n"
+        )
+        run.return_value = subprocess.CompletedProcess([], 0, stdout=transcript, stderr="")
+        with TemporaryDirectory() as tmp:
+            out = run_matrix.run_cell(CELLS[1], "img:1", Path(tmp))
+        self.assertEqual(out["tier_a"], "fail")
+
+    def test_list_output_discards_everything_before_the_marker(self):
+        text = f"noise flox\n{run_matrix.LIST_MARKER}\nreal output"
+        self.assertEqual(run_matrix.list_output(text).strip(), "real output")
+
+    def test_list_output_is_empty_when_marker_missing(self):
+        self.assertEqual(run_matrix.list_output("flox everywhere"), "")
 
     @patch("run_matrix.subprocess.run")
     def test_tier_a_fails_when_expect_absent(self, run):
@@ -112,7 +135,8 @@ class TestRunCell(unittest.TestCase):
     @patch("run_matrix.subprocess.run")
     def test_auth_failure_is_reported_distinctly(self, run):
         run.side_effect = [
-            subprocess.CompletedProcess([], 0, stdout="flox", stderr=""),
+            subprocess.CompletedProcess([], 0, stdout=run_matrix.LIST_MARKER + "\nflox",
+                                        stderr=""),
             subprocess.CompletedProcess([], 1, stdout="",
                                         stderr="Invalid API key · Please run /login"),
         ]
@@ -126,9 +150,17 @@ class TestRunCell(unittest.TestCase):
             out = run_matrix.run_cell(CELLS[0], "img:1", Path(tmp))
         self.assertEqual(out["tier_a"], "error")
 
+    def test_script_shims_usr_bin_env(self):
+        # Without this, npx-installed binaries die on `#!/usr/bin/env node`
+        # because a flox container has no FHS layout.
+        script = run_matrix.cell_script(CELLS[1], include_launch=False)
+        self.assertIn("/usr/bin/env", script)
+        self.assertIn("ln -s", script)
+
     @patch("run_matrix.subprocess.run")
     def test_tier_a_only_never_launches(self, run):
-        run.return_value = subprocess.CompletedProcess([], 0, stdout="flox", stderr="")
+        run.return_value = subprocess.CompletedProcess(
+            [], 0, stdout=run_matrix.LIST_MARKER + "\nflox", stderr="")
         with TemporaryDirectory() as tmp:
             out = run_matrix.run_cell(CELLS[0], "img:1", Path(tmp), tier_a_only=True)
         self.assertEqual(out["tier_b"], "not-attempted")
@@ -138,7 +170,8 @@ class TestRunCell(unittest.TestCase):
 
     @patch("run_matrix.subprocess.run")
     def test_prompt_placeholder_is_substituted(self, run):
-        run.return_value = subprocess.CompletedProcess([], 0, stdout="flox", stderr="")
+        run.return_value = subprocess.CompletedProcess(
+            [], 0, stdout=run_matrix.LIST_MARKER + "\nflox", stderr="")
         with TemporaryDirectory() as tmp:
             run_matrix.run_cell(CELLS[0], "img:1", Path(tmp))
             script = (Path(tmp) / "cell.sh").read_text()

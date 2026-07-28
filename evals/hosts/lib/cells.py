@@ -27,13 +27,31 @@ CLAUDE_LAUNCH = 'claude -p "$(cat {prompt})" --output-format json'
 CODEX_LAUNCH = 'codex exec "$(cat {prompt})" --json --skip-git-repo-check'
 OPENCODE_LAUNCH = 'opencode run "$(cat {prompt})" --format json'
 
-# OpenCode ships no list subcommand, so its Tier A is a filesystem search.
-# The exact skills path is still unobserved — Task 6 pins it — so the check
-# searches both candidate roots and prints whatever it finds.
+# `npx skills add` is INTERACTIVE by default — it renders a picker and waits.
+# `-a <agent> -s '*' -y` is the non-interactive form; `-g` installs at user
+# level, since a container has no project to install into.
+def npx_install(agent: str) -> str:
+    return f"npx --yes skills add {REPO} -a {agent} -s '*' -y -g"
+
+
+# The images carry no findutils (`find: command not found`), so every
+# filesystem assertion uses `ls -R`, which is coreutils.
 OPENCODE_LIST = (
-    'find "$HOME/.config/opencode" "$HOME/.local/share/opencode" '
-    '-maxdepth 4 -iname "*flox*" 2>/dev/null'
+    'ls -R "$HOME/.config/opencode" "$HOME/.local/share/opencode" 2>/dev/null'
 )
+
+
+def floxai_list(host: str) -> str:
+    """Tier A for a flox-ai cell: does the packaged tree carry this host's skills?
+
+    NOT `flox-ai search flox` — that reports "no skills matched" even when
+    `flox-ai doctor` sees four installed fragment dirs, so it answers a
+    different question than "is the skill here". The per-host layouts differ
+    (claude and opencode nest under `skills/`, codex and pi are bare roots),
+    so the check lists recursively rather than assuming a shape. `ls -R`
+    rather than `find`: the images have no findutils.
+    """
+    return f'ls -R "$FLOX_ENV/share/flox/{host}"'
 
 CLAUDE_DIRS = ("$HOME/.claude",)
 CODEX_DIRS = ("$HOME/.codex",)
@@ -62,14 +80,14 @@ CELLS: tuple[Cell, ...] = (
     ),
     Cell(
         id="claude-npx", host="claude", method="npx", image="base",
-        install=f"npx --yes skills add {REPO}",
+        install=npx_install("claude"),
         list_cmd="claude plugin list", expect="flox",
         launch=CLAUDE_LAUNCH, snapshot_dirs=CLAUDE_DIRS,
     ),
     Cell(
         id="claude-flox-ai", host="claude", method="flox-ai", image="withpkg",
         install="",
-        list_cmd="flox-ai search flox", expect="flox",
+        list_cmd=floxai_list("claude"), expect="floxify",
         launch="flox-ai launch claude -- " + CLAUDE_LAUNCH, snapshot_dirs=CLAUDE_DIRS,
     ),
     Cell(
@@ -82,26 +100,26 @@ CELLS: tuple[Cell, ...] = (
     ),
     Cell(
         id="codex-npx", host="codex", method="npx", image="base",
-        install=f"npx --yes skills add {REPO}",
+        install=npx_install("codex"),
         list_cmd="codex plugin list", expect="flox",
         launch=CODEX_LAUNCH, snapshot_dirs=CODEX_DIRS,
     ),
     Cell(
         id="codex-flox-ai", host="codex", method="flox-ai", image="withpkg",
         install="",
-        list_cmd="flox-ai search flox", expect="flox",
+        list_cmd=floxai_list("codex"), expect="floxify",
         launch="flox-ai launch codex -- " + CODEX_LAUNCH, snapshot_dirs=CODEX_DIRS,
     ),
     Cell(
         id="opencode-npx", host="opencode", method="npx", image="base",
-        install=f"npx --yes skills add {REPO}",
+        install=npx_install("opencode"),
         list_cmd=OPENCODE_LIST, expect="flox",
         launch=OPENCODE_LAUNCH, snapshot_dirs=OPENCODE_DIRS,
     ),
     Cell(
         id="opencode-flox-ai", host="opencode", method="flox-ai", image="withpkg",
         install="",
-        list_cmd="flox-ai search flox", expect="flox",
+        list_cmd=floxai_list("opencode"), expect="floxify",
         launch="flox-ai launch opencode -- " + OPENCODE_LAUNCH, snapshot_dirs=OPENCODE_DIRS,
     ),
 )

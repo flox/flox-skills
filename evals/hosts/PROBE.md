@@ -76,6 +76,36 @@ diff is read against:
 /root/.local/share/opencode
 ```
 
+## `hosts-withpkg` image — flox-ai and the packaged skills
+
+`flox/skills-flox@1.0.0` unpacks to `$FLOX_ENV/share/flox/{claude,codex,opencode,pi}/flox`,
+with **different shapes per host** — `claude` and `opencode` nest their skills
+under `skills/`, while `codex` and `pi` carry `flox` and `floxify` as bare
+roots. Any check has to search by name rather than assume a layout.
+
+Two things `flox-ai doctor` (v0.8.0) reports, both load-bearing:
+
+- **`flox-ai search flox` prints "no skills matched"** even though the same
+  doctor run reports `Installed fragment dirs: 4`. `search` answers a
+  different question than "is this skill installed", so it is **not** usable
+  as a Tier A probe. The flox-ai cells assert against the fragment tree
+  instead.
+- **Launch readiness: `claude` ok, `opencode` ok, `codex` DEGRADED** —
+  *"codex is not the flox-patched build; skills and rules will not be
+  injected."* The catalog's `flox/codex` is not the build flox-ai needs, so
+  the `codex-flox-ai` path cannot inject skills at all. This is a product
+  finding, not a harness bug: it means one of the eight cells is expected to
+  fail until a flox-patched Codex is packaged.
+
+## `npx skills add` needs `/usr/bin/env`
+
+All three npx cells first failed with
+`/root/.npm/_npx/.../bin/skills: /usr/bin/env: bad interpreter`. A flox
+container has no FHS layout, and skills.sh's binaries ship
+`#!/usr/bin/env node`. Every ordinary host it ships to has `/usr/bin/env`, so
+the runner shims the path inside the container (`ENV_SHIM` in
+`run_matrix.py`) rather than treating it as a product defect.
+
 ## Still open
 
 - **OpenCode's skill-discovery path** is still unobserved. It gets pinned in
