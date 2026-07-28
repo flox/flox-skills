@@ -7,19 +7,21 @@ from lib import images
 
 
 class TestImages(unittest.TestCase):
-    def test_tag_is_name_and_version(self):
-        self.assertEqual(images.image_tag("base", "20260727"),
-                         "flox-skills-hosts-base:20260727")
+    def test_tag_is_env_name_and_version(self):
+        # `flox containerize` names the repo after the ENVIRONMENT (hosts-base),
+        # and -t is the tag alone.
+        self.assertEqual(images.image_tag("base", "20260727"), "hosts-base:20260727")
+        self.assertEqual(images.image_tag("withpkg", "20260727"), "hosts-withpkg:20260727")
 
     @patch("lib.images.subprocess.run")
     def test_image_exists_is_true_when_docker_prints_an_id(self, run):
         run.return_value = subprocess.CompletedProcess([], 0, stdout="abc123\n", stderr="")
-        self.assertTrue(images.image_exists("flox-skills-hosts-base:x"))
+        self.assertTrue(images.image_exists("hosts-base:x"))
 
     @patch("lib.images.subprocess.run")
     def test_image_exists_is_false_when_docker_prints_nothing(self, run):
         run.return_value = subprocess.CompletedProcess([], 0, stdout="\n", stderr="")
-        self.assertFalse(images.image_exists("flox-skills-hosts-base:x"))
+        self.assertFalse(images.image_exists("hosts-base:x"))
 
     @patch("lib.images.image_exists", return_value=True)
     @patch("lib.images.subprocess.run")
@@ -33,7 +35,11 @@ class TestImages(unittest.TestCase):
         run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         images.build("base", "20260727", rebuild=True)
         self.assertEqual(run.call_count, 1)
-        self.assertIn("containerize", run.call_args[0][0])
+        argv = run.call_args[0][0]
+        self.assertIn("containerize", argv)
+        # -t carries the bare version; a "name:version" here is the bug that
+        # produced `hosts-base:base:20260727` and "invalid reference format".
+        self.assertEqual(argv[argv.index("-t") + 1], "20260727")
 
     @patch("lib.images.image_exists", return_value=False)
     @patch("lib.images.subprocess.run")

@@ -12,7 +12,15 @@ class BuildError(RuntimeError):
 
 
 def image_tag(name: str, version: str) -> str:
-    return f"flox-skills-hosts-{name}:{version}"
+    """Docker reference for image `name`.
+
+    `flox containerize` derives the repository from the ENVIRONMENT name and
+    treats `-t` as the tag alone — passing `name:version` there yields the
+    invalid reference `hosts-base:base:version`. The environments are named
+    `hosts-base` and `hosts-withpkg` (see `flox init -n`), so the repository
+    is `hosts-<name>` and `-t` carries only the version.
+    """
+    return f"hosts-{name}:{version}"
 
 
 def image_exists(tag: str) -> bool:
@@ -27,7 +35,7 @@ def build(name: str, version: str, rebuild: bool = False) -> str:
     if image_exists(tag) and not rebuild:
         return tag
     cmd = ["flox", "containerize", "-d", str(HERE / name),
-           "--runtime", "docker", "-t", f"{name}:{version}"]
+           "--runtime", "docker", "-t", version]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise BuildError(f"containerize {name} failed: {proc.stderr.strip()}")

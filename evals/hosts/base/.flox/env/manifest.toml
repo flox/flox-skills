@@ -1,0 +1,18 @@
+schema-version = "1.13.0"
+
+# Image `base` for the host-matrix smoke test: the three agent CLIs plus the
+# Node toolchain the skills.sh install path needs. Deliberately contains NO
+# skills — the native-plugin and npx cells install them at run time, and a
+# skill present in the image would let a host discover it through a path
+# other than the one under test.
+
+[install]
+claude-code.pkg-path = "flox/claude-code"
+codex.pkg-path = "flox/codex"
+opencode.pkg-path = "flox/opencode"
+nodejs.pkg-path = "nodejs"
+git.pkg-path = "git"
+jq.pkg-path = "jq"
+
+[options]
+systems = ["x86_64-linux"]
