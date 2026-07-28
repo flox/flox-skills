@@ -18,7 +18,8 @@ FULL_CLAUDE = {
         "linear-server|def": {"accessToken": "MUST-NOT-LEAK"},
     },
 }
-CODEX = {"auth_mode": "chatgpt", "tokens": {"access_token": "at-test"}}
+CODEX = {"auth_mode": "chatgpt", "OPENAI_API_KEY": "sk-MUST-NOT-LEAK",
+         "tokens": {"access_token": "at-test"}, "last_refresh": "2026-07-28"}
 
 
 class TestMinimizeClaude(unittest.TestCase):
@@ -59,6 +60,26 @@ class TestPrepare(unittest.TestCase):
             for rel in ("claude/.credentials.json", "codex/auth.json"):
                 mode = os.stat(dest / rel).st_mode & 0o777
                 self.assertEqual(mode, 0o600, rel)
+
+    def test_codex_copy_drops_the_api_key(self):
+        """OAuth only: a per-token-billed key must never reach a container."""
+        with TemporaryDirectory() as tmp:
+            c, x = self._srcs(tmp)
+            dest = Path(tmp) / "run"
+            creds.prepare(dest, c, x)
+            written = (dest / "codex" / "auth.json").read_text()
+            self.assertNotIn("MUST-NOT-LEAK", written)
+            self.assertNotIn("OPENAI_API_KEY", written)
+            self.assertIn("chatgpt", written)
+
+    def test_codex_copy_keeps_the_oauth_tokens(self):
+        with TemporaryDirectory() as tmp:
+            c, x = self._srcs(tmp)
+            dest = Path(tmp) / "run"
+            creds.prepare(dest, c, x)
+            written = json.loads((dest / "codex" / "auth.json").read_text())
+            self.assertEqual(written["tokens"]["access_token"], "at-test")
+            self.assertEqual(written["last_refresh"], "2026-07-28")
 
     def test_assert_minimized_rejects_a_fat_file(self):
         with TemporaryDirectory() as tmp:
