@@ -254,3 +254,38 @@ class TestResultsMerge(unittest.TestCase):
         self.assertEqual(set(rows), {"claude-native", "codex-npx"})
         self.assertEqual(rows["codex-npx"]["tier_a"], "fail")   # newer wins
         self.assertEqual(rows["claude-native"]["tier_a"], "pass")  # survivor
+
+
+class TestCleanup(unittest.TestCase):
+    def test_host_owned_dir_is_removed_without_docker(self):
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            (run_dir / "claude").mkdir(parents=True)
+            (run_dir / "claude" / ".credentials.json").write_text("{}")
+            with patch("run_matrix.subprocess.run") as run:
+                leaked = run_matrix.cleanup_run_dir(run_dir, "img:1")
+                run.assert_not_called()      # plain rmtree sufficed
+        self.assertEqual(leaked, [])
+        self.assertFalse(run_dir.exists())
+
+    def test_root_owned_leftovers_trigger_a_container_sweep(self):
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir(parents=True)
+            with patch("run_matrix.shutil.rmtree"), \
+                 patch("run_matrix.subprocess.run") as run:
+                run_matrix.cleanup_run_dir(run_dir, "img:1")
+            argv = run.call_args[0][0]
+        self.assertIn("docker", argv)
+        self.assertIn(f"{run_dir}:/sweep", argv)
+
+    def test_surviving_credentials_are_reported(self):
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            (run_dir / "codex").mkdir(parents=True)
+            (run_dir / "codex" / "auth.json").write_text("{}")
+            with patch("run_matrix.shutil.rmtree"), \
+                 patch("run_matrix.subprocess.run"):
+                leaked = run_matrix.cleanup_run_dir(run_dir, "img:1")
+        self.assertEqual(len(leaked), 1)
+        self.assertTrue(leaked[0].endswith("auth.json"))

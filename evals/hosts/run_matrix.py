@@ -188,6 +188,31 @@ def classify_trigger(text: str) -> str:
     return "weak"                      # ran, but nothing skill-specific surfaced
 
 
+def cleanup_run_dir(run_dir: Path, tag: str | None) -> list[str]:
+    """Remove the run directory, including files the container wrote as root.
+
+    Containers run as root and leave root-owned trees (codex plugin caches,
+    marketplace clones) inside the mounted per-cell dirs. `shutil.rmtree` with
+    ignore_errors then leaves the directory behind silently. The credential
+    copies themselves are host-owned and do delete — but "silently leaves
+    things behind" is not a property this directory should have, so a
+    container does the final sweep as root.
+
+    Returns any credential files that survived; a non-empty list is an alarm.
+    """
+    shutil.rmtree(run_dir, ignore_errors=True)
+    if run_dir.exists() and tag:
+        subprocess.run(
+            ["docker", "run", "--rm", "-v", f"{run_dir}:/sweep", tag,
+             "bash", "-c", "rm -rf /sweep/* /sweep/.[!.]* 2>/dev/null || true"],
+            capture_output=True, text=True)
+        shutil.rmtree(run_dir, ignore_errors=True)
+    if not run_dir.exists():
+        return []
+    return [str(p) for p in run_dir.rglob("*")
+            if p.name in (".credentials.json", "auth.json")]
+
+
 def write_results(path: Path, rows: list[dict]) -> None:
     """Merge `rows` into the day's results, keyed by cell id.
 
@@ -269,7 +294,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"results: {out}")
         return 0
     finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
+        leaked = cleanup_run_dir(run_dir, next(iter(tags.values()), None))
+        if leaked:
+            print(f"WARNING: credential copies survived cleanup: {leaked}",
+                  file=sys.stderr)
+        elif run_dir.exists():
+            print(f"note: {run_dir} still holds root-owned container files",
+                  file=sys.stderr)
 
 
 if __name__ == "__main__":
