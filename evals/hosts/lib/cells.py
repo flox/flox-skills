@@ -27,11 +27,41 @@ CLAUDE_LAUNCH = 'claude -p "$(cat {prompt})" --output-format json'
 CODEX_LAUNCH = 'codex exec "$(cat {prompt})" --json --skip-git-repo-check'
 OPENCODE_LAUNCH = 'opencode run "$(cat {prompt})" --format json'
 
+# skills.sh's own agent ids — NOT our host names. `-a claude` is rejected with
+# "Invalid agents: claude"; the id is `claude-code`.
+NPX_AGENT = {"claude": "claude-code", "codex": "codex", "opencode": "opencode"}
+
+
 # `npx skills add` is INTERACTIVE by default — it renders a picker and waits.
 # `-a <agent> -s '*' -y` is the non-interactive form; `-g` installs at user
 # level, since a container has no project to install into.
-def npx_install(agent: str) -> str:
-    return f"npx --yes skills add {REPO} -a {agent} -s '*' -y -g"
+def npx_install(host: str) -> str:
+    return f"npx --yes skills add {REPO} -a {NPX_AGENT[host]} -s '*' -y -g"
+
+
+# Where skills.sh actually copies, observed per host: it knows Claude Code's
+# native directory, but falls back to the generic skills.sh tree for the
+# others.
+#     claude-code -> ~/.claude/skills/{flox,floxify}
+#     codex       -> ~/.agents/skills/{flox,floxify}
+#     opencode    -> ~/.agents/skills/{flox,floxify}
+#
+# A host's plugin list is the WRONG assertion for an npx cell — `codex plugin
+# list` correctly says "No marketplace plugins found" after a successful
+# skills install, because a skill is not a plugin.
+#
+# This makes npx Tier A weaker than the other methods on purpose: it proves
+# the files landed where the installer put them, not that the host reads
+# them. Host pickup is only proven by Tier B.
+NPX_DEST = {
+    "claude": "$HOME/.claude/skills",
+    "codex": "$HOME/.agents/skills",
+    "opencode": "$HOME/.agents/skills",
+}
+
+
+def npx_list(host: str) -> str:
+    return f'ls -R "{NPX_DEST[host]}"'
 
 
 # The images carry no findutils (`find: command not found`), so every
@@ -81,7 +111,7 @@ CELLS: tuple[Cell, ...] = (
     Cell(
         id="claude-npx", host="claude", method="npx", image="base",
         install=npx_install("claude"),
-        list_cmd="claude plugin list", expect="flox",
+        list_cmd=npx_list("claude"), expect="floxify",
         launch=CLAUDE_LAUNCH, snapshot_dirs=CLAUDE_DIRS,
     ),
     Cell(
@@ -101,7 +131,7 @@ CELLS: tuple[Cell, ...] = (
     Cell(
         id="codex-npx", host="codex", method="npx", image="base",
         install=npx_install("codex"),
-        list_cmd="codex plugin list", expect="flox",
+        list_cmd=npx_list("codex"), expect="floxify",
         launch=CODEX_LAUNCH, snapshot_dirs=CODEX_DIRS,
     ),
     Cell(
@@ -113,7 +143,7 @@ CELLS: tuple[Cell, ...] = (
     Cell(
         id="opencode-npx", host="opencode", method="npx", image="base",
         install=npx_install("opencode"),
-        list_cmd=OPENCODE_LIST, expect="flox",
+        list_cmd=npx_list("opencode"), expect="floxify",
         launch=OPENCODE_LAUNCH, snapshot_dirs=OPENCODE_DIRS,
     ),
     Cell(

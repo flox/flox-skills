@@ -106,6 +106,47 @@ container has no FHS layout, and skills.sh's binaries ship
 the runner shims the path inside the container (`ENV_SHIM` in
 `run_matrix.py`) rather than treating it as a product defect.
 
+## Where each install method actually puts the skills
+
+Observed, not assumed. This is the single most surprising part of the matrix:
+the three methods write to three different places, and none of them is
+interchangeable with another.
+
+| Method | Destination | Proven by |
+|---|---|---|
+| Claude native plugin | Claude's own plugin store; `claude plugin list` shows `flox@flox-skills` v1.0.0, enabled | `claude plugin list` |
+| Codex native plugin | Codex's marketplace store | `codex plugin list` |
+| `npx skills add -a claude-code` | `~/.claude/skills/{flox,floxify}` | installer output + `ls -R` |
+| `npx skills add -a codex` | `~/.agents/skills/{flox,floxify}` | installer output + `ls -R` |
+| `npx skills add -a opencode` | `~/.agents/skills/{flox,floxify}` | installer output + `ls -R` |
+| flox-ai / skills-flox | `$FLOX_ENV/share/flox/<host>/flox` | `ls -R` |
+
+Consequences worth remembering:
+
+- **A skill is not a plugin.** After a *successful* `npx skills add -a codex`,
+  `codex plugin list` correctly prints "No marketplace plugins found". Using a
+  plugin list to check a skills install reads a green install as a failure —
+  and, worse, reading the whole transcript instead reads a failed install as a
+  pass (see below).
+- **skills.sh agent ids are its own**, not our host names: `-a claude` is
+  rejected with `Invalid agents: claude`; the id is `claude-code`.
+- **`npx skills add` is interactive by default** — it renders a picker and
+  blocks forever in a container. `-a <agent> -s '*' -y` is the non-interactive
+  form (`--all` is the blunter shorthand).
+
+## The false pass this harness nearly shipped
+
+The first green Tier A for `claude-npx` and `codex-npx` was **wrong**. The
+check grepped the whole container transcript for `flox`, and skills.sh's
+picker prints `flox` and `floxify` while installing nothing. Underneath, the
+list commands were saying "No plugins installed" and "No marketplace plugins
+found".
+
+Tier A now emits a marker after the install step and judges only what follows
+it (`LIST_MARKER` in `run_matrix.py`), with a regression test built from the
+real transcript. Any future assertion must keep that property: **judge the
+verification command's output, never the installer's.**
+
 ## Still open
 
 - **OpenCode's skill-discovery path** is still unobserved. It gets pinned in

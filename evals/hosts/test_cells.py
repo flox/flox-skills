@@ -45,6 +45,28 @@ class TestMatrix(unittest.TestCase):
             for field in (c.install, c.list_cmd, c.launch):
                 self.assertNotIn("<<<", field, c.id)
 
+    def test_npx_cells_use_skills_sh_agent_ids(self):
+        """`-a claude` is rejected — skills.sh calls it `claude-code`."""
+        for c in CELLS:
+            if c.method == "npx":
+                self.assertIn("-a ", c.install, c.id)
+                self.assertNotIn("-a claude ", c.install, c.id)
+
+    def test_npx_cells_are_non_interactive(self):
+        """Without -s/-y the installer renders a picker and blocks."""
+        for c in CELLS:
+            if c.method == "npx":
+                self.assertIn("-y", c.install, c.id)
+                self.assertIn("-s ", c.install, c.id)
+
+    def test_npx_cells_assert_the_shared_skills_tree(self):
+        """A skill is not a plugin: `codex plugin list` is empty after a
+        successful skills.sh install, which writes to ~/.agents/skills."""
+        for c in CELLS:
+            if c.method == "npx":
+                self.assertIn("skills", c.list_cmd, c.id)
+                self.assertNotIn("plugin list", c.list_cmd, c.id)
+
     def test_cells_are_frozen(self):
         with self.assertRaises(Exception):
             CELLS[0].id = "mutated"
