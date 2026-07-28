@@ -210,3 +210,31 @@ class TestClassifyTrigger(unittest.TestCase):
 
     def test_empty_output(self):
         self.assertEqual(run_matrix.classify_trigger("   "), "no-output")
+
+
+class TestAuthDetection(unittest.TestCase):
+    @patch("run_matrix.subprocess.run")
+    def test_prose_about_postgres_auth_is_not_an_auth_error(self, run):
+        """Regression: Codex answered 'PostgreSQL uses trust authentication'
+        and the cell was scored auth-error on an exit-0 run."""
+        answer = ("PostgreSQL is socket-only and uses trust authentication, so "
+                  "this is for local development. pkg-path python312 [services]")
+        run.side_effect = [
+            subprocess.CompletedProcess([], 0, stdout=run_matrix.LIST_MARKER + "\nflox",
+                                        stderr=""),
+            subprocess.CompletedProcess([], 0, stdout=answer, stderr=""),
+        ]
+        with TemporaryDirectory() as tmp:
+            out = run_matrix.run_cell(CELLS[0], "img:1", Path(tmp))
+        self.assertEqual(out["tier_b"], "pass")
+
+    @patch("run_matrix.subprocess.run")
+    def test_a_real_auth_failure_still_reports(self, run):
+        run.side_effect = [
+            subprocess.CompletedProcess([], 0, stdout=run_matrix.LIST_MARKER + "\nflox",
+                                        stderr=""),
+            subprocess.CompletedProcess([], 1, stdout="", stderr="Please run /login"),
+        ]
+        with TemporaryDirectory() as tmp:
+            out = run_matrix.run_cell(CELLS[0], "img:1", Path(tmp))
+        self.assertEqual(out["tier_b"], "auth-error")

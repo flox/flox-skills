@@ -33,8 +33,13 @@ RESULTS = HERE / "results"
 CONTAINER_PROMPT = "/prompt.txt"
 CONTAINER_SCRIPT = "/cell.sh"
 CONTAINER_HOME = "/root"
+# Precise phrases only. A bare "authentication"/"expired" matched Codex
+# answers describing PostgreSQL "trust authentication" and flagged two good
+# runs as credential failures — a false negative in the other direction from
+# the Tier A false pass.
 AUTH_MARKERS = ("/login", "invalid api key", "unauthorized", "not logged in",
-                "authentication", "expired", "please log in")
+                "authentication failed", "token expired", "session expired",
+                "please log in", "please run /login", "401 ")
 
 
 def docker_cmd(cell: Cell, tag: str, creds_dir: Path, script: Path) -> list[str]:
@@ -140,7 +145,8 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
         # Tier B — one prompt, in a fresh container that re-runs the install.
         b = _run(cell, tag, work, work, include_launch=True, timeout=timeout)
         combined = b.stdout + b.stderr
-        if _looks_like_auth_failure(combined):
+        # A successful exit is never an auth failure, whatever the prose says.
+        if b.returncode != 0 and _looks_like_auth_failure(combined):
             row["tier_b"] = "auth-error"
             row["notes"] = "credential problem, not a skill problem"
         elif b.returncode != 0:
