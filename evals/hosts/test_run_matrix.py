@@ -191,3 +191,22 @@ class TestResults(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestClassifyTrigger(unittest.TestCase):
+    def test_explicit_non_injection_beats_a_good_answer(self):
+        text = ('warning: codex is not the flox-patched build; skills and rules '
+                'will not be injected\npkg-path python312 [services] flox activate')
+        self.assertEqual(run_matrix.classify_trigger(text), "not-injected")
+
+    def test_greeting_only_is_weak(self):
+        self.assertEqual(
+            run_matrix.classify_trigger("I'm here and ready. What would you like to work on?"),
+            "weak")
+
+    def test_skill_shaped_answer(self):
+        text = 'python312.pkg-path = "python312"\n[services]\npostgresql_16'
+        self.assertEqual(run_matrix.classify_trigger(text), "answer-shaped")
+
+    def test_empty_output(self):
+        self.assertEqual(run_matrix.classify_trigger("   "), "no-output")

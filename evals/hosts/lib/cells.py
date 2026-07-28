@@ -27,6 +27,13 @@ CLAUDE_LAUNCH = 'claude -p "$(cat {prompt})" --output-format json'
 CODEX_LAUNCH = 'codex exec "$(cat {prompt})" --json --skip-git-repo-check'
 OPENCODE_LAUNCH = 'opencode run "$(cat {prompt})" --format json'
 
+# flox-ai forwards args after `--` VERBATIM to the agent, so these omit the
+# binary name. Repeating it runs `claude claude -p ...`, which exits 0 while
+# silently dropping the prompt — a false pass.
+CLAUDE_ARGS = '-p "$(cat {prompt})" --output-format json'
+CODEX_ARGS = 'exec "$(cat {prompt})" --json --skip-git-repo-check'
+OPENCODE_ARGS = 'run "$(cat {prompt})" --format json'
+
 # skills.sh's own agent ids — NOT our host names. `-a claude` is rejected with
 # "Invalid agents: claude"; the id is `claude-code`.
 NPX_AGENT = {"claude": "claude-code", "codex": "codex", "opencode": "opencode"}
@@ -118,7 +125,7 @@ CELLS: tuple[Cell, ...] = (
         id="claude-flox-ai", host="claude", method="flox-ai", image="withpkg",
         install="",
         list_cmd=floxai_list("claude"), expect="floxify",
-        launch="flox-ai launch claude -- " + CLAUDE_LAUNCH, snapshot_dirs=CLAUDE_DIRS,
+        launch="flox-ai launch claude -- " + CLAUDE_ARGS, snapshot_dirs=CLAUDE_DIRS,
     ),
     Cell(
         id="codex-native", host="codex", method="native", image="base",
@@ -138,7 +145,7 @@ CELLS: tuple[Cell, ...] = (
         id="codex-flox-ai", host="codex", method="flox-ai", image="withpkg",
         install="",
         list_cmd=floxai_list("codex"), expect="floxify",
-        launch="flox-ai launch codex -- " + CODEX_LAUNCH, snapshot_dirs=CODEX_DIRS,
+        launch="flox-ai launch codex -- " + CODEX_ARGS, snapshot_dirs=CODEX_DIRS,
     ),
     Cell(
         id="opencode-npx", host="opencode", method="npx", image="base",
@@ -150,6 +157,6 @@ CELLS: tuple[Cell, ...] = (
         id="opencode-flox-ai", host="opencode", method="flox-ai", image="withpkg",
         install="",
         list_cmd=floxai_list("opencode"), expect="floxify",
-        launch="flox-ai launch opencode -- " + OPENCODE_LAUNCH, snapshot_dirs=OPENCODE_DIRS,
+        launch="flox-ai launch opencode -- " + OPENCODE_ARGS, snapshot_dirs=OPENCODE_DIRS,
     ),
 )

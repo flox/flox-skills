@@ -111,7 +111,7 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
     """Run one cell. Never raises: every failure becomes a recorded verdict."""
     row = {"cell": cell.id, "host": cell.host, "method": cell.method,
            "image": cell.image, "tier_a": "dry-run", "tier_b": "dry-run",
-           "evidence": "", "notes": ""}
+           "evidence_class": "", "evidence": "", "notes": ""}
     if dry_run:
         row["notes"] = cell_script(cell, include_launch=False).replace("\n", " ; ")
         return row
@@ -147,6 +147,10 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
             row["tier_b"] = "fail"
         else:
             row["tier_b"] = "pass"
+        row["evidence_class"] = classify_trigger(combined)
+        if row["tier_b"] == "pass" and row["evidence_class"] != "answer-shaped":
+            row["notes"] = (row["notes"] + " " if row["notes"] else "") + \
+                f"exit 0 but evidence is '{row['evidence_class']}'"
         row["evidence"] = combined[-4000:]
     except subprocess.TimeoutExpired:
         row["tier_a"], row["tier_b"] = "timeout", "timeout"
@@ -157,6 +161,27 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
     return row
 
 
+# Exit 0 does not mean the skill was used. Nothing any of the three hosts
+# prints in headless mode enumerates the skills it loaded, so a Tier B pass is
+# classified by what the transcript can actually support — never as proof.
+NOT_INJECTED = "not the flox-patched build"
+# Guidance the skill teaches that an unguided model routinely gets wrong:
+# versioned pkg-paths and services wiring rather than bare `python`/`postgres`.
+FINGERPRINTS = ("pkg-path", "python312", "postgresql_", "[services]", "flox activate")
+
+
+def classify_trigger(text: str) -> str:
+    """How much does this transcript actually support?"""
+    if NOT_INJECTED in text:
+        return "not-injected"          # host said outright it ignored the skill
+    if not text.strip():
+        return "no-output"
+    hits = [f for f in FINGERPRINTS if f in text]
+    if len(hits) >= 2:
+        return "answer-shaped"         # consistent with the skill, not proof of it
+    return "weak"                      # ran, but nothing skill-specific surfaced
+
+
 def write_results(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as fh:
@@ -165,11 +190,17 @@ def write_results(path: Path, rows: list[dict]) -> None:
 
 
 def summarize(rows: list[dict]) -> str:
-    lines = ["", f"{'cell':<20} {'tier A (load)':<14} {'tier B (trigger)':<16}", "-" * 52]
+    lines = ["", f"{'cell':<20} {'tier A (load)':<14} {'tier B (trigger)':<10} "
+             f"{'evidence':<14}", "-" * 62]
     for r in rows:
-        lines.append(f"{r['cell']:<20} {r['tier_a']:<14} {r['tier_b']:<16}")
-    passed = sum(1 for r in rows if r["tier_a"] == "pass" and r["tier_b"] == "pass")
-    lines += ["-" * 52, f"{passed}/{len(rows)} cells fully green", ""]
+        lines.append(f"{r['cell']:<20} {r['tier_a']:<14} {r['tier_b']:<10} "
+                     f"{r.get('evidence_class', ''):<14}")
+    passed = sum(1 for r in rows if r["tier_a"] == "pass" and r["tier_b"] == "pass"
+                 and r.get("evidence_class") == "answer-shaped")
+    lines += ["-" * 62,
+              f"{passed}/{len(rows)} cells green with answer-shaped evidence",
+              "(no host enumerates loaded skills headlessly, so none of this is",
+              " proof of invocation — see DESIGN.md)", ""]
     return "\n".join(lines)
 
 
