@@ -189,10 +189,24 @@ def classify_trigger(text: str) -> str:
 
 
 def write_results(path: Path, rows: list[dict]) -> None:
+    """Merge `rows` into the day's results, keyed by cell id.
+
+    A `--cells` subset run used to rewrite the file wholesale, silently
+    discarding every cell it did not run.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    merged: dict[str, dict] = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            if line.strip():
+                prior = json.loads(line)
+                merged[prior["cell"]] = prior
+    for row in rows:
+        merged[row["cell"]] = row
+    order = {c.id: i for i, c in enumerate(CELLS)}
     with path.open("w") as fh:
-        for row in rows:
-            fh.write(json.dumps(row) + "\n")
+        for cell_id in sorted(merged, key=lambda c: order.get(c, 999)):
+            fh.write(json.dumps(merged[cell_id]) + "\n")
 
 
 def summarize(rows: list[dict]) -> str:

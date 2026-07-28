@@ -238,3 +238,19 @@ class TestAuthDetection(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             out = run_matrix.run_cell(CELLS[0], "img:1", Path(tmp))
         self.assertEqual(out["tier_b"], "auth-error")
+
+
+class TestResultsMerge(unittest.TestCase):
+    def test_subset_run_does_not_discard_other_cells(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out.jsonl"
+            run_matrix.write_results(path, [
+                {"cell": "claude-native", "tier_a": "pass"},
+                {"cell": "codex-npx", "tier_a": "pass"},
+            ])
+            run_matrix.write_results(path, [{"cell": "codex-npx", "tier_a": "fail"}])
+            rows = {json.loads(x)["cell"]: json.loads(x)
+                    for x in path.read_text().splitlines()}
+        self.assertEqual(set(rows), {"claude-native", "codex-npx"})
+        self.assertEqual(rows["codex-npx"]["tier_a"], "fail")   # newer wins
+        self.assertEqual(rows["claude-native"]["tier_a"], "pass")  # survivor
