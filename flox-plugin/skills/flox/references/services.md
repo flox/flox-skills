@@ -3,6 +3,7 @@
 ## Running Services in Flox Environments
 
 - Start with `flox activate --start-services` or `flox activate -s`
+- Or set `auto-start = true` under `[services]` so every activation starts them with no flag (see "Auto-Starting Services on Activation" below)
 - Run the service in the foreground with `exec` (the default) — Flox manages it; a foreground process needs neither `is-daemon` nor `shutdown.command`
 - Only a process that *daemonizes itself* (forks and exits) needs `is-daemon = true`, and it then **requires** a `shutdown.command`
 - Use `flox services status/logs/restart` to manage (must be in activated env)
@@ -17,6 +18,58 @@ flox services logs <service>    # View service logs
 flox services restart <service> # Restart a service
 flox services stop <service>    # Stop a service
 ```
+
+## Auto-Starting Services on Activation
+
+By default services only run when asked for: `flox activate -s` /
+`flox activate --start-services`, or `flox services start` from inside
+an activation. To make them start on *every* activation with no flag,
+set `auto-start = true` in the `[services]` table:
+
+```toml
+schema-version = "1.12.0"
+
+[services]
+auto-start = true
+
+[services.web]
+command = '''exec python -m http.server "$WEB_PORT"'''
+
+[vars]
+WEB_PORT = "8000"
+```
+
+The details that are easy to get wrong:
+
+- **`auto-start` belongs to the `[services]` table itself, not to a
+  service.** It is a sibling of the service names and applies to *all*
+  of them — there is no per-service form. Put it directly under the
+  `[services]` header, before the first `[services.<name>]` block.
+  Placing it inside a service is a parse error: ``unknown field
+  `auto-start`, expected one of `command`, `vars`, `is-daemon`,
+  `shutdown`, `systemd`, `systems` ``.
+- **It requires `schema-version = "1.12.0"` or newer** (the schema
+  version that introduced it). In a `version = 1` manifest the same key
+  fails to parse: ``invalid type: boolean `true`, expected struct
+  ServiceDescriptor in `services.auto-start` ``. Replace the
+  `version = 1` line with `schema-version = "1.12.0"` in the same edit
+  (leave an already-higher `schema-version` alone). The two keys are
+  mutually exclusive — a manifest carrying both is rejected.
+- **The default is off.** Omitting the key behaves exactly like
+  `auto-start = false`: activation starts nothing.
+- **Per-activation overrides still win.** `flox activate
+  --no-start-services` suppresses auto-start for that activation, and
+  `flox activate -s` starts services even when `auto-start` is unset.
+- **Auto-activation respects it too.** Directory auto-activation
+  (`flox activate allow`) does not start services unless the manifest
+  sets `auto-start = true`.
+- **Composed environments:** the including manifest's `auto-start` wins;
+  if it doesn't set one, the value from the included environment is
+  inherited.
+
+To turn it back off, set `auto-start = false` or delete the key — both
+mean "don't start on activate"; keep the explicit `false` when the
+intent is worth recording in the manifest.
 
 ## Network Services Pattern
 

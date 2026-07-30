@@ -90,8 +90,13 @@ _FRAGMENT_INFO = {"toml-fragment"}
 # Any snippet flox will *parse*, whether or not it's a complete manifest.
 _MANIFEST_INFO = {"toml"} | _FRAGMENT_INFO
 
-# `version = 1` at the top level, i.e. before the first table header.
-_VERSION_KEY = re.compile(r"^[ \t]*version[ \t]*=", re.M)
+# A top-level schema declaration, i.e. before the first table header. Either
+# spelling counts: the legacy `version = 1` or the newer
+# `schema-version = "1.12.0"` (which a snippet must use to exercise a field a
+# later schema added, e.g. `services.auto-start`). They are mutually exclusive
+# in flox -- prepending `version = 1` to a snippet that already declares
+# `schema-version` makes it fail to parse, so both must suppress the prepend.
+_VERSION_KEY = re.compile(r"^[ \t]*(?:schema-)?version[ \t]*=", re.M)
 _TABLE_HEADER = re.compile(r"^[ \t]*\[", re.M)
 
 # [install], [install.foo], or a top-level `install.foo = ...` dotted key. Only
@@ -169,7 +174,9 @@ class Block:
         """The snippet as flox will see it: `version = 1` prepended if absent.
 
         Only a *top-level* version counts -- `version` inside a table (e.g.
-        [build.foo] version = "1.0") is a different key entirely.
+        [build.foo] version = "1.0") is a different key entirely. A top-level
+        `schema-version` counts as present: it *replaces* `version = 1`, and a
+        manifest holding both is rejected.
         """
         head = self.body
         first_table = _TABLE_HEADER.search(head)

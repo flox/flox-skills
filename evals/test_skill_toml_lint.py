@@ -132,6 +132,23 @@ class TestManifestText(unittest.TestCase):
         (block,) = lint.extract_blocks("```toml\nversion = 1\n[install]\n```\n", "d.md")
         self.assertEqual(block.manifest_text(), "version = 1\n[install]\n")
 
+    def test_leaves_snippet_alone_when_schema_version_present(self):
+        # `schema-version` REPLACES `version = 1` (a manifest holding both is
+        # rejected: "unknown field `schema-version`"), so a snippet declaring it
+        # — the only way to exercise a later-schema field like
+        # `services.auto-start` — must not get `version = 1` prepended (AI-503).
+        text = '```toml\nschema-version = "1.12.0"\n[services]\nauto-start = true\n```\n'
+        (block,) = lint.extract_blocks(text, "d.md")
+        self.assertEqual(
+            block.manifest_text(),
+            'schema-version = "1.12.0"\n[services]\nauto-start = true\n',
+        )
+
+    def test_schema_version_inside_a_table_does_not_count(self):
+        text = '```toml\n[build.x]\nschema-version = "1.0"\n```\n'
+        (block,) = lint.extract_blocks(text, "d.md")
+        self.assertTrue(block.manifest_text().startswith("version = 1\n"))
+
     def test_version_inside_a_table_does_not_count(self):
         # [build.x] version = "1.0" is a package version, not the manifest
         # schema version — prepending is still required or flox rejects it.
