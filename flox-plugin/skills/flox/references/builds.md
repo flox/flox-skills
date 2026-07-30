@@ -130,7 +130,9 @@ command      = '''  # required – Bash, multiline string
 '''
 version      = "1.2.3"               # optional
 description  = "one-line summary"    # optional
-sandbox      = "pure" | "off"        # default: off
+sandbox      = "off" | "warn" | "enforce" | "pure"   # default: off
+                                     # "warn"/"enforce" need schema-version "1.13.0"+
+sandbox-allow = [ "~/.npm/**" ]      # optional; schema-version "1.13.0"+
 runtime-packages = [ "id1", "id2" ]  # optional
 ```
 
@@ -149,7 +151,32 @@ runtime-packages = [ "id1", "id2" ]  # optional
 | sandbox value | Filesystem scope | Network | Typical use-case |
 |---------------|------------------|---------|------------------|
 | `"off"` (default) | Project working tree; complete host FS | allowed | Fast, iterative dev builds |
+| `"warn"` | Same as `"off"`, but each read from outside the package closure is reported | allowed | Finding undeclared dependencies without breaking the build |
+| `"enforce"` | Reads from outside the package closure are denied | allowed | Failing the build on undeclared dependencies, without full purity |
 | `"pure"` | Git-tracked files only, copied to tmp | Linux: blocked<br>macOS: allowed | Reproducible, host-agnostic packages |
+
+**`"warn"` and `"enforce"` require `schema-version = "1.13.0"` or newer.** Under
+`version = 1` they fail to parse with ``unknown variant `warn`, expected `off`
+or `pure` `` — the message points at the value, but the fix is the manifest's
+version line (see *Manifest Schema Versions* in SKILL.md).
+
+`sandbox-allow` (same 1.13.0 requirement) exempts specific paths from the
+`"warn"`/`"enforce"` check. A leading `~/` expands to `$HOME`, and `*`/`**`
+match across path separators. Patterns must not contain spaces, and the key has
+no effect under `"off"` or `"pure"`:
+
+```toml
+schema-version = "1.13.0"
+
+[build.app]
+command = '''
+  npm ci
+  mkdir -p $out/bin
+  cp -r dist $out/
+'''
+sandbox = "warn"
+sandbox-allow = [ "~/.npm/**" ]
+```
 
 Pure mode highlights undeclared inputs early and is mandatory for builds intended for CI/CD publication. When a pure build needs pre-fetched artifacts (e.g. language modules) use a two-stage pattern:
 

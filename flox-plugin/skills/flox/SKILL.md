@@ -23,10 +23,17 @@ High-value specifics that are easy to get wrong from memory. These are
 authoritative; use them inline without opening a reference file.
 
 **Manifest essentials**
-- Every manifest starts with `version = 1` — *unless* it uses a field a later
-  schema introduced, which needs `schema-version = "<X.Y.Z>"` **in place of**
-  `version = 1` (e.g. `services.auto-start` needs `"1.12.0"` or newer). The two
-  keys are mutually exclusive; a manifest carrying both is a parse error.
+- Every manifest declares a schema: the legacy `version = 1`, or
+  `schema-version = "<X.Y.Z>"` **in place of** it. The two keys are mutually
+  exclusive; a manifest carrying both is a parse error. **`schema-version` is
+  the minimum flox CLI version that can read the environment** —
+  `schema-version = "1.12.0"` means flox 1.12.0 or newer. An older CLI refuses
+  it outright: `manifest had invalid schema version '1.14.0'`. Flox migrates
+  manifests it can already parse up to the newest schema on its own, but that
+  never covers *your* edits: adding a schema-gated field by hand means
+  replacing the version line in the same edit, or flox rejects the file. See
+  [Manifest Schema Versions](#manifest-schema-versions) for which version
+  gates what.
 - **Never invent a package name or version.** Verify names with `flox search
   <term>` and versions with `flox show <pkg>`; pin only to a version `flox show`
   actually lists — pick the closest available if the exact one is absent. The
@@ -255,6 +262,80 @@ many versions:
 - `[build]`: Reproducible build commands (see `references/builds.md`)
 - `[include]`: Compose other environments (see `references/sharing.md`)
 - `[options]`: Activation mode, supported systems
+
+## Manifest Schema Versions
+
+Every manifest declares which schema it follows, on the very first key:
+
+```toml
+# eval: skip fragment - alternative forms of one field
+version = 1                   # legacy form: any flox CLI
+schema-version = "1.12.0"     # modern form: needs flox >= 1.12.0
+```
+
+**The two keys are mutually exclusive.** A manifest carrying both is rejected;
+bumping a schema means *replacing* the `version = 1` line, not adding to it.
+
+**A schema version is a minimum CLI version.** The value is literally a flox
+release number, and it names the oldest CLI that can read the environment.
+`schema-version = "1.13.0"` works on flox 1.13.0 and everything newer; on flox
+1.12.x it fails immediately with `manifest had invalid schema version
+'1.13.0'`. That is the whole point of the field — it lets an environment say
+"you need at least this much flox" before anything else is attempted.
+
+Only releases that actually changed the schema get a version, so the valid
+values are a short list, not every flox release:
+
+| Schema | Introduced in | What it gates |
+|--------|---------------|---------------|
+| `version = 1` | before 1.10.0 | the original schema — gates nothing, and every flox still accepts it |
+| `"1.10.0"` | flox 1.10.0 | package `outputs` selection in `[install]` |
+| `"1.11.0"` | flox 1.11.0 | `minimum-cli-version` |
+| `"1.12.0"` | flox 1.12.0 | `[services] auto-start` |
+| `"1.13.0"` | flox 1.13.0 | `[profile] deactivate`; build `sandbox = "warn" \| "enforce"` and `sandbox-allow` |
+| `"1.14.0"` | flox 1.14.0 | `[plugins.<pkg-name>]` tables |
+
+**New environments get the CLI's newest schema.** `flox init` writes the latest
+value the installed CLI knows — flox 1.13.2 writes `schema-version = "1.13.0"`
+(the newest *schema*, which is why a patch release still writes `.0`).
+
+**Flox forward-migrates existing manifests, but only ones it can already
+parse.** Any command that successfully loads an environment rewrites the
+on-disk manifest to the CLI's latest schema — a `version = 1` manifest becomes
+`schema-version = "1.13.0"` after a single `flox list` on flox 1.13.2. That is
+why you will often find a manifest already new enough for the field you want.
+
+**That migration cannot rescue a hand-edit**, because parsing happens first. If
+you add a newer field with an editor or `sed` and leave the old version line in
+place, flox rejects the file before it would ever migrate it. So when *you*
+write the field, you must raise the version line **in the same edit** — check
+the first line first, and leave an already-higher `schema-version` alone.
+
+**Getting it wrong is a parse error, not a silent no-op** — the schema is
+enforced with `deny_unknown_fields`, so an unknown or mistyped key is rejected
+rather than ignored. The message names the field, not the schema, which makes
+it easy to misread as "this key doesn't exist" when the real fix is a version
+bump:
+
+- `auto-start = true` under `version = 1` →
+  ``invalid type: boolean `true`, expected struct ServiceDescriptor in `services.auto-start` ``
+- `sandbox = "warn"` under `version = 1` →
+  ``unknown variant `warn`, expected `off` or `pure` in `build.<name>.sandbox` ``
+
+If a key you know exists is rejected, check the manifest's schema version
+before concluding the key is wrong.
+
+**`minimum-cli-version` is a separate, softer knob** (itself needing schema
+`"1.11.0"`+). Use it to ask for a *higher* CLI than the schema alone implies —
+typically a bugfix release, where nothing about the manifest's shape changed.
+The difference matters: a too-old `schema-version` is a hard parse failure,
+whereas a too-old `minimum-cli-version` only emits a warning and the command
+still runs. It takes a bare semver string or a table with a reason:
+
+```toml
+schema-version = "1.11.0"
+minimum-cli-version = { version = "1.12.1", reason = "needs the service restart fix" }
+```
 
 ## The [install] Section
 
