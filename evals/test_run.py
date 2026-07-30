@@ -135,13 +135,164 @@ class TestAutoStartChecks(unittest.TestCase):
                   '```toml\n[services.web]\nauto-start = true\n```\n')
         self.assertFalse(run._sets_auto_start(answer))
 
-    def test_schema_version_check_requires_1_12_or_newer(self):
-        ok = run.CHECKS["auto_start_schema_version"]
-        self.assertTrue(ok('schema-version = "1.12.0"'))
-        self.assertTrue(ok('schema-version = "1.13.0"'))
-        self.assertTrue(ok('schema-version = "1.20.0"'))
-        self.assertFalse(ok('schema-version = "1.11.0"'))
-        self.assertFalse(ok("version = 1"))
+    def test_accepts_manifest_preceded_by_a_bash_block(self):
+        # ANSWER_SUFFIX asks for the manifest *and* the commands, so a mixed
+        # answer is the expected shape and block order varies run to run. The
+        # old fence regex matched an empty info string, so the closing ```
+        # of the bash block read as an opening one and the manifest was lost —
+        # a red gate on a correct answer.
+        answer = ('```bash\nflox edit\n```\n\n'
+                  '```toml\nschema-version = "1.12.0"\n\n[services]\n'
+                  'auto-start = true\nweb.command = "x"\n```\n')
+        self.assertTrue(run._sets_auto_start(answer))
+        self.assertTrue(run.CHECKS["auto_start_schema_version"](answer))
+
+    def test_rejects_auto_start_inside_a_multiline_command_body(self):
+        # tomllib: `services.auto-start` does not exist here — the text is
+        # part of `web.command`. The old line scanner had no '''/""" state.
+        self.assertFalse(run._sets_auto_start(self._answer(
+            'schema-version = "1.12.0"\n\n[services]\nweb.command = \'\'\'\n'
+            'auto-start = true\nsleep 100\n\'\'\'\n'
+        )))
+
+    def test_accepts_key_after_a_bracket_leading_shell_line(self):
+        # `[ -d node_modules ] || npm ci` inside a command body set the
+        # scanner's current table to `-d node_modules`, hiding the real key
+        # that followed — a manifest tomllib confirms is correct.
+        self.assertTrue(run._sets_auto_start(self._answer(
+            'schema-version = "1.12.0"\n\n[services]\nweb.command = \'\'\'\n'
+            '[ -d node_modules ] || npm ci\nnpm start\n\'\'\'\n'
+            'auto-start = true\n'
+        )))
+
+
+class TestAutoStartSchemaVersion(unittest.TestCase):
+    """The schema half of the `services.auto-start` gate (AI-503).
+
+    All three facts — the key is set, the schema is new enough, no `version = 1`
+    survives — must hold in the SAME fenced manifest. Asserting them across the
+    whole answer certified manifests the check never inspected.
+    """
+
+    ok = staticmethod(lambda a: run.CHECKS["auto_start_schema_version"](a))
+
+    def _manifest(self, version_line):
+        return (f'```toml\n{version_line}\n\n[services]\nauto-start = true\n'
+                'web.command = "python3 -m http.server"\n```\n')
+
+    def test_accepts_1_12_and_newer(self):
+        for v in ('"1.12.0"', '"1.13.0"', '"1.20.0"', '"1.100.0"', '"2.0.0"'):
+            with self.subTest(v=v):
+                self.assertTrue(self.ok(self._manifest(f"schema-version = {v}")))
+
+    def test_accepts_toml_literal_string_form(self):
+        # `'1.12.0'` is an ordinary TOML string; the old substring probe only
+        # matched the double-quoted spelling.
+        self.assertTrue(self.ok(self._manifest("schema-version = '1.12.0'")))
+
+    def test_rejects_older_schema(self):
+        for v in ('"1.11.0"', '"1.10.0"'):
+            with self.subTest(v=v):
+                self.assertFalse(self.ok(self._manifest(f"schema-version = {v}")))
+
+    def test_rejects_legacy_version_line(self):
+        self.assertFalse(self.ok(self._manifest("version = 1")))
+
+    def test_rejects_malformed_versions(self):
+        # A substring probe accepted all of these.
+        for v in ('"1.12garbage"', '"1.29-nonsense"', '"1.12"', '"garbage"'):
+            with self.subTest(v=v):
+                self.assertFalse(self.ok(self._manifest(f"schema-version = {v}")))
+
+    def test_rejects_prose_schema_over_a_version_1_manifest(self):
+        # The RED this task exists to catch: "knows the key exists and even
+        # places it correctly, but keeps `version = 1`". flox rejects it with
+        # `invalid type: boolean true, expected struct ServiceDescriptor`.
+        answer = ('You need schema-version = "1.12.0" for this.\n\n'
+                  '```toml\nversion = 1\n\n[services]\nauto-start = true\n'
+                  'web.command = "x"\n```\n')
+        self.assertTrue(run._sets_auto_start(answer))  # placement is right
+        self.assertFalse(self.ok(answer))              # ... but it cannot load
+
+    def test_rejects_schema_declared_in_a_different_block(self):
+        answer = ('```toml\nschema-version = "1.12.0"\n```\n\n'
+                  '```toml\nversion = 1\n\n[services]\nauto-start = true\n```\n')
+        self.assertFalse(self.ok(answer))
+
+    def test_rejects_manifest_carrying_both_version_keys(self):
+        # flox rejects a manifest with both spellings.
+        answer = ('```toml\nversion = 1\nschema-version = "1.12.0"\n\n'
+                  '[services]\nauto-start = true\n```\n')
+        self.assertFalse(self.ok(answer))
+
+
+class TestBuildSandboxChecks(unittest.TestCase):
+    """`sandbox = "warn"|"enforce"` / `sandbox-allow` hard-checks (AI-503).
+
+    Both fields arrived with schema 1.13.0; under `version = 1` flox rejects
+    the manifest with ``unknown variant `warn`, expected `off` or `pure` ``.
+    """
+
+    def _answer(self, toml):
+        return f"```toml\n{toml}```\n"
+
+    ENFORCE = ('[build.app]\ncommand = "make"\nsandbox = "enforce"\n'
+               'sandbox-allow = [ "~/.npm/**" ]\n')
+
+    def test_accepts_enforce_with_schema_1_13(self):
+        a = self._answer(f'schema-version = "1.13.0"\n\n{self.ENFORCE}')
+        self.assertTrue(run.CHECKS["sets_build_sandbox_mode"](a))
+        self.assertTrue(run.CHECKS["build_sandbox_schema_version"](a))
+
+    def test_rejects_gated_field_under_version_1(self):
+        a = self._answer(f"version = 1\n\n{self.ENFORCE}")
+        self.assertTrue(run.CHECKS["sets_build_sandbox_mode"](a))
+        self.assertFalse(run.CHECKS["build_sandbox_schema_version"](a))
+
+    def test_rejects_schema_below_1_13(self):
+        a = self._answer(f'schema-version = "1.12.0"\n\n{self.ENFORCE}')
+        self.assertFalse(run.CHECKS["build_sandbox_schema_version"](a))
+
+    def test_ungated_sandbox_values_do_not_count(self):
+        for mode in ('"off"', '"pure"'):
+            with self.subTest(mode=mode):
+                a = self._answer(f'version = 1\n\n[build.app]\ncommand = "make"\n'
+                                 f"sandbox = {mode}\n")
+                self.assertFalse(run.CHECKS["sets_build_sandbox_mode"](a))
+
+    def test_boolean_sandbox_does_not_count(self):
+        # `sandbox = true` is the habit the skill exists to break.
+        a = self._answer('schema-version = "1.13.0"\n\n[build.app]\n'
+                         'command = "make"\nsandbox = true\n')
+        self.assertFalse(run.CHECKS["sets_build_sandbox_mode"](a))
+
+    def test_prose_only_mention_does_not_count(self):
+        self.assertFalse(run.CHECKS["sets_build_sandbox_mode"](
+            'Set sandbox = "enforce" in your build section.'
+        ))
+
+
+class TestFencedManifestExtraction(unittest.TestCase):
+    """Fence handling is delegated to `skill_toml_lint.extract_blocks`."""
+
+    def test_skips_non_toml_fences(self):
+        text = '```bash\nflox install hello\n```\n\n```toml\nversion = 1\n```\n'
+        self.assertEqual([b.body for b in run._fenced_manifests(text)], ["version = 1\n"])
+
+    def test_unterminated_fence_does_not_lose_earlier_blocks(self):
+        text = '```toml\nversion = 1\n```\n\n```toml\n[services]\nauto-start = true\n'
+        self.assertEqual(len(run._fenced_manifests(text)), 2)
+
+    def test_invalid_toml_block_is_dropped_not_raised(self):
+        text = '```toml\nthis is not = = toml\n```\n\n```toml\nversion = 1\n```\n'
+        self.assertEqual(run._parsed_manifests(text), [{"version": 1}])
+
+
+class TestBuildParser(unittest.TestCase):
+    def test_help_renders(self):
+        # argparse percent-expands help lazily, so a bare `%` only raises when
+        # the help is formatted. This covers every help string in run.py.
+        self.assertIn("--gate", run.build_parser().format_help())
 
 
 class TestCostSummary(unittest.TestCase):

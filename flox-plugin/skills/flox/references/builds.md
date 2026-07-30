@@ -162,8 +162,12 @@ version line (see *Manifest Schema Versions* in SKILL.md).
 
 `sandbox-allow` (same 1.13.0 requirement) exempts specific paths from the
 `"warn"`/`"enforce"` check. A leading `~/` expands to `$HOME`, and `*`/`**`
-match across path separators. Patterns must not contain spaces, and the key has
-no effect under `"off"` or `"pure"`:
+match across path separators. The key has no effect under `"off"` or `"pure"`.
+
+⚠ **A pattern containing a space will not match**, even though it parses
+cleanly — the list is space-joined into a single value handed to the sandbox,
+so a space splits one pattern into two. Give a directory with a space in its
+name a glob that avoids the space (`"~/*/**"`) or move the path.
 
 ```toml
 schema-version = "1.13.0"
