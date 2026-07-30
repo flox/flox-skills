@@ -95,11 +95,23 @@ LIVE_CATALOG = os.environ.get("FLOXIFY_GOLDEN_LINT_LIVE_CATALOG", "1") != "0"
 # Populated from a live `flox show` run against nixpkgs on 2026-07-16 (see
 # the AI-461 PR description for that snapshot) and burned down to empty by
 # AI-457, which fixed every golden's content instead of leaving it
-# allowlisted. Kept as an empty dict rather than deleted: the stale-entry
-# test (test_known_violations_allowlist_has_no_stale_entries) and every
-# `_is_allowlisted` call still need the symbol to exist. New entries here
-# should be rare and always tagged with the ticket that will resolve them.
-KNOWN_VIOLATIONS = {}
+# allowlisted. New entries here should be rare and always tagged with the
+# ticket that will resolve them.
+KNOWN_VIOLATIONS = {
+    # Live-catalog drift, not a regression in any change that trips it: the
+    # newest `gcc` the catalog now serves is 15.3.0, which has no
+    # x86_64-darwin build, while lemmy.toml's `options.systems` declares all
+    # four systems. Nothing in lemmy.toml changed — the catalog moved under
+    # it, so the golden started failing on an unrelated PR. This is the
+    # allowlist's stated purpose; the content fix (pin `gcc.version` to a
+    # release that builds on all four systems, or scope `gcc.systems` to
+    # Linux) belongs to AI-457, which owns golden content.
+    #
+    # Deliberately narrow: the key matches ONLY lemmy's `gcc` under the
+    # `catalog-systems-mismatch` rule, so any other golden, any other
+    # package, or any other rule on this same package still fails loudly.
+    ("lemmy", "catalog-systems-mismatch", "gcc"): "AI-457",
+}
 
 
 def _matches(fixture_id, v, key):
