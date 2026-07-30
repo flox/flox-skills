@@ -158,7 +158,7 @@ runtime-packages = [ "id1", "id2" ]  # optional
 **`"warn"` and `"enforce"` require `schema-version = "1.13.0"` or newer.** Under
 `version = 1` they fail to parse with ``unknown variant `warn`, expected `off`
 or `pure` `` — the message points at the value, but the fix is the manifest's
-version line (see *Manifest Schema Versions* in SKILL.md).
+version line (see `references/schema-versions.md`).
 
 `sandbox-allow` (same 1.13.0 requirement) exempts specific paths from the
 `"warn"`/`"enforce"` check. A leading `~/` expands to `$HOME`, and `*`/`**`
