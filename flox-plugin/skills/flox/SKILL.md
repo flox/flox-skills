@@ -23,7 +23,10 @@ High-value specifics that are easy to get wrong from memory. These are
 authoritative; use them inline without opening a reference file.
 
 **Manifest essentials**
-- Every manifest starts with `version = 1`.
+- Every manifest starts with `version = 1` — *unless* it uses a field a later
+  schema introduced, which needs `schema-version = "<X.Y.Z>"` **in place of**
+  `version = 1` (e.g. `services.auto-start` needs `"1.12.0"` or newer). The two
+  keys are mutually exclusive; a manifest carrying both is a parse error.
 - **Never invent a package name or version.** Verify names with `flox search
   <term>` and versions with `flox show <pkg>`; pin only to a version `flox show`
   actually lists — pick the closest available if the exact one is absent. The
@@ -75,6 +78,25 @@ authoritative; use them inline without opening a reference file.
 **Services** — depth in `references/services.md`
 - A self-daemonizing process needs `is-daemon = true` and a `shutdown.command`
   in its `[services.<name>]` block, not just `command`.
+- **"make this environment auto-start its services" / "start the services
+  automatically on activate" / "I don't want to pass `-s` every time" = a
+  manifest edit**, not a command or a hook. Set `auto-start = true` directly
+  under `[services]`, and change the manifest's `version = 1` line to
+  `schema-version = "1.12.0"` (the schema version that added the key; leave an
+  already-higher one alone):
+  ```toml
+  schema-version = "1.12.0"
+
+  [services]
+  auto-start = true
+
+  [services.web]
+  command = '''exec python -m http.server 8000'''
+  ```
+  It is a key of the `[services]` table, a sibling of the service names, and it
+  applies to **all** services — there is no per-service form, so "make *this
+  service* auto-start" still means this one env-wide key (say so). Default is
+  off; `flox activate --no-start-services` overrides it for one activation.
 
 **Sharing / compose / layer** — depth in `references/sharing.md`
 - Build-time compose (merge into one definition): `[include]` with
@@ -99,6 +121,8 @@ authoritative; use them inline without opening a reference file.
   enter its directory (direnv-like, via the shell hook). Control it per-directory
   with `flox activate allow` / `flox activate deny`; the default behavior is the
   `auto_activate` config option (`flox config`), which defaults to prompting.
+  Auto-activation still starts no services unless the manifest sets
+  `[services] auto-start = true`.
 - **`flox activate -m dev|run`** — choose dev vs run activation mode, overriding
   `options.activate.mode` in the manifest.
 
@@ -226,7 +250,8 @@ many versions:
 - `[vars]`: Static variables
 - `[hook]`: Non-interactive setup scripts
 - `[profile]`: Shell-specific functions/aliases
-- `[services]`: Service definitions (see `references/services.md`)
+- `[services]`: Service definitions, plus the env-wide `auto-start` toggle (see
+  `references/services.md`)
 - `[build]`: Reproducible build commands (see `references/builds.md`)
 - `[include]`: Compose other environments (see `references/sharing.md`)
 - `[options]`: Activation mode, supported systems

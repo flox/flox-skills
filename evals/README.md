@@ -183,6 +183,18 @@ a networked runner behaves exactly like an air-gapped one. The catalog tier is
 report-only by design: it fails for reasons that have nothing to do with the
 skill (catalog outage, a package legitimately renamed).
 
+### Snippets that declare `schema-version`
+
+The guard prepends `version = 1` to any block that doesn't declare a schema
+itself. A block exercising a field a **later** schema added — `services.
+auto-start`, which needs `schema-version = "1.12.0"` — must declare that key
+instead, and the two spellings are mutually exclusive in flox (a manifest
+carrying both is rejected with ``unknown field `schema-version` ``). So a
+top-level `schema-version` suppresses the prepend exactly like `version = 1`
+does. AI-503 found this the hard way: the first correct auto-start snippet in
+`services.md` failed the guard for a reason that had nothing to do with the
+snippet.
+
 ### Opting a block out
 
 A block that is deliberately partial — package descriptors with no `[install]`

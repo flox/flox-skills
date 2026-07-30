@@ -62,6 +62,45 @@ def toml_blocks(text):
     return "\n".join(re.findall(r"```(?:toml)?\n(.*?)```", text, re.S))
 
 
+# `services.auto-start` (AI-503). Two things are checkable and both are things a
+# model gets wrong without the skill:
+#
+#   1. Placement. The key belongs to the `[services]` table itself, alongside the
+#      service names — under a `[services.<name>]` block flox rejects it
+#      ("unknown field `auto-start`"). A plain string grep would pass that wrong
+#      manifest, so _sets_auto_start tracks the enclosing table.
+#   2. Schema version. The key was introduced in schema 1.12.0; in a
+#      `version = 1` manifest it fails to parse ("invalid type: boolean `true`,
+#      expected struct ServiceDescriptor"). An answer that never mentions
+#      `schema-version` hands the user a manifest that cannot be loaded.
+_AUTO_START_TRUE = re.compile(r"auto-start\s*=\s*true\b")
+_TOML_TABLE = re.compile(r"\[([^\]]+)\]")
+# 1.12.0 or newer: 1.12–1.19, or 1.20+ / any 1.<2-digit>.
+_AUTO_START_SCHEMA = re.compile(r'schema-version\s*=\s*"1\.(?:1[2-9]|[2-9]\d)')
+
+
+def _sets_auto_start(answer):
+    """True iff some TOML block sets `auto-start = true` at `[services]` scope.
+
+    Scoped per block (each fenced block is its own manifest) so a `[services]`
+    header in one snippet can't vouch for a stray `auto-start` line in another.
+    """
+    for block in re.findall(r"```(?:toml)?\n(.*?)```", answer, re.S):
+        table = None
+        for line in block.splitlines():
+            stripped = line.strip()
+            header = _TOML_TABLE.match(stripped)
+            if header:
+                table = header.group(1).strip()
+                continue
+            # Top-level dotted form is equivalent, but only before any header.
+            if table is None and re.match(r"services\.auto-start\s*=\s*true\b", stripped):
+                return True
+            if table == "services" and _AUTO_START_TRUE.match(stripped):
+                return True
+    return False
+
+
 CHECKS = {
     "no_fake_install_url": lambda a: not FAKE_INSTALL.search(a),
     "no_abs_paths": lambda a: not ABS_PATH.search(toml_blocks(a)),
@@ -72,6 +111,8 @@ CHECKS = {
     "uses_flox_publish": lambda a: "flox publish" in a,
     "uses_include_or_layer": lambda a: "[include]" in a or "flox activate -r" in a,
     "uses_search_show": lambda a: "flox search" in a or "flox show" in a,
+    "sets_services_auto_start": _sets_auto_start,
+    "auto_start_schema_version": lambda a: bool(_AUTO_START_SCHEMA.search(a)),
     "uses_remote_env": lambda a: "flox push" in a or "flox pull" in a or "flox activate -r" in a,
     # Implicit-trigger check: did the skill fire and produce Flox guidance even
     # though the prompt never said "flox"?
@@ -254,7 +295,9 @@ def main():
     ap.add_argument("--tasks", default=str(HERE / "tasks.jsonl"))
     ap.add_argument("--only", help="run a single task id")
     ap.add_argument("--gate", action="store_true",
-                    help="exit non-zero if binding gates fail (functional should-tier < 100%)")
+                    # `%%` — argparse percent-expands help strings, and a bare
+                    # `%)` raises "badly formed help string" on Python 3.14.
+                    help="exit non-zero if binding gates fail (functional should-tier < 100%%)")
     ap.add_argument("--plugin-dir", help="override the plugin dir (e.g. a pre-consolidation checkout)")
     ap.add_argument("--out", help="output filename under results/ (default: <mode>.json)")
     ap.add_argument("--concurrency", type=int, default=6,
