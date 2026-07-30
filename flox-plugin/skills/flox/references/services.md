@@ -55,8 +55,8 @@ The details that are easy to get wrong:
   `version = 1` line with `schema-version = "1.12.0"` in the same edit
   (leave an already-higher `schema-version` alone). The two keys are
   mutually exclusive — a manifest carrying both is rejected.
-  This is one instance of a general rule, covered in SKILL.md under
-  *Manifest Schema Versions*, and worth knowing before you edit any
+  This is one instance of a general rule, covered in full in
+  `references/schema-versions.md`, and worth knowing before you edit any
   manifest:
   - A `schema-version` value **is a minimum flox CLI version.** Setting
     `"1.12.0"` says "flox 1.12.0 or newer required"; an older CLI stops
@@ -79,8 +79,10 @@ The details that are easy to get wrong:
     fits the schema the file declares (`flox install openssl` on a
     `version = 1` manifest jumps to `"1.13.0"`, because recording a
     multi-output package needs `outputs`), and leaves it alone when
-    nothing requires the change (`flox install hello`, `flox list`,
-    `flox activate`). Don't count on it having happened.
+    nothing requires the change (`flox install hello`). It is the
+    environment's contents that decide this, not which command you ran —
+    even a plain `flox activate` can bump the line. Don't count on it
+    having happened either way; read the first line.
   - **Migration will never save your edit.** Flox parses before it
     migrates, so adding `auto-start` while the file still says
     `version = 1` is rejected outright — the migration logic never sees
