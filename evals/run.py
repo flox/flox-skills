@@ -16,8 +16,11 @@ import re
 import subprocess
 import sys
 import time
+import tomllib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+import skill_toml_lint
 
 HERE = Path(__file__).resolve().parent
 PLUGIN_DIR = HERE.parent / "flox-plugin"
@@ -58,8 +61,45 @@ FAKE_INSTALL = re.compile(
 ABS_PATH = re.compile(r'=\s*"(/home/|/Users/|/usr/local/|/opt/|/root/)', re.I)
 
 
+def _fenced_manifests(text):
+    """Every fenced ```toml block in `text`, in document order.
+
+    Delegates fence handling to `skill_toml_lint.extract_blocks`, which is
+    indent- and info-string-aware and unit-tested in this same package. The
+    regex this replaced (`` ```(?:toml)?\\n(.*?)``` ``) matched an empty info
+    string, so a bare *closing* fence read as an opening one: in an answer
+    whose ```bash block preceded its ```toml block, the manifest was silently
+    lost. Since ANSWER_SUFFIX asks for the manifest *and* the commands, that
+    is the expected shape of a correct answer.
+    """
+    try:
+        return skill_toml_lint.extract_blocks(text, "<answer>")
+    except ValueError:
+        # A model answer can end mid-fence. Close it and retry rather than
+        # dropping every block in the answer.
+        try:
+            return skill_toml_lint.extract_blocks(text + "\n```\n", "<answer>")
+        except ValueError:
+            return []
+
+
 def toml_blocks(text):
-    return "\n".join(re.findall(r"```(?:toml)?\n(.*?)```", text, re.S))
+    return "\n".join(b.body for b in _fenced_manifests(text))
+
+
+def _parsed_manifests(text):
+    """Each fenced ```toml block parsed with `tomllib`, as a dict.
+
+    Blocks that are not valid TOML are dropped: a check cannot certify a
+    manifest flox would refuse to read.
+    """
+    out = []
+    for block in _fenced_manifests(text):
+        try:
+            out.append(tomllib.loads(block.body))
+        except (tomllib.TOMLDecodeError, ValueError):
+            continue
+    return out
 
 
 # `services.auto-start` (AI-503). Two things are checkable and both are things a
@@ -73,32 +113,103 @@ def toml_blocks(text):
 #      `version = 1` manifest it fails to parse ("invalid type: boolean `true`,
 #      expected struct ServiceDescriptor"). An answer that never mentions
 #      `schema-version` hands the user a manifest that cannot be loaded.
-_AUTO_START_TRUE = re.compile(r"auto-start\s*=\s*true\b")
-_TOML_TABLE = re.compile(r"\[([^\]]+)\]")
-# 1.12.0 or newer: 1.12–1.19, or 1.20+ / any 1.<2-digit>.
-_AUTO_START_SCHEMA = re.compile(r'schema-version\s*=\s*"1\.(?:1[2-9]|[2-9]\d)')
+# Both facts are asserted against the *parsed* manifest rather than its text.
+# The line scanner this replaced tracked the enclosing table with a regex and
+# had no `'''`/`\"\"\"` state, so it both over- and under-reported: an
+# `auto-start = true` line inside a multiline command body counted as a real
+# key, and a `[ -d node_modules ] || npm ci` line inside one set the current
+# table to `-d node_modules`, hiding a correct key that followed. Asking
+# `tomllib` for `services["auto-start"]` makes both impossible.
+# Full `X.Y.Z` only — flox matches the value against a literal list, so a
+# two-component `"1.12"` is rejected outright (`manifest had invalid schema
+# version '1.12'`, verified on flox 1.13.2).
+_SCHEMA_VERSION = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+_MIN_AUTO_START_SCHEMA = (1, 12)
+
+
+def _auto_start_manifests(answer):
+    """Parsed manifests that set `auto-start = true` on the `[services]` table.
+
+    Scoped per block (each fenced block is its own manifest) so a `[services]`
+    header in one snippet can't vouch for a stray `auto-start` line in another,
+    and `[services.<name>] auto-start = true` — which flox rejects with
+    ``unknown field `auto-start` `` — lands under the service, not `services`,
+    so it correctly does not count.
+    """
+    return [
+        m for m in _parsed_manifests(answer)
+        if isinstance(m.get("services"), dict) and m["services"].get("auto-start") is True
+    ]
 
 
 def _sets_auto_start(answer):
-    """True iff some TOML block sets `auto-start = true` at `[services]` scope.
+    return bool(_auto_start_manifests(answer))
 
-    Scoped per block (each fenced block is its own manifest) so a `[services]`
-    header in one snippet can't vouch for a stray `auto-start` line in another.
+
+def _schema_at_least(value, minimum):
+    """True iff `value` is a version string at or above `minimum` (major, minor)."""
+    if not isinstance(value, str):
+        return False
+    m = _SCHEMA_VERSION.match(value.strip())
+    return bool(m) and (int(m.group(1)), int(m.group(2))) >= minimum
+
+
+def _auto_start_schema_version(answer):
+    """True iff the block that carries `auto-start` also carries a new-enough schema.
+
+    All three facts are asserted against the *same* manifest. Searching the
+    whole answer certified manifests it never inspected: an answer whose prose
+    said `schema-version = "1.12.0"` while its only fenced manifest kept
+    `version = 1` passed every check in the task, and that manifest does not
+    load (``invalid type: boolean `true`, expected struct ServiceDescriptor``)
+    — which is the exact RED failure this task exists to catch.
     """
-    for block in re.findall(r"```(?:toml)?\n(.*?)```", answer, re.S):
-        table = None
-        for line in block.splitlines():
-            stripped = line.strip()
-            header = _TOML_TABLE.match(stripped)
-            if header:
-                table = header.group(1).strip()
-                continue
-            # Top-level dotted form is equivalent, but only before any header.
-            if table is None and re.match(r"services\.auto-start\s*=\s*true\b", stripped):
-                return True
-            if table == "services" and _AUTO_START_TRUE.match(stripped):
-                return True
-    return False
+    return any(
+        _schema_at_least(m.get("schema-version"), _MIN_AUTO_START_SCHEMA)
+        # `version` and `schema-version` are mutually exclusive in flox; a
+        # surviving `version = 1` line means the manifest is still rejected.
+        and "version" not in m
+        for m in _auto_start_manifests(answer)
+    )
+
+
+# Build sandbox modes (AI-503, second half). `sandbox = "warn"|"enforce"` and
+# `sandbox-allow` all arrived with schema 1.13.0, so an answer that uses them
+# under `version = 1` hands the user a manifest that will not load:
+# ``unknown variant `warn`, expected `off` or `pure` ``. Same shape as the
+# auto-start pair: placement, then the version line that makes it parse.
+_MIN_SANDBOX_MODE_SCHEMA = (1, 13)
+_GATED_SANDBOX_MODES = {"warn", "enforce"}
+
+
+def _sandbox_mode_manifests(answer):
+    """Parsed manifests using a 1.13.0-gated build sandbox field."""
+    out = []
+    for m in _parsed_manifests(answer):
+        builds = m.get("build")
+        if not isinstance(builds, dict):
+            continue
+        for descriptor in builds.values():
+            if isinstance(descriptor, dict) and (
+                descriptor.get("sandbox") in _GATED_SANDBOX_MODES
+                or "sandbox-allow" in descriptor
+            ):
+                out.append(m)
+                break
+    return out
+
+
+def _sets_sandbox_mode(answer):
+    return bool(_sandbox_mode_manifests(answer))
+
+
+def _sandbox_schema_version(answer):
+    """True iff the block using the gated sandbox field also declares schema 1.13.0+."""
+    return any(
+        _schema_at_least(m.get("schema-version"), _MIN_SANDBOX_MODE_SCHEMA)
+        and "version" not in m
+        for m in _sandbox_mode_manifests(answer)
+    )
 
 
 CHECKS = {
@@ -112,7 +223,9 @@ CHECKS = {
     "uses_include_or_layer": lambda a: "[include]" in a or "flox activate -r" in a,
     "uses_search_show": lambda a: "flox search" in a or "flox show" in a,
     "sets_services_auto_start": _sets_auto_start,
-    "auto_start_schema_version": lambda a: bool(_AUTO_START_SCHEMA.search(a)),
+    "auto_start_schema_version": _auto_start_schema_version,
+    "sets_build_sandbox_mode": _sets_sandbox_mode,
+    "build_sandbox_schema_version": _sandbox_schema_version,
     "uses_remote_env": lambda a: "flox push" in a or "flox pull" in a or "flox activate -r" in a,
     # Implicit-trigger check: did the skill fire and produce Flox guidance even
     # though the prompt never said "flox"?
@@ -286,8 +399,16 @@ def _read_golden(name):
         return None
 
 
-def main():
-    global MODEL, PLUGIN_DIR
+def build_parser():
+    """The CLI parser, extracted so a test can render every help string.
+
+    argparse percent-expands help text lazily, so a bare `%` is only caught
+    when the help is *formatted* — `--gate`'s "< 100%)" made the harness die
+    on import under Python 3.14 (`ValueError: badly formed help string`) and
+    on `--help` under 3.11, which CI pins. Nothing in the suite constructed
+    the parser, so no test could have caught it. `test_run.py` now calls
+    `format_help()` on this, which covers every help string in the file.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["skills", "baseline"], default="skills")
     ap.add_argument("--model", default=MODEL,
@@ -302,7 +423,12 @@ def main():
     ap.add_argument("--out", help="output filename under results/ (default: <mode>.json)")
     ap.add_argument("--concurrency", type=int, default=6,
                     help="parallel claude calls (default 6; lower if you hit rate limits)")
-    args = ap.parse_args()
+    return ap
+
+
+def main():
+    global MODEL, PLUGIN_DIR
+    args = build_parser().parse_args()
 
     MODEL = args.model
     if args.plugin_dir:

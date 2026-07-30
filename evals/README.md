@@ -145,8 +145,20 @@ chance of an all-green run). So `--gate` is split:
 
 - **Binding (deterministic):** every **functional `should`-tier** task must pass
   its **hard-checks** (no hallucinated Flox install, required manifest sections,
-  correct commands, etc.). These are regex-deterministic and stable; a failure
-  blocks the build.
+  correct commands, etc.). These are deterministic and stable; a failure blocks
+  the build.
+
+  Checks that assert something about a *manifest* parse it with `tomllib` and
+  inspect the resulting dict, rather than grepping the answer — a fenced block
+  is extracted with `skill_toml_lint.extract_blocks` and every fact about it is
+  asserted against that same block. This is not stylistic. A whole-answer grep
+  certifies manifests it never inspected: an answer whose prose says
+  `schema-version = "1.12.0"` while its only manifest keeps `version = 1`
+  passes a text search and hands the user a file flox refuses to load, which is
+  exactly the RED such a task exists to catch. Ad-hoc line scanners have the
+  same problem in miniature — without `'''`/`"""` state, a key inside a command
+  body reads as a real key, and a `[ -d dir ] || cmd` line reads as a table
+  header.
 - **Advisory (reported, never blocks):** `avg_judge_score`, `judge_correct_rate`,
   per-tier breakdown, and `should_trigger_rate`. These are tracked as quality/
   triggering trends (watch for a sustained drop), not pass/fail gates. `may` and
@@ -186,8 +198,8 @@ skill (catalog outage, a package legitimately renamed).
 ### Snippets that declare `schema-version`
 
 The guard prepends `version = 1` to any block that doesn't declare a schema
-itself. A block exercising a field a **later** schema added — `services.
-auto-start`, which needs `schema-version = "1.12.0"` — must declare that key
+itself. A block exercising a field a **later** schema added —
+`services.auto-start`, which needs `schema-version = "1.12.0"` — must declare that key
 instead, and the two spellings are mutually exclusive in flox (a manifest
 carrying both is rejected with ``unknown field `schema-version` ``). So a
 top-level `schema-version` suppresses the prepend exactly like `version = 1`

@@ -68,16 +68,23 @@ The details that are easy to get wrong:
     is `version = 1` (up to flox 1.9.1, before `schema-version`
     existed), then `"1.10.0"`, `"1.11.0"`, `"1.12.0"`, `"1.13.0"`,
     `"1.14.0"` — not every flox release.
-  - **New environments start at the CLI's newest schema**, and flox
-    forward-migrates older manifests it can parse (one `flox list` on
-    flox 1.13.2 turns `version = 1` into
-    `schema-version = "1.13.0"`). So an environment touched by a recent
-    flox is often already new enough for `auto-start` — read the first
-    line before you change it.
-  - **That migration will not save your edit.** Flox parses before it
+  - **New environments start at the CLI's newest schema.** `flox init`
+    has written a `schema-version` since flox 1.10.0, and on 1.13.2 it
+    writes `"1.13.0"`. So an environment created by a recent flox is
+    often already new enough for `auto-start` — read the first line
+    before you change it. That is because of how it was *created*, not
+    because something upgraded it later.
+  - **Flox forward-migrates only when an operation needs it.** It
+    rewrites the version line when the result of a command no longer
+    fits the schema the file declares (`flox install openssl` on a
+    `version = 1` manifest jumps to `"1.13.0"`, because recording a
+    multi-output package needs `outputs`), and leaves it alone when
+    nothing requires the change (`flox install hello`, `flox list`,
+    `flox activate`). Don't count on it having happened.
+  - **Migration will never save your edit.** Flox parses before it
     migrates, so adding `auto-start` while the file still says
-    `version = 1` is rejected outright. Bump the version line in the
-    *same* edit that adds the key.
+    `version = 1` is rejected outright — the migration logic never sees
+    it. Bump the version line in the *same* edit that adds the key.
 - **The default is off.** Omitting the key behaves exactly like
   `auto-start = false`: activation starts nothing.
 - **Per-activation overrides still win.** `flox activate
