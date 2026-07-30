@@ -98,7 +98,7 @@ jobs:
                 && inputs.publish == true) }}
         run: flox publish -o flox skills-flox --system ${{ matrix.system }}
         env:
-          FLOX_FLOXHUB_TOKEN: ${{ secrets.FLOX_FLOXHUB_TOKEN }}
+          FLOX_FLOXHUB_TOKEN: ${{ secrets.MANAGED_FLOX_SKILLS_FLOXHUB_TOKEN }}
 
   # Single required status: collapses the per-system matrix into one
   # pass/fail. always() so it reports even when a leg fails; it then
