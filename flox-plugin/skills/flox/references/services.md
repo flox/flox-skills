@@ -55,6 +55,29 @@ The details that are easy to get wrong:
   `version = 1` line with `schema-version = "1.12.0"` in the same edit
   (leave an already-higher `schema-version` alone). The two keys are
   mutually exclusive — a manifest carrying both is rejected.
+  This is one instance of a general rule, covered in SKILL.md under
+  *Manifest Schema Versions*, and worth knowing before you edit any
+  manifest:
+  - A `schema-version` value **is a minimum flox CLI version.** Setting
+    `"1.12.0"` says "flox 1.12.0 or newer required"; an older CLI stops
+    with `manifest had invalid schema version '1.12.0'`. So bumping the
+    schema to reach `auto-start` also raises the floor for everyone
+    sharing the environment — mention that when the env is pushed to
+    FloxHub or shared with a team.
+  - **Only releases that changed the schema have a version.** The list
+    is `version = 1` (up to flox 1.9.1, before `schema-version`
+    existed), then `"1.10.0"`, `"1.11.0"`, `"1.12.0"`, `"1.13.0"`,
+    `"1.14.0"` — not every flox release.
+  - **New environments start at the CLI's newest schema**, and flox
+    forward-migrates older manifests it can parse (one `flox list` on
+    flox 1.13.2 turns `version = 1` into
+    `schema-version = "1.13.0"`). So an environment touched by a recent
+    flox is often already new enough for `auto-start` — read the first
+    line before you change it.
+  - **That migration will not save your edit.** Flox parses before it
+    migrates, so adding `auto-start` while the file still says
+    `version = 1` is rejected outright. Bump the version line in the
+    *same* edit that adds the key.
 - **The default is off.** Omitting the key behaves exactly like
   `auto-start = false`: activation starts nothing.
 - **Per-activation overrides still win.** `flox activate
