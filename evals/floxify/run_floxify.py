@@ -237,7 +237,9 @@ CHECKS = {
 # EVERY call. run.py's single-turn harness has captured this since
 # AI-459; the two agentic spawn points below threw it away. Ported here
 # with one addition AI-459's own `_parse_meta` left on the table:
-# `num_turns` (see evals/flox/run.py:81 for the sibling this mirrors).
+# `num_turns` (see `_parse_meta` in evals/flox/run.py for the sibling this
+# mirrors -- named by symbol rather than line, which does not drift when the
+# file above it changes).
 
 def _parse_meta(envelope):
     """Extract cost/usage/duration/turns from a claude JSON envelope (or

@@ -8,9 +8,12 @@ proving it does NOT fire on a known-good manifest — "a wrong invariant is
 worse than no invariant" (evals/floxify/README.md policy). Catalog checks
 are mocked (`_run_show_command`) so the whole suite runs with no network.
 
-Runnable two ways:
-    python3 test_verify.py            # standalone, prints PASS/FAIL
-    pytest test_verify.py             # each test_* function is a pytest case
+Run from the suite root (`evals/floxify/`) — that is what puts
+`_skill_module_loader` on `sys.path`. Running the file by path
+(`python3 tests/test_verify.py`) fails with `ModuleNotFoundError` instead:
+    python3 -m unittest tests.test_verify -v   # this module only
+    python3 -m tests.test_verify               # same, via the __main__ block
+    pytest tests/test_verify.py                # each test_* method is a pytest case
 """
 import io
 import json

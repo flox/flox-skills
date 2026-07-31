@@ -33,7 +33,6 @@ import run_floxify
 
 HERE = Path(__file__).resolve().parent
 SUITE = HERE.parent          # evals/floxify
-REPO_ROOT = SUITE.parent.parent
 STRETCH_FILE = SUITE / "stretch.jsonl"
 FIXTURES_DIR = SUITE / "fixtures"
 EXPECTED_DIR = SUITE / "expected"

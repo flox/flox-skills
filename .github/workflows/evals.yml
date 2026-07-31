@@ -181,37 +181,37 @@ jobs:
           # on flox's ambient absence is the golden lint's, and it was already
           # written not to — see FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 below,
           # which is now load-bearing rather than belt-and-braces.
-          echo "::group::detect.py (analyzer extraction)"
+          #
+          # TWO commands, not one, and neither subsumes the other (AI-509
+          # Ticket 2 review). `discover` is what stops this list drifting from
+          # the tests/ package: it enumerates nothing by hand, so a module
+          # added to tests/ is gated the day it lands rather than green by
+          # omission — which is how tests.test_stretch (wired in by hand in
+          # Ticket 3) and tests.test_stretch_golden_lint (still named by no
+          # job before this change) went unrun here for their whole life.
+          # But discovery collects ZERO of tests/test_detect.py: that module is
+          # plain `def test_*` functions with a hand-rolled runner, not
+          # TestCase subclasses, so `-m unittest tests.test_detect` is a
+          # vacuous green (Ran 0 tests / OK / exit 0) rather than a load error.
+          # Folding its script call into the discover line would silently drop
+          # 42 analyzer checks. Keep both.
+          echo "::group::detect.py (analyzer extraction -- script form ON PURPOSE)"
           python3 tests/test_detect.py
           echo "::endgroup::"
-          echo "::group::harness logic (real_world + detect_usage_eval)"
-          python3 -m unittest tests.test_real_world tests.test_detect_usage_eval -v
-          echo "::endgroup::"
-          # verify.py (AI-461): the checker's own invariants, all mocked at
-          # the `flox show` boundary (_run_show_command) — no catalog, no
-          # network, same discipline as the rest of this step.
-          # test_real_world_golden_lint
-          # also runs here for baseline sanity, with FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0
-          # pinned EXPLICITLY so its no-network guarantee doesn't rest on
-          # flox merely happening to be absent from this runner. Since AI-509
-          # flox is NOT absent — it supplies python3 — so that switch is now
-          # the only thing making this run catalog-free, exactly the case it
-          # was written for. It only proves the allowlist machinery imports
-          # and runs; its real, catalog-backed run (with real teeth against
-          # catalog drift) is the golden-lint job below.
-          echo "::group::verify.py (manifest checker)"
-          FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_verify tests.test_verify_usage_eval tests.test_real_world_golden_lint -v
-          echo "::endgroup::"
-          echo "::group::run_floxify.py (harness deterministic-leg wiring)"
-          python3 -m unittest tests.test_run_floxify -v
-          echo "::endgroup::"
-          # Registry invariants for the stretch tier, including the id
-          # disjointness that keeps synthetic/stretch/real-world from fighting
-          # over a shared fixtures/ + expected/ pair. Pure data reads, no
-          # subprocess and no catalog. It was not wired into any job before,
-          # so these guards were asserting into the void.
-          echo "::group::stretch registry invariants (test_stretch)"
-          python3 -m unittest tests.test_stretch -v
+          # Everything else, discovered. FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 is
+          # pinned EXPLICITLY, and now covers the two golden-lint modules
+          # (tests.test_real_world_golden_lint and the newly-gated
+          # tests.test_stretch_golden_lint) whose lock legs BOTH default that
+          # switch on: their no-network guarantee must not rest on flox merely
+          # happening to be absent from this runner, and since AI-509 flox is
+          # NOT absent -- it supplies python3 -- so the switch is the only
+          # thing making this run catalog-free, exactly the case it was
+          # written for. Their real, catalog-backed run (with teeth against
+          # catalog drift) is the golden-lint job below. The rest is mocked at
+          # its subprocess boundary: verify.py (AI-461) at `_run_show_command`,
+          # etc.
+          echo "::group::everything unittest can discover (real_world, verify, run_floxify, stretch, ...)"
+          FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest discover -s tests -t . -v
           echo "::endgroup::"
 
       - name: Free deterministic unit tests -- eval harness (run.py, screen.py)
@@ -230,36 +230,30 @@ jobs:
           # there, and the tests are addressed as `tests.<module>` because
           # each suite now owns a tests/ package. A separate step rather than
           # folding them into the evals/floxify step above, which needs
-          # evals/floxify/ instead. test_skill_module_loader.py is a
-          # regression test for those floxify suites' own module loading and
-          # belongs with them, so it runs from evals/floxify/ via `cd` rather
-          # than a path hack.
-          echo "::group::run.py deterministic pieces (test_run)"
-          python3 -m unittest tests.test_run -v
-          echo "::endgroup::"
-          echo "::group::screen.py deterministic pieces (test_screen)"
-          python3 -m unittest tests.test_screen -v
-          echo "::endgroup::"
-          # gen_screening_report.py: a report may only claim what was measured.
-          # Pins the intersection of the candidate registry with the ids
-          # actually present in --results, so an unmeasured candidate is never
-          # bucketed as "baseline already passes", and a run with zero
-          # measurements is an error rather than a plausible-looking report.
-          echo "::group::gen_screening_report.py deterministic pieces (test_gen_screening_report)"
-          python3 -m unittest tests.test_gen_screening_report -v
-          echo "::endgroup::"
-          # skill_toml_lint.py's own logic: fence extraction, skip markers, the
-          # structural/catalog tier split, allowlist staleness. Mocked at the
-          # subprocess boundary, so no flox here -- the live `flox edit` run is
-          # the skill-toml-lint job below. This suite is what makes that guard
+          # evals/floxify/ instead -- and a package named `tests` on each side
+          # is exactly why one process cannot span both.
+          #
+          # `discover` rather than a hand-written module list, for the same
+          # anti-drift reason as the step above (AI-509 Ticket 2 review). Here
+          # it is a clean substitution: all of this suite's tests are TestCase
+          # subclasses, so discovery misses none of them, and none is a
+          # networked or paid leg. It covers run.py's and screen.py's
+          # deterministic pieces; gen_screening_report.py's rule that a report
+          # may only claim what was measured; and skill_toml_lint.py's own
+          # logic -- fence extraction, skip markers, the structural/catalog
+          # tier split, allowlist staleness, all mocked at the subprocess
+          # boundary, so no flox here; the live `flox edit` run is the
+          # skill-toml-lint job below. That suite is what makes this guard
           # trustworthy enough to gate on: an extractor that silently dropped
           # blocks would report "0 failed" forever.
-          echo "::group::skill_toml_lint.py deterministic pieces (test_skill_toml_lint)"
-          python3 -m unittest tests.test_skill_toml_lint -v
-          echo "::endgroup::"
-          echo "::group::_skill_module_loader.py sys.modules collision regression (test_skill_module_loader)"
-          cd ../floxify
-          python3 -m unittest tests.test_skill_module_loader -v
+          #
+          # tests/test_skill_module_loader.py used to run here via `cd
+          # ../floxify`. It is a regression test for the FLOXIFY suite's module
+          # loading and lives in that suite's package, so the step above now
+          # discovers it where it belongs -- the cd hack was the enumeration
+          # working around itself.
+          echo "::group::everything unittest can discover (run, screen, gen_screening_report, skill_toml_lint)"
+          python3 -m unittest discover -s tests -t . -v
           echo "::endgroup::"
 
       # No setup-node / `npm install -g @anthropic-ai/claude-code` here any
