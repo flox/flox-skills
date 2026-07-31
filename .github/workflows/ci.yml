@@ -71,7 +71,7 @@ jobs:
           use-cache: true
 
       - name: "Install Flox"
-        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
+        uses: flox/install-flox-action@3b80351ae97bbe063f264dc88fbd505507054963 # v2.5.3
 
       - name: "Configure Nix"
         uses: flox/configure-nix-action@1ee58d63463cb1870ab73d9df0acfd9d8ba671f8 # main
