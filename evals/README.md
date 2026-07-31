@@ -338,8 +338,7 @@ per candidate via `must_match` / `must_not_match` regex lists.
 
 `tasks/candidates-all.jsonl` is the default and the only candidate set this
 harness ships — it is a superset of the original `tasks/candidates.jsonl`
-(retired) with the
-same false-firing checks fixed under new ids
+(retired) with the same false-firing checks fixed under new ids
 (`trap-layer-vs-compose-fixed`, `trap-containerize-nopush-fixed`) plus the
 pass2/regression batches folded in. Pass `--candidates` to screen a specific
 historical batch (`tasks/candidates-pass2.jsonl`,

@@ -1,10 +1,10 @@
 # AI-435 / AI-439 — Triggering + Freshness Discrimination Screening
 
-Research pass for AI-439 (child of AI-435). **Nothing here is promoted into `tasks.jsonl`** — promotion and the eval-model-policy choice are Bill decisions (AI-439 is blocked on the model policy). This artifact is `evals/candidates.jsonl` + this report only.
+Research pass for AI-439 (child of AI-435). **Nothing here is promoted into `tasks.jsonl`** — promotion and the eval-model-policy choice are Bill decisions (AI-439 is blocked on the model policy). This artifact is `evals/flox/tasks/candidates.jsonl` + this report only.
 
 ## Method
 
-- **19 candidates** — 13 triggering, 6 freshness — screened with `evals/screen.py` at **reps=5** (per AI-438 multi-rep policy) on each model below.
+- **19 candidates** — 13 triggering, 6 freshness — screened with `evals/flox/screen.py` at **reps=5** (per AI-438 multi-rep policy) on each model below.
 - **Arms.** *baseline* = bare model, no plugin; *skills* = the flox plugin loaded via `--plugin-dir`. A candidate is a **discriminator** when the skills arm passes (hard-check majority OR judge-correct) while the baseline fails the same measure; **skill-gap** when both arms fail (flagged, not discarded); **no-signal** when the baseline already passes.
 - **Baseline isolation (harness fix).** On this host the flox plugin is enabled globally in `~/.claude/settings.json`, so the plain baseline arm loaded it and stopped being a bare model (it answered *"Based on the Flox guide"* and knew post-cutoff commands). `screen.py`/`run.py` now pass `--setting-sources project,local` to every arm, dropping user-level `enabledPlugins` while keeping OAuth; the skills arm re-adds exactly one plugin. Without this the whole screen collapses to no-signal.
 - **Freshness axis = post-training-cutoff Flox behavior** (model cutoff ~Jan 2026). Scanned the local `flox`, `floxdocs`, `floxhandbook` checkouts and the installed CLI (v1.13.2).
@@ -57,12 +57,12 @@ The freshness scan found only a **small in-skill post-cutoff surface**: `flox ru
 ## Provenance / reproduce
 
 ```bash
-cd evals
+cd evals/flox
 for m in claude-haiku-4-5-20251001 claude-sonnet-5 claude-opus-4-8; do
-  python3 screen.py --candidates candidates.jsonl --reps 5 --concurrency 4 \
+  python3 screen.py --candidates tasks/candidates.jsonl --reps 5 --concurrency 4 \
     --model "$m" --out results/screen-${m%%-*}.json   # isolated by default
 done
 python3 gen_screening_report.py --results results/screen-*.json \
-    --candidates candidates.jsonl --out SCREENING-REPORT.md
+    --candidates tasks/candidates.jsonl --out reports/SCREENING-REPORT.md
 ```
 

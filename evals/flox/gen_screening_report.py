@@ -202,6 +202,12 @@ def main():
              "    --candidates tasks/candidates.jsonl --out reports/SCREENING-REPORT.md\n"
              "```\n")
 
+    # The default --out lives in reports/, which nothing here creates and which
+    # git tracks only by virtue of the one report sitting in it. Unlike the
+    # results/ defaults (whose directory holds committed goldens), that is thin
+    # ground for a directory to stand on, and before the AI-509 Ticket 2 move
+    # this default landed in the script's own directory, which always exists.
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text("\n".join(L) + "\n")
     print(f"wrote {args.out}  ({len(cands)} candidates, models: {', '.join(order) or 'NONE YET'})")
 

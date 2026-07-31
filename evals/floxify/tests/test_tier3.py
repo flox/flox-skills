@@ -32,7 +32,6 @@ import run_floxify
 
 HERE = Path(__file__).resolve().parent
 SUITE = HERE.parent          # evals/floxify
-REPO_ROOT = SUITE.parent.parent
 TIER3_FILE = SUITE / "tier3.jsonl"
 FIXTURES_DIR = SUITE / "fixtures"
 GOLD_DIR = SUITE / "gold"
