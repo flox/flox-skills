@@ -13,9 +13,9 @@ manually or on a schedule, never in the fast gate. Bounded to Phase 1 (no flox
 init / activate) so it stays cheap.
 
 Usage:
-    python3 detect_usage_eval.py                     # default fixture (node-postgres)
-    python3 detect_usage_eval.py --fixture ruby
-    python3 detect_usage_eval.py --skill-dir /path/to/flox-plugin
+    flox activate -- python3 detect_usage_eval.py                     # default fixture (node-postgres)
+    flox activate -- python3 detect_usage_eval.py --fixture ruby
+    flox activate -- python3 detect_usage_eval.py --skill-dir /path/to/flox-plugin
 
 Exit 0 if the analyzer was invoked (and, as a bonus signal, run through
 `flox run`); exit 1 otherwise. Pure stdlib.

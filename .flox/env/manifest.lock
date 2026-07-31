@@ -12,6 +12,10 @@
       },
       "flox-ai": {
         "pkg-path": "flox/flox-ai"
+      },
+      "python311": {
+        "pkg-path": "python311",
+        "pkg-group": "python"
       }
     },
     "options": {},
@@ -424,6 +428,128 @@
       },
       "system": "x86_64-linux",
       "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "python311",
+      "broken": false,
+      "derivation": "/nix/store/3a1f0j7pwas4zvz79wnvgggvaki3ml3p-python3-3.11.15.drv",
+      "description": "High-level dynamically-typed programming language",
+      "install_id": "python311",
+      "license": "Python-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d407951447dcd00442e97087bf374aad70c04cea",
+      "name": "python3-3.11.15",
+      "pname": "python311",
+      "rev": "d407951447dcd00442e97087bf374aad70c04cea",
+      "rev_count": 1027867,
+      "rev_date": "2026-07-05T04:06:12Z",
+      "scrape_date": "2026-07-06T03:13:37.150246Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "python3-3.11.15",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/3xqryhvq65kg2ahqjydcfwmhnbn9ny5i-python3-3.11.15"
+      },
+      "system": "aarch64-darwin",
+      "group": "python",
+      "priority": 5
+    },
+    {
+      "attr_path": "python311",
+      "broken": false,
+      "derivation": "/nix/store/14g2mji4fsvg90h5p74lf3hldmxdagng-python3-3.11.15.drv",
+      "description": "High-level dynamically-typed programming language",
+      "install_id": "python311",
+      "license": "Python-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d407951447dcd00442e97087bf374aad70c04cea",
+      "name": "python3-3.11.15",
+      "pname": "python311",
+      "rev": "d407951447dcd00442e97087bf374aad70c04cea",
+      "rev_count": 1027867,
+      "rev_date": "2026-07-05T04:06:12Z",
+      "scrape_date": "2026-07-06T03:42:22.926242Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "python3-3.11.15",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/qp1ki9z28qmhlw2wp27p4vh2gpp1lsl7-python3-3.11.15-debug",
+        "out": "/nix/store/lwrvc4vvrab8yavs8fp6vf1xh1v1vzjc-python3-3.11.15"
+      },
+      "system": "aarch64-linux",
+      "group": "python",
+      "priority": 5
+    },
+    {
+      "attr_path": "python311",
+      "broken": false,
+      "derivation": "/nix/store/8bhjnvxm2b52kzaak8xhk005c7h06a0x-python3-3.11.15.drv",
+      "description": "High-level dynamically-typed programming language",
+      "install_id": "python311",
+      "license": "Python-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d407951447dcd00442e97087bf374aad70c04cea",
+      "name": "python3-3.11.15",
+      "pname": "python311",
+      "rev": "d407951447dcd00442e97087bf374aad70c04cea",
+      "rev_count": 1027867,
+      "rev_date": "2026-07-05T04:06:12Z",
+      "scrape_date": "2026-07-06T04:09:53.024332Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "python3-3.11.15",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/4w7i02q2kvwbhi4xmw14rkwbmv5s1h8n-python3-3.11.15"
+      },
+      "system": "x86_64-darwin",
+      "group": "python",
+      "priority": 5
+    },
+    {
+      "attr_path": "python311",
+      "broken": false,
+      "derivation": "/nix/store/m63kmcq43bwjgfmhn1b3mi0pw916h7v2-python3-3.11.15.drv",
+      "description": "High-level dynamically-typed programming language",
+      "install_id": "python311",
+      "license": "Python-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d407951447dcd00442e97087bf374aad70c04cea",
+      "name": "python3-3.11.15",
+      "pname": "python311",
+      "rev": "d407951447dcd00442e97087bf374aad70c04cea",
+      "rev_count": 1027867,
+      "rev_date": "2026-07-05T04:06:12Z",
+      "scrape_date": "2026-07-06T04:41:29.491484Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "python3-3.11.15",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/j8bh7dnm47v3blyhvrvky3c4qdy2sxc3-python3-3.11.15-debug",
+        "out": "/nix/store/2m2lgnmm5m63i5c9hr9najkpmi7af4jc-python3-3.11.15"
+      },
+      "system": "x86_64-linux",
+      "group": "python",
       "priority": 5
     }
   ]

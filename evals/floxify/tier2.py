@@ -71,12 +71,12 @@ finds genuinely wired, which is exactly "probe only when actually
 wired" regardless of what the registry expected.
 
 Usage:
-    python3 tier2.py --only mastodon             # single repo
-    python3 tier2.py                              # all registered repos
-    python3 tier2.py --activate                   # opt in to flox activate
-    python3 tier2.py --activate --services        # ...and prove services serve
-    python3 tier2.py --skill-dir /path/to/flox-plugin
-    python3 tier2.py --out results/my-run.json
+    flox activate -- python3 tier2.py --only mastodon             # single repo
+    flox activate -- python3 tier2.py                              # all registered repos
+    flox activate -- python3 tier2.py --activate                   # opt in to flox activate
+    flox activate -- python3 tier2.py --activate --services        # ...and prove services serve
+    flox activate -- python3 tier2.py --skill-dir /path/to/flox-plugin
+    flox activate -- python3 tier2.py --out results/my-run.json
 
 Pure stdlib — no additional packages required.
 """

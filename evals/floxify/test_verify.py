@@ -9,7 +9,7 @@ worse than no invariant" (evals/floxify/README.md policy). Catalog checks
 are mocked (`_run_show_command`) so the whole suite runs with no network.
 
 Runnable two ways:
-    python3 test_verify.py            # standalone, prints PASS/FAIL
+    flox activate -- python3 test_verify.py            # standalone, prints PASS/FAIL
     pytest test_verify.py             # each test_* function is a pytest case
 """
 import io

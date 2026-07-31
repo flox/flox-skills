@@ -13,7 +13,7 @@ Two concerns, both pure logic — no claude, no network, no API spend:
   2. _score_arm()'s handling of run_claude/judge's current return shapes
      (mocked at the subprocess boundary, same pattern as test_run.py).
 
-    python3 -m unittest test_screen -v
+    flox activate -- python3 -m unittest test_screen -v
 """
 import json
 import subprocess
