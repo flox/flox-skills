@@ -558,7 +558,7 @@ def manifest_wires_compose(manifest):
     return "docker-compose" in pkg_paths
 
 
-# Back-compat alias — PR #51 review (AI-470): tier2.py now consumes this as
+# Back-compat alias — PR #51 review (AI-470): real_world.py now consumes this as
 # a public export directly, same public/private-alias shape
 # matching_service_names/_service_covers already uses below. Internal
 # callers in this module keep the underscore name.
@@ -572,7 +572,7 @@ def matching_service_names(manifest, kind):
     module's other two consumers (the eval harnesses' structural
     `has_service_<kind>` check and the AI-447 probe's target resolution,
     AI-468). A service can be declared under any name (`[services.db]`
-    running postgres) — matching on name alone, the way tier2.py's
+    running postgres) — matching on name alone, the way real_world.py's
     structural check and probe used to, missed that shape and reported
     "not declared" for a service that was both declared and reachable.
     Public (no leading underscore) so external callers import it rather

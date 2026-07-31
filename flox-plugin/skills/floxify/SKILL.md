@@ -494,7 +494,7 @@ service" — CI parity is not the goal; a working local build+run is.
 
 The carve-out that keeps this from over-correcting: **toolchain-standard
 lint/format tooling is in scope; third-party auxiliary tooling is opt-in.**
-Lemmy's golden (`evals/floxify/testdata/gold/lemmy.toml`) installs seven
+Lemmy's golden (`evals/floxify/expected/lemmy.toml`) installs seven
 packages total — `cargo`/`rustc`/`postgresql_18`/`pkg-config`/`gcc` build
 and run `lemmy_server` directly, and `clippy`/`rustfmt` round out the seven
 because they're the Rust toolchain's OWN lint/format tools (driven by
@@ -655,11 +655,11 @@ corrupting the command. Literal strings (`'''…'''`, `'…'`) leave backslashes
 and `$` completely inert, so the shell script reads exactly as written.
 Every `[hook] on-activate` and `[services.*] command` this skill's own
 patterns emit uses `'''…'''` for this reason — e.g.
-`evals/floxify/gold/node-postgres.toml`'s `on-activate` and `command` blocks
+`evals/floxify/expected/node-postgres.toml`'s `on-activate` and `command` blocks
 are both `'''…'''` (that file's postgres service still uses the old TCP
 default this same PR replaces — cited here only for its string type, not
 its socket/TCP shape; see the PostgreSQL pattern in
-`references/service-patterns.md` for the current default). Not every `testdata/gold/*.toml` reference
+`references/service-patterns.md` for the current default). Not every `expected/*.toml` reference
 follows the literal-string rule yet — `firefly-iii.toml`, `lemmy.toml`, and
 `supabase.toml` still carry a basic-string block each — that gap is a
 separate, pre-existing golden defect (tracked outside this guidance-only
@@ -773,7 +773,7 @@ say so in the same source-attribution comment the install line already
 carries (see "Version mismatches" in Phase 2, and the `packageManager` /
 Mise-asdf entries under "Search term strategies" above) — the attribution
 convention already exists; emitting the `version` field alongside it
-closes that gap. `evals/floxify/testdata/gold/mastodon.toml` is the worked
+closes that gap. `evals/floxify/expected/mastodon.toml` is the worked
 example for the mechanism: `.nvmrc` pins Node `24.18`, the catalog carries
 that exact patch, so `nodejs.version = "24.18.0"` is a clean exact match
 (live-verified 2026-07-18). `.ruby-version` pins Ruby `4.0.6` — check

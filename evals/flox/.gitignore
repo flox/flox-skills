@@ -1,4 +1,8 @@
 *_run.log
-# Per-run CI artifact (skill-toml-lint job), not a recorded baseline like the
-# other results/*.json files.
-results/skill-toml-lint.json
+
+# Generated run output (AI-509 Ticket 3). Every `run.py --out` / `screen.py
+# --out` / `skill_toml_lint.py --json` file lands here, and none of it is
+# committed. Durable comparison points live in baselines/, which the runners
+# read and never write -- so a local run can no longer overwrite the snapshot
+# it is being diffed against.
+results/

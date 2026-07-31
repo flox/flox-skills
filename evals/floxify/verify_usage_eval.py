@@ -13,7 +13,7 @@ Bash step invoked verify.py against a manifest the skill actually wrote.
 Heavier than detect_usage_eval.py (Phase 1-only): this needs the skill to
 run all the way through package resolution, `flox init`, and writing
 manifest.toml before Step 4 has anything to check. Still opt-in like
-detect_usage_eval.py and the Tier 2 harness — spawns a real `claude`
+detect_usage_eval.py and the real-world harness — spawns a real `claude`
 agent, run manually or on a schedule, never in the fast gate.
 
 Usage:

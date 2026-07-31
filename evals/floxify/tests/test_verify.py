@@ -28,7 +28,7 @@ VERIFY = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.
 DETECT = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "detect.py"
 
 # Unique sys.modules key so @patch("...") resolves THIS file's instance —
-# test_golden_lint.py loads the same verify.py under its OWN unique key.
+# test_real_world_golden_lint.py loads the same verify.py under its OWN unique key.
 # Sharing a key (both used to register under the bare "verify") let
 # whichever file's import ran second silently steal the other's @patch
 # target when both run in one interpreter, as CI's free-tests step does.
@@ -426,7 +426,7 @@ class TestLeafDatastoreServices(unittest.TestCase):
     # test_posthog_pyproject_shape_pymysql_pymongo_are_scope_runtime) --
     # section-provenance alone reports them as scope="runtime" correctly,
     # but PostHog runs neither MariaDB nor MongoDB locally. Without
-    # corroboration, this used to HARD-fail the tier2 posthog eval in ALL
+    # corroboration, this used to HARD-fail the real_world posthog eval in ALL
     # FIVE reps, including against PostHog's own upstream manifest. ---
 
     def test_posthog_shape_pymysql_pymongo_produce_no_hard_violation(self):
@@ -437,7 +437,7 @@ class TestLeafDatastoreServices(unittest.TestCase):
              "scope": "runtime"},
         ]}
         # PostHog's own manifest: postgres + redis wired, no mariadb/mongodb
-        # [vars] endpoint or compose service anywhere -- the tier2 registry
+        # [vars] endpoint or compose service anywhere -- the real_world registry
         # expects neither service for posthog.
         manifest = f'''
 [install]
@@ -2256,10 +2256,10 @@ class TestMainCLI(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# AI-467 forensic reproduction: the tier2 posthog x5 re-run HARD-fired
+# AI-467 forensic reproduction: the real_world posthog x5 re-run HARD-fired
 # `leaf-datastore-not-served` for pymysql->mariadb and pymongo->mongodb in
 # ALL FIVE reps -- including against PostHog's own upstream hand-maintained
-# manifest -- while the tier2 registry expects neither service for
+# manifest -- while the real_world registry expects neither service for
 # posthog. Runs the REAL detect.py against fixtures/posthog-shaped/ (a
 # pyproject.toml with the exact dependency list confirmed live against
 # PostHog @ 55525a19f353), the same integration boundary
@@ -2272,7 +2272,7 @@ class TestAI467PosthogForensicReproduction(unittest.TestCase):
 
     def test_posthog_own_manifest_shape_produces_no_leaf_datastore_hard_violation(self):
         # PostHog's actual needs: postgres + redis wired, nothing for
-        # mariadb/mongodb anywhere -- matching the tier2 registry's
+        # mariadb/mongodb anywhere -- matching the real_world registry's
         # expected_services (postgres, redis, clickhouse; no mariadb/
         # mongodb) and what verify.py HARD-fired incorrectly before this
         # fix.

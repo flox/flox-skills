@@ -4,7 +4,7 @@
 - Pinned SHA: `a0d70228bc14` (full: `a0d70228bc1401a80e88e273461ec6af2d739374`)
   - Branch: `main` ("Fix quick build."). This tip is the bleeding-edge
     development line (PHP >=8.5, Laravel ^13).
-- Ecosystem: `php` (composer). New to Tier 2.
+- Ecosystem: `php` (composer). New to real-world.
 - Tooling: flox 1.13.2, nixpkgs catalog.
 
 ## Provenance (repo file -> value)
@@ -112,7 +112,7 @@ This is the tricky part of the PHP/composer ecosystem.
    is exactly that failure mode, corrected the way the skill prescribes.
    The manifest no longer carries `composer install
    --ignore-platform-req=ext-xml` — it was a workaround for a problem that
-   does not exist, and the tier2.jsonl rubric that penalized manifests for
+   does not exist, and the real-world.jsonl rubric that penalized manifests for
    NOT claiming this gap has also been corrected (see AI-457 ticket).
 
 ## AI-457 activation validation (resolution-tested, not functionally tested)

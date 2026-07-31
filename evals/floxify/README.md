@@ -58,7 +58,7 @@ with two eval layers:
 - **`detect_usage_eval.py`** — behavioral conformance. Runs a real,
   Phase-1-bounded `/floxify` against a fixture with a tool-call-visible stream
   and asserts the skill *actually invoked* `detect.py` (bonus signal: through
-  `flox run`). Heavy and opt-in like Tier 2 — it spawns a `claude` agent — so
+  `flox run`). Heavy and opt-in like real-world — it spawns a `claude` agent — so
   it's manual/scheduled, never in the fast gate.
 
   ```bash
@@ -91,18 +91,19 @@ Phase 3c Step 4, gating the report the same way Steps 1-3 already do.
 Three consumers, one checker (no duplicated logic):
 
 - **The skill** (Phase 3c Step 4) — violations stop the flow; fix, re-run.
-- **The eval harnesses** (`run_floxify.py` Tier 1, `tier2.py` Tier 2 since
+- **The eval harnesses** (`run_floxify.py` synthetic, `real_world.py` real-world since
   AI-465) — each re-scans its fixture/checkout and runs the checker
   against the produced manifest as its own deterministic leg, reported
   per-task/per-repo and in the summary (`verify_checked`, `verify_clean`,
   `verify_hard_violation_rate`); advisory, same reason activation is
   advisory (see "Why verify.py is advisory in the harness" below). Its
   confirmed catalog resolution table is handed to the LLM judge so it
-  stops grading catalog facts from memory (AI-451). Tier 2 reuses Tier
-  1's `_run_verify`/`_catalog_note` rather than duplicating them — see
-  "What's different from Tier 1" under the Tier 2 section below.
-- **The goldens** (`testdata/gold/*.toml`) — linted by the same checker as a
-  cheap unit-test-tier check (no `claude`, no agent); see `tests/test_golden_lint.py`
+  stops grading catalog facts from memory (AI-451). The real-world tier
+  reuses the synthetic tier's `_run_verify`/`_catalog_note` rather than
+  duplicating them — see
+  "What's different from synthetic" under the real-world section below.
+- **The goldens** (`expected/*.toml`) — linted by the same checker as a
+  cheap unit-test-tier check (no `claude`, no agent); see `tests/test_real_world_golden_lint.py`
   below.
 
 Eval layers, same two-tier shape as `detect.py`'s:
@@ -118,8 +119,8 @@ Eval layers, same two-tier shape as `detect.py`'s:
   python3 -m unittest tests.test_verify -v
   ```
 
-- **`tests/test_golden_lint.py`** — runs the checker over every
-  `testdata/gold/*.toml` reference. Two hand reviews (AI-455) found real
+- **`tests/test_real_world_golden_lint.py`** — runs the checker over every
+  `expected/*.toml` reference. Two hand reviews (AI-455) found real
   defects in those goldens that had never been linted before; this check
   found 16 more (per-system catalog gaps across 6 of 8 goldens) the moment
   it ran with live flox. Golden content is intentionally NOT fixed here —
@@ -140,8 +141,8 @@ Eval layers, same two-tier shape as `detect.py`'s:
   still the `golden-lint` job, which leaves the switch at its default.
 
   ```bash
-  python3 -m unittest tests.test_golden_lint -v
-  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_golden_lint -v  # no network
+  python3 -m unittest tests.test_real_world_golden_lint -v
+  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_real_world_golden_lint -v  # no network
   ```
 
   **Whole-manifest lock-resolution leg (AI-479).** Every check above is
@@ -149,7 +150,7 @@ Eval layers, same two-tier shape as `detect.py`'s:
   resolve individually but cannot co-resolve TOGETHER on any single
   catalog page (`constraints for group 'X' are too tight`). AI-457 and
   AI-478 only caught that class by hand, running `flox activate`
-  themselves against a scratch directory. `tests/test_golden_lint.py` now adds
+  themselves against a scratch directory. `tests/test_real_world_golden_lint.py` now adds
   one more test per golden, `test_<fixture>_locks_cleanly`, that attempts
   a real `flox list -c` in a throwaway environment with the candidate
   manifest written directly into it. `flox list -c` is resolution-only:
@@ -168,7 +169,7 @@ Eval layers, same two-tier shape as `detect.py`'s:
   check. A catalog-API communication error is a different, transient
   failure class: it gets one retry and, if it persists, is reported with
   an honest "likely transient" message rather than the resolution-defect
-  verdict — see `_classify_lock_failure` in `tests/test_golden_lint.py`.
+  verdict — see `_classify_lock_failure` in `tests/test_real_world_golden_lint.py`.
   `TestLockResolutionLeg` covers the skip/fail/pass/retry/classification
   plumbing with mocked, no-network unit tests; the live behavior (does a
   real golden actually lock) is exercised by the per-golden tests above,
@@ -186,7 +187,7 @@ Eval layers, same two-tier shape as `detect.py`'s:
   writes, consistent sub-2s timing on pass and fail) confirmed it never
   realizes.
 
-  **Caveat:** the LLM judge (in `run_floxify.py` and `tier2.py`) grades
+  **Caveat:** the LLM judge (in `run_floxify.py` and `real_world.py`) grades
   produced manifests against these same goldens. Until AI-457 lands, a
   defective golden could in principle nudge the judge to penalize a
   correct manifest that differs from the defect, or reward one that
@@ -242,7 +243,7 @@ For each fixture in `fixtures/`, the harness:
 1. Copies the fixture to a temp dir (no `.flox/` — the skill creates it)
 2. Runs `claude /floxify <dir>` headlessly with the skill loaded
 3. Reads `.flox/env/manifest.toml` from the temp dir
-4. Scores it with deterministic hard-checks + an LLM judge (vs `gold/`)
+4. Scores it with deterministic hard-checks + an LLM judge (vs `expected/`)
 5. Attempts `flox activate -c "echo __ok__"` (advisory; skipped if
    unavailable)
 
@@ -262,7 +263,7 @@ For each fixture in `fixtures/`, the harness:
 | `pins_rust` | manifest references `cargo` |
 | `pins_ruby` | manifest references `ruby` |
 
-Each task in `tasks.jsonl` lists which checks apply via the `checks` array.
+Each task in `synthetic.jsonl` lists which checks apply via the `checks` array.
 Checks not listed for a task are not evaluated.
 
 ### Activation check (advisory)
@@ -286,7 +287,7 @@ access to FloxHub, so CI runs without those should pass
 
 ### LLM judge (advisory)
 
-The judge compares the produced manifest against `gold/<id>.toml` and
+The judge compares the produced manifest against `expected/<id>.toml` and
 grades 1–5 on package choices, hook quality, and idiomatic Flox usage.
 The gold files are references, not byte-exact match targets — a
 well-structured manifest that differs idiomatically can still score 4-5.
@@ -315,17 +316,19 @@ python3 run_floxify.py --skill-dir /path/to/flox-plugin
 # Custom output path:
 python3 run_floxify.py --out results/my-run.json
 
-# Diff against a specific committed baseline (default: floxify-baseline.json):
-python3 run_floxify.py --baseline floxify-baseline.json
+# Diff against a specific committed baseline (default: synthetic.json):
+python3 run_floxify.py --baseline synthetic.json   # a file under baselines/
 ```
 
 Results land in `results/` as JSON with a summary (hard-pass rate,
-avg judge score, activation counts). Pure stdlib — no pip install needed.
+avg judge score, activation counts). `results/` is **gitignored** generated
+output; the committed comparison points live in `baselines/`, which the
+runners read and never write. Pure stdlib — no pip install needed.
 
 ## Regression detection
 
 After each run the harness diffs the results against the committed
-baseline (`results/floxify-baseline.json` by default, override with
+baseline (`baselines/synthetic.json` by default, override with
 `--baseline`) and prints a **regression diff**:
 
 - **hard-check regressions** — a fixture that passed all hard-checks in
@@ -335,13 +338,18 @@ baseline (`results/floxify-baseline.json` by default, override with
 - **new / removed fixtures** — fixtures added to or dropped from the suite
 - **judge-score delta** — advisory only; the judge is noisy run-to-run
 
-When a run writes to the same file it compares against (e.g.
-`--out results/floxify-baseline.json`), the baseline is snapshotted
-*before* the write, so re-recording the baseline still shows a
-meaningful diff against the prior committed version.
+A run can no longer clobber its own comparison target: `--out` writes
+under `results/` and `--baseline` reads under `baselines/` (AI-509
+Ticket 3), so the two are never the same file.
 
 To refresh the baseline after an intentional skill change, run the full
-suite with `--out results/floxify-baseline.json` and commit the result.
+suite, then copy its output over `baselines/synthetic.json` and commit
+that — a deliberate, reviewable act rather than a side effect of a run:
+
+```bash
+python3 run_floxify.py --out results/refresh.json
+cp results/refresh.json baselines/synthetic.json
+```
 
 ## Prerequisites
 
@@ -360,7 +368,7 @@ suite with `--out results/floxify-baseline.json` and commit the result.
 ## Gate policy
 
 - **Binding (deterministic):** every `should`-tier fixture must pass all
-  hard-checks listed in its `tasks.jsonl` entry. A failure exits non-zero
+  hard-checks listed in its `synthetic.jsonl` entry. A failure exits non-zero
   under `--gate`.
 - **Advisory (reported, never blocks):** `avg_judge_score`,
   `judge_correct_rate`, `activation_ok`. These track quality trends —
@@ -393,7 +401,7 @@ dispatch) rather than never.
 Per-PR floxify regression-catching is therefore **manual/scheduled by
 design** — the live-flox dependency makes a fast per-PR gate impractical.
 
-**Exception: `golden-lint`.** The golden-manifest lint (`tests/test_golden_lint.py`,
+**Exception: `golden-lint`.** The golden-manifest lint (`tests/test_real_world_golden_lint.py`,
 see "Phase 3c checker" above) is a SEPARATE job from `floxify-evals` and
 does NOT follow the dispatch-only rule above — it needs `flox` (for
 `flox show`) but never spawns `claude`, so it carries none of the cost or
@@ -417,7 +425,7 @@ Fixtures deliberately have NO `.flox/` directory. The skill writes it.
 
 ## Gold manifests
 
-`gold/<id>.toml` — hand-tuned reference manifests seeded from:
+`expected/<id>.toml` — hand-tuned reference manifests seeded from:
 
 | fixture | source |
 |---------|--------|
@@ -434,14 +442,14 @@ are **references for the LLM judge**, not byte-exact match targets.
 ## Adding a fixture
 
 1. Create `fixtures/<new-id>/` with the project files (no `.flox/`)
-2. Create `gold/<new-id>.toml` with the ideal manifest
-3. Add a line to `tasks.jsonl` with `id`, `tier`, `ecosystem`,
+2. Create `expected/<new-id>.toml` with the ideal manifest
+3. Add a line to `synthetic.jsonl` with `id`, `tier`, `ecosystem`,
    `checks`, `rubric`
 4. Run `python3 run_floxify.py --only <new-id>` to verify end-to-end
 
 ## Baseline
 
-`results/floxify-baseline.json` — recorded against the in-repo
+`baselines/synthetic.json` — recorded against the in-repo
 `flox-plugin/skills/floxify/` skill. The `summary.skill` field records
 a portable identity (`<dir-name>@<branch>`, e.g.
 `flox-plugin@main`) rather than an absolute host path, so the committed
@@ -487,7 +495,7 @@ AI-459 proved this for `../flox/run.py`'s single-turn harness, and this
 harness threw it away at both spawn points (`_run_claude_agent`,
 `_run_judge`). AI-442 ports that parsing (`_parse_meta`, mirroring
 `../flox/run.py:81`) into both functions, which changes their return shape
-from `(result, err)` to `(result, err, meta)`. `tier2.py` imports both
+from `(result, err)` to `(result, err, meta)`. `real_world.py` imports both
 and picks up the port for free at the call-site level — its own two
 call sites now unpack a 3-tuple, but it does not record cost in its
 own output yet (out of PR 1's scope; a mechanical fix, not a feature).
@@ -503,7 +511,7 @@ alongside the total tool-call count. The judge call stays on plain
 stream-parse. The flag combination (does `stream-json` work headless
 with `-p`? is `--verbose` required?) was verified with one live,
 minimal `claude` call before any code was written; the captured
-transcript lives in `testdata/stream-samples/`, and its own README
+transcript lives in `samples/`, and its own README
 documents exactly what that call confirmed.
 
 ### The verified anchor (Q2)
@@ -511,14 +519,14 @@ documents exactly what that call confirmed.
 Efficiency is meaningless without an anchor — cost to reach *what*?
 `flox activate -c "echo __ok__"` proves packages resolve and build; it
 does not prove a declared service actually serves (the same gap
-`--services` closes for Tier 2 — see "…and activation doesn't tell
+`--services` closes for real-world — see "…and activation doesn't tell
 you the services serve" above). The binding decision on Q2: use the
 stronger anchor for exactly the fixtures that declare one. A task's
 own `checks` array is the signal — `has_services_section` plus a
 `pins_<kind>` check (currently only `pins_postgres`, i.e.
 `node-postgres`) means the fixture expects a service, and
-`_probe_service` (a leaner, Tier-1-local version of `tier2.py`'s
-AI-447 probe — not imported from there, since `tier2.py` already
+`_probe_service` (a leaner, synthetic-local version of `real_world.py`'s
+AI-447 probe — not imported from there, since `real_world.py` already
 imports from this module and a reverse import would be circular) runs
 the same `flox activate --start-services -c <polling script>`
 technique to confirm real connectivity before crediting the rep as
@@ -579,7 +587,7 @@ python3 run_floxify.py \
 
 python3 run_floxify.py \
   --only ruby,python-uv,node-postgres,rust-cargo,go-mod \
-  --arm baseline --reps 8 --out results/floxify-baseline-batch.json
+  --arm baseline --reps 8 --out results/synthetic-batch.json
 ```
 
 n=8 per (fixture, arm) — above the AI-438 n≥5 floor, for a readable
@@ -605,10 +613,10 @@ classification, censoring rules, and arm selection. The batch above is
 a separate, paid, subscription-covered step that runs AFTER this
 lands: PR 1 ships the instrument, not a measurement.
 
-## Tier 2: real OSS conversion repos (`tier2.py`)
+## Real-world tier: pinned OSS repos (`real_world.py`)
 
-Tier 1 fixtures above are small synthetic dirs vendored into this repo.
-Tier 2 (`tier2.py` + `tier2.jsonl`) runs `/floxify` against **real
+The synthetic fixtures above are small dirs vendored into this repo. The
+real-world tier (`real_world.py` + `real-world.jsonl`) runs `/floxify` against **real
 open-source repos**, which are too large to vendor and too heavy to
 fully `flox activate`. It's a sibling harness that imports shared
 machinery from `run_floxify.py` (`_run_claude_agent`, `_is_valid_toml`,
@@ -618,7 +626,7 @@ leg: `_run_verify`, `_hard_verify_violations`,
 `_advisory_verify_violations`, `_catalog_note`) rather than duplicating
 it.
 
-### What's different from Tier 1
+### What's different from synthetic
 
 1. **Fixtures are cloned at a pinned SHA**, not copied from disk.
    `_clone_at_sha` tries three strategies in increasing order of cost: a
@@ -628,16 +636,16 @@ it.
    checkout), and a full clone as a last resort. A clone failure is
    recorded as a per-entry error, not a crash.
 2. **The primary check is structural conformance**, not full
-   activation. Each `tier2.jsonl` entry declares `expected_runtimes`
+   activation. Each `real-world.jsonl` entry declares `expected_runtimes`
    (regex patterns matched against `pkg-path` values, e.g.
    `ruby(_[0-9_]+)?`, `nodejs_24`) and `expected_services` (substring
    matched against `[services.*]` section headers, e.g. `postgres`,
    `redis`). `manifest_created`, `valid_toml`, and `no_abs_paths` are
-   checked the same way as Tier 1.
+   checked the same way as synthetic.
 3. **Activation is opt-in and off by default** (`--activate`). These
    dev environments (Rails monoliths, pnpm/turbo monorepos) are too
    heavy to reliably activate in CI; when off, activation is recorded
-   as `skipped` with a note, same as Tier 1's advisory treatment.
+   as `skipped` with a note, same as synthetic's advisory treatment.
 4. **The LLM judge compares against a textual gold characterization**
    (registry `gold.runtimes` / `gold.services` / `gold.notes`), not a
    gold TOML file — there's no hand-tuned reference manifest for a repo
@@ -645,7 +653,7 @@ it.
    idiomaticity-focused, not exact-match.
 5. **Report-only — this tier never gates the build**, in any mode.
    There's no `--gate` flag.
-6. **A cloned checkout can ship its own in-tree `.flox/`** (Tier 1's
+6. **A cloned checkout can ship its own in-tree `.flox/`** (synthetic's
    vendored fixtures deliberately never do — "the skill creates it").
    `process_entry` strips it before the conversion task runs, so the
    skill starts from a clean slate rather than being anchored by — or
@@ -659,19 +667,19 @@ it.
    fixture's golden route, feeding a separate golden-vs-upstream
    adoption review rather than this harness's own scoring.
 
-Everything else about the verify.py leg is the *same* as Tier 1, not
+Everything else about the verify.py leg is the *same* as synthetic, not
 different (AI-465): `process_entry` re-runs `detect.py` against the
 cloned checkout, runs `verify.py` against the produced manifest, and
 records the same `verify` block shape (`violations`, `hard_count`,
 `advisory_count`, `catalog_checked`) that flows into `_stats`'
 `verify_checked` / `verify_clean` / `verify_hard_violation_rate`. The
-catalog sub-leg is tied to `--activate` (the Tier 2 analogue of Tier
+catalog sub-leg is tied to `--activate` (the real-world analogue of the synthetic tier
 1's `--skip-activation`): live `flox show` calls only run when
 `--activate` is set, and degrade to a clean skip if `flox` itself is
 unavailable regardless (`verify.py`'s own `shutil.which` guard). The
-confirmed-catalog note is handed to the Tier 2 judge the same way
-Tier 1's `_judge` gets it — see "Phase 3c checker" above and "Why
-verify.py is advisory in the harness"; this leg never gates Tier 2,
+confirmed-catalog note is handed to the real-world judge the same way
+synthetic's `_judge` gets it — see "Phase 3c checker" above and "Why
+verify.py is advisory in the harness"; this leg never gates real-world,
 which has no `--gate` at all.
 
 ### What a structural pass does and does not tell you
@@ -737,21 +745,21 @@ environment that is not activated". The first version of this probe got that
 wrong, passed its own unit tests, and only real `flox` caught it; the tests now
 pin the actual contract.
 
-### Golden reference manifests (`testdata/gold/<id>.toml`)
+### Golden reference manifests (`expected/<id>.toml`)
 
 The registry's prose `gold` field characterizes the *right answer* in words.
-`testdata/gold/<id>.toml` goes one better: a concrete, hand-curated,
+`expected/<id>.toml` goes one better: a concrete, hand-curated,
 per-package verified reference manifest for each registered repo (not
 whole-manifest lock-tested — see the caveat below) — the manifest a
 careful engineer would write after reading the repo in full. When one exists,
-`_judge_tier2` passes it to the judge alongside the prose characterization, so
+`_judge_real_world` passes it to the judge alongside the prose characterization, so
 grading compares the produced manifest against a real target rather than a
 description. It is an **idiomatic reference, not an exact-match target** — a
 well-structured produced manifest may differ in layout, comments, or hook style
 and still score 5/5.
 
-These are distinct from `testdata/mastodon-manifest.toml`, which is a
-*representative capture of actual skill output* used by `tests/test_tier2.py` as a
+These are distinct from `samples/mastodon-manifest.toml`, which is a
+*representative capture of actual skill output* used by `tests/test_real_world.py` as a
 regex-drift guard (bugs and all). The golden references are the *ideal*.
 
 Each `<id>.toml` has a sibling `<id>-notes.md` recording provenance (every pin
@@ -773,9 +781,9 @@ as functionally tested — no real repo was checked out, so no gem/wheel
 native build ever compiled and hook commands that touch project files
 (`bundle install`, `composer install`, ...) fail on missing inputs by
 design. Each golden passes its own registry entry's structural checks and
-the deterministic golden lint (`tests/test_golden_lint.py`, AI-456/AI-457).
+the deterministic golden lint (`tests/test_real_world_golden_lint.py`, AI-456/AI-457).
 
-### Registry (`tier2.jsonl`)
+### Registry (`real-world.jsonl`)
 
 One JSON object per line:
 
@@ -824,7 +832,7 @@ registry expected.
 A bare string (`"postgres"`) is still accepted as shorthand for
 `{"name": "postgres", "disposition": "expect-wired"}` — this keeps any
 external tooling or ad-hoc registry edits from needing an immediate
-schema migration, though the committed `tier2.jsonl` uses the explicit
+schema migration, though the committed `real-world.jsonl` uses the explicit
 dict form throughout.
 
 ### Current repos
@@ -840,7 +848,7 @@ dict form throughout.
 | `lemmy` | `9311de3b662b` | rust | cargo, rustc | postgres | golden, run pending |
 | `firefly-iii` | `a0d70228bc14` | php | php85, nodejs | mariadb, redis | golden, run pending |
 
-All eight have a golden reference manifest under `testdata/gold/<id>.toml`
+All eight have a golden reference manifest under `expected/<id>.toml`
 (+ `<id>-notes.md`); see "Golden reference manifests" above. The four original
 repos (mastodon, posthog, sentry, supabase) cover Ruby / Python / JS+Deno; the
 four added later (gitea, plausible, lemmy, firefly-iii) deliberately reach into
@@ -886,76 +894,77 @@ remain unrun.
 
 ```bash
 # Single repo (validated so far):
-python3 tier2.py --only mastodon
+python3 real_world.py --only mastodon
 
 # All registered repos (heavy — large clones + long skill runs):
-python3 tier2.py
+python3 real_world.py
 
 # Opt in to activation verification:
-python3 tier2.py --only mastodon --activate
+python3 real_world.py --only mastodon --activate
 
 # Custom timeouts (defaults: 900s clone, 1800s agent run):
-python3 tier2.py --only sentry --clone-timeout 1200 --agent-timeout 2400
+python3 real_world.py --only sentry --clone-timeout 1200 --agent-timeout 2400
 
 # Custom skill dir / output path (same conventions as run_floxify.py):
-python3 tier2.py --skill-dir /path/to/flox-plugin --out results/my-run.json
+python3 real_world.py --skill-dir /path/to/flox-plugin --out results/my-run.json
 ```
 
-Results land in `results/tier2.json` by default. Unlike Tier 1, there's
+Results land in `results/real-world.json` by default (gitignored; the
+committed snapshot is `baselines/real-world.json`). Unlike synthetic, there's
 no committed baseline or regression diff yet — with only one of four
 repos run so far, a diff isn't meaningful. Add one once more repos have
 a run to compare against.
 
 ### Unit tests
 
-`tests/test_tier2.py` covers the deterministic, unit-testable pieces
+`tests/test_real_world.py` covers the deterministic, unit-testable pieces
 (structural-conformance regexes, registry loading, the clone-at-SHA
 fallback chain) with `unittest` + mocked `subprocess`/clone-strategy
 calls. The agentic skill run and LLM judge call are integration-only,
-same as Tier 1 — exercised by an actual `--only <id>` run, not unit
+same as synthetic — exercised by an actual `--only <id>` run, not unit
 tests.
 
 ```bash
-python3 -m unittest tests.test_tier2 -v
+python3 -m unittest tests.test_real_world -v
 ```
 
 ### CI
 
-Not wired into `.github/workflows/evals.yml` yet. Like Tier 1's
-`floxify-evals` job, Tier 2 needs a live `flox` + network + Claude
-credentials and is too slow for per-PR gating; unlike Tier 1, it isn't
+Not wired into `.github/workflows/evals.yml` yet. Like synthetic's
+`floxify-evals` job, real-world needs a live `flox` + network + Claude
+credentials and is too slow for per-PR gating; unlike synthetic, it isn't
 on the weekly schedule either — these are large repos and 4 full runs
 would be expensive on every scheduled tick. Run manually via `--only`
 per repo until there's a cheaper subset or a case for scheduling it.
 
-## Tier 3: known-hard & conversion-mode fixtures (`tier3.jsonl`, stretch — report-only)
+## Stretch tier: known-hard & conversion-mode fixtures (`stretch.jsonl` — report-only)
 
-Tier 3 (AI-431) adds the fixtures where the skill is *expected* to
+The stretch tier (AI-431) adds the fixtures where the skill is *expected* to
 struggle, plus one per dedicated conversion mode. Its whole purpose is
 **trend visibility, not a pass/fail bar** — it is tracked and reported but
-**never gates the build, in any mode**. It reuses the Tier-1 runner
-(`run_floxify.py`) verbatim — same synthetic `fixtures/<id>/` + `gold/<id>.toml`
+**never gates the build, in any mode**. It reuses the synthetic runner
+(`run_floxify.py`) verbatim — same synthetic `fixtures/<id>/` + `expected/<id>.toml`
 layout, same hard-checks, same judge — driven by a separate registry so it
 stays out of the default/weekly gated run:
 
 ```bash
 # Report-only run (NO --gate — every entry is stretch-tier):
-python3 run_floxify.py --tasks tier3.jsonl
+python3 run_floxify.py --tasks stretch.jsonl
 
 # One fixture:
-python3 run_floxify.py --tasks tier3.jsonl --only ruby-native-gems
+python3 run_floxify.py --tasks stretch.jsonl --only ruby-native-gems
 ```
 
 ### Why it never gates (structural, not a flag)
 
 `run_floxify.py`'s `--gate` binds **only `should`-tier** tasks
-(`binding = [r for r in scored if r["tier"] == "should"]`). Every Tier-3
+(`binding = [r for r in scored if r["tier"] == "should"]`). Every stretch
 entry is **`stretch`**, so none of them can ever bind the gate — the tier
 is report-only by construction, and `by_tier.stretch` in the run summary is
 where its hard-pass rate and judge score land for trend-watching. (Passing
-`--gate` with only `tier3.jsonl` is a vacuous-gate error by design — there
+`--gate` with only `stretch.jsonl` is a vacuous-gate error by design — there
 are no should-tier tasks to gate; run it without `--gate`.) There is no
-committed baseline and no rate-refresh batch, same posture as Tier 2:
+committed baseline and no rate-refresh batch, same posture as real-world:
 record one once the skill has a run worth diffing against.
 
 ### Fixtures
@@ -969,18 +978,18 @@ record one once the skill has a run worth diffing against.
 | `brewfile-convert` | conversion-mode | `Brewfile`, `README.md` | Brewfile → Flox: `brew "…"` → catalog (`awscli`→`awscli2`); `tap` dropped; Brewfile left in place |
 | `devcontainer-convert` | conversion-mode | `.devcontainer/devcontainer.json`, `requirements.txt`, `package.json` | Dev Container full conversion: runtimes from image (`python:3.12`) **and** feature (`node:20`); `containerEnv`→`[vars]`, `postCreateCommand`→`[hook]` (pip into a `$FLOX_ENV_CACHE` venv) |
 
-Same "fixtures ship no `.flox/`" discipline as Tier 1 — the skill writes it.
+Same "fixtures ship no `.flox/`" discipline as synthetic — the skill writes it.
 
 ### Gold manifests
 
-`gold/<id>.toml` — hand-authored, and **every catalog claim
+`expected/<id>.toml` — hand-authored, and **every catalog claim
 live-verified via `flox show` on 2026-07-21** (nixpkgs) per the skill's
 Phase-2 reading discipline: each `pkg-path` resolves, and the
 whole manifest co-resolves (`flox list -c`) on the three declared systems
 `["x86_64-linux", "aarch64-linux", "aarch64-darwin"]`. `x86_64-darwin` is
 dropped from `[options].systems` because several of these packages
 (python3, uv, jq, ripgrep, terraform, …) currently have no `x86_64-darwin`
-build in the catalog — the same drop the Tier-2 goldens make. No fixture
+build in the catalog — the same drop the real-world goldens make. No fixture
 was skipped: all six goldens authored and verified clean.
 
 ### Deterministic gates (the only things that DO gate — via `python3 -m unittest`)
@@ -988,30 +997,30 @@ was skipped: all six goldens authored and verified clean.
 Two fast, no-`claude` test modules, mirroring the two-tier shape the rest
 of this suite uses:
 
-- **`tests/test_tier3.py`** — harness plumbing (pure stdlib, no network): the
+- **`tests/test_stretch.py`** — harness plumbing (pure stdlib, no network): the
   registry is well-formed, every entry is `stretch` (so the tier can never
-  gate), ids don't collide with Tier 1, every declared check is a real
+  gate), ids don't collide with synthetic, every declared check is a real
   `run_floxify.CHECKS` key, and each id has a non-`.flox/` fixture + a
   parseable gold with `[install]`.
 
   ```bash
-  python3 -m unittest tests.test_tier3 -v
+  python3 -m unittest tests.test_stretch -v
   ```
 
-- **`tests/test_tier3_golden_lint.py`** — golden lint over the six Tier-3
+- **`tests/test_stretch_golden_lint.py`** — golden lint over the six stretch
   goldens: `verify.py`'s manifest-only checks (`[vars]` literalness,
   hook-mutation, catalog resolution) plus the whole-manifest lock leg,
-  reusing `tests/test_golden_lint.py`'s `_attempt_lock` and sharing its
-  `FLOXIFY_GOLDEN_LINT_LIVE_CATALOG` switch. Unlike the Tier-2 goldens
-  there is **no `KNOWN_VIOLATIONS` allowlist** — a Tier-3 gold must be
+  reusing `tests/test_real_world_golden_lint.py`'s `_attempt_lock` and sharing its
+  `FLOXIFY_GOLDEN_LINT_LIVE_CATALOG` switch. Unlike the real-world goldens
+  there is **no `KNOWN_VIOLATIONS` allowlist** — a stretch gold must be
   clean.
 
   ```bash
-  python3 -m unittest tests.test_tier3_golden_lint -v
-  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_tier3_golden_lint -v  # no network
+  python3 -m unittest tests.test_stretch_golden_lint -v
+  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_stretch_golden_lint -v  # no network
   ```
 
-The agentic outcome run (`run_floxify.py --tasks tier3.jsonl`) is
-report-only and manual, exactly like Tier 1's `floxify-evals` job and
-Tier 2's `--only` runs — it needs live `flox` + network + Claude
+The agentic outcome run (`run_floxify.py --tasks stretch.jsonl`) is
+report-only and manual, exactly like synthetic's `floxify-evals` job and
+real-world's `--only` runs — it needs live `flox` + network + Claude
 credentials and is never a per-PR gate.

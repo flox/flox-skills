@@ -48,7 +48,7 @@ it directly with `<id>.pkg-path` + `<id>.version` (see "Emitting an exact
 pin" above) — supabase pins `packageManager "pnpm@10.24.0"` and the catalog
 carries `pnpm_10@10.24.0` exactly, so the golden installs it directly with
 `pnpm_10.version = "10.24.0"`, no corepack involved (live-verified
-2026-07-18; `evals/floxify/testdata/gold/supabase.toml`).
+2026-07-18; `evals/floxify/expected/supabase.toml`).
 
 Fall back to **corepack** only when the catalog genuinely can't satisfy the
 pin — the nearest `pnpm_<major>`/`yarn-berry` version is a gap short of the
@@ -62,10 +62,10 @@ the lesson, not the numbers. Two worked cases from the goldens:
   gap in the version list, not a ceiling (the catalog's `pnpm_10` line
   continues well past `10.29.x`), but still short of the exact repo pin —
   so its golden provisions pnpm through corepack instead (verified
-  2026-07-17; `evals/floxify/testdata/gold/posthog.toml`).
+  2026-07-17; `evals/floxify/expected/posthog.toml`).
 - Mastodon pins `packageManager "yarn@4.17.1"`, but its golden installs
   `yarn-berry` with NO `.version` field at all
-  (`evals/floxify/testdata/gold/mastodon.toml`) — not because corepack is
+  (`evals/floxify/expected/mastodon.toml`) — not because corepack is
   needed here either, but because Yarn Berry doesn't need the catalog
   exact match OR corepack: `.yarn/releases/yarn-<version>.cjs`, checked
   into the repo and referenced by `.yarnrc.yml`, IS the pinned binary — the

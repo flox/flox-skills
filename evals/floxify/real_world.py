@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Flox /floxify skill eval harness — Tier 2, real OSS conversion repos.
+"""Flox /floxify skill eval harness — real-world, real OSS conversion repos.
 
-Tier 1 (run_floxify.py) copies small synthetic fixtures from disk and grades
-the manifest against a hand-tuned gold TOML. Tier 2 fixtures are real
+The synthetic tier (run_floxify.py) copies small fixtures from disk and grades
+the manifest against a hand-tuned gold TOML. real-world fixtures are real
 open-source repos — too large to vendor and too heavy to fully `flox
 activate` — so this harness differs in two ways:
 
-  1. Fixtures are shallow-cloned at a pinned SHA (see tier2.jsonl), not
+  1. Fixtures are shallow-cloned at a pinned SHA (see real-world.jsonl), not
      copied from evals/floxify/fixtures/.
   2. The primary check is structural conformance, derived per-entry from
      the registry's expected_runtimes/expected_services: does the produced
@@ -17,9 +17,9 @@ activate` — so this harness differs in two ways:
 Activation is off by default (`--activate` to opt in) and is always
 advisory. This tier never gates the build — it is report-only, run
 manually or on a schedule, and intended to surface real-world regressions
-(e.g. a weak ecosystem like Ruby) that the small Tier 1 fixtures can't.
+(e.g. a weak ecosystem like Ruby) that the small synthetic fixtures can't.
 Its activation budget defaults to 1800s (`--activation-timeout`): these
-environments realize a full closure on first activation, and the Tier 1
+environments realize a full closure on first activation, and the synthetic
 budget of 120s silently recorded posthog as "skipped" rather than measuring
 it. A timeout is now a FAILURE, not a skip.
 
@@ -53,7 +53,7 @@ rather than duplicating that machinery. Also reuses run_floxify's
 both the structural `has_service_<kind>` check and the AI-447 probe's
 target resolution, so a `[services.db]` running postgres is recognized
 the same way the deterministic verify leg already recognizes it,
-instead of tier2's own narrower name-only match.
+instead of real_world's own narrower name-only match.
 
 `expected_services` registry entries carry a per-service disposition
 (AI-470): `expect-wired` (the default — every fixture but posthog) means
@@ -71,12 +71,12 @@ finds genuinely wired, which is exactly "probe only when actually
 wired" regardless of what the registry expected.
 
 Usage:
-    python3 tier2.py --only mastodon             # single repo
-    python3 tier2.py                              # all registered repos
-    python3 tier2.py --activate                   # opt in to flox activate
-    python3 tier2.py --activate --services        # ...and prove services serve
-    python3 tier2.py --skill-dir /path/to/flox-plugin
-    python3 tier2.py --out results/my-run.json
+    python3 real_world.py --only mastodon             # single repo
+    python3 real_world.py                              # all registered repos
+    python3 real_world.py --activate                   # opt in to flox activate
+    python3 real_world.py --activate --services        # ...and prove services serve
+    python3 real_world.py --skill-dir /path/to/flox-plugin
+    python3 real_world.py --out results/my-run.json
 
 Pure stdlib — no additional packages required.
 """
@@ -109,11 +109,11 @@ from run_floxify import (
 
 HERE = Path(__file__).resolve().parent
 
-# Tier 2 repos are heavy by definition — a first activation realizes an
-# entire closure (posthog: 33 packages incl. rust/go/emscripten). The Tier 1
+# real-world repos are heavy by definition — a first activation realizes an
+# entire closure (posthog: 33 packages incl. rust/go/emscripten). The synthetic
 # budget of 120s is not a sane default here; it silently produced 'skipped'
 # on the largest repo in the corpus (AI-454).
-TIER2_ACTIVATION_TIMEOUT = 1800
+REAL_WORLD_ACTIVATION_TIMEOUT = 1800
 
 
 # --- git clone-at-SHA (fallback chain) -----------------------------------
@@ -203,7 +203,7 @@ def _clone_at_sha(url, sha, dest, timeout=900):
 
 # --- structural conformance checks (data-driven from the registry) -------
 # Runtime patterns are matched against the pkg-path *value*, anchored on
-# both quotes (same technique as Tier 1's PIN_* regexes) so an unrelated
+# both quotes (same technique as synthetic's PIN_* regexes) so an unrelated
 # ecosystem tool cannot satisfy the check — e.g. a "ruby" pin must not be
 # satisfied by rubyPackages.rubocop.
 
@@ -222,7 +222,7 @@ def _load_verify_module(skill_dir):
     SAME kind-matching rule (`matching_service_names`/`_service_covers`,
     AI-468) and the same manifest-wired-compose rule (`manifest_wires_compose`,
     AI-466/AI-470) the deterministic verify leg and the live skill's
-    Phase 3c Step 4 already enforce, instead of tier2's own separate,
+    Phase 3c Step 4 already enforce, instead of real_world's own separate,
     narrower checks.
 
     Mirrors run_floxify.py's `_load_detect_and_verify` per-call reload
@@ -333,7 +333,7 @@ def _service_disposition_results(entry, manifest_text, verify_mod):
 
 def _structural_checks(entry, manifest_text, verify_mod=None):
     """Per-entry hard-checks derived from the registry's expected_runtimes/
-    expected_services, rather than Tier 1's fixed CHECKS dict — each
+    expected_services, rather than synthetic's fixed CHECKS dict — each
     real-world repo pins different runtimes and wires different services.
 
     `has_service_<kind>` means "a service of this kind exists" (name OR
@@ -543,32 +543,32 @@ def _probe_services(target_dir, expected_services, manifest_text=None,
     return results
 
 
-# --- Tier 2 LLM judge ------------------------------------------------------
-# Tier 1's _judge diffs the produced manifest against a hand-tuned gold
-# TOML file. Tier 2 has no gold manifest for these repos — the reference is
+# --- real-world LLM judge ------------------------------------------------------
+# synthetic's _judge diffs the produced manifest against a hand-tuned gold
+# TOML file. real-world has no gold manifest for these repos — the reference is
 # a textual characterization (registry `gold` field: expected runtimes,
 # services, and notes). This reuses _run_judge (the bare claude invocation)
 # with a conformance-focused rubric and the same JSON-response parsing
-# pattern as Tier 1's _judge.
+# pattern as synthetic's _judge.
 
-GOLD_DIR = HERE / "testdata" / "gold"
+EXPECTED_DIR = HERE / "expected"
 
 
 def _golden_manifest(entry_id):
     """A hand-curated, catalog-verified reference manifest for this repo, if
-    one has been captured under testdata/gold/<id>.toml. It is an *idiomatic*
+    one has been captured under expected/<id>.toml. It is an *idiomatic*
     reference (right runtimes/services, correct hook idioms), not an exact-match
     target — a well-structured produced manifest may legitimately differ."""
-    path = GOLD_DIR / f"{entry_id}.toml"
+    path = EXPECTED_DIR / f"{entry_id}.toml"
     return path.read_text() if path.exists() else None
 
 
-def _judge_tier2(entry, manifest_text, verify_result=None):
+def _judge_real_world(entry, manifest_text, verify_result=None):
     """Grade produced manifest vs the registry's gold characterization, plus a
-    concrete golden reference manifest when one exists (testdata/gold/<id>.toml).
+    concrete golden reference manifest when one exists (expected/<id>.toml).
 
     `verify_result` (AI-465) is the deterministic verify.py leg's confirmed
-    catalog resolution table — handed to the judge the same way Tier 1's
+    catalog resolution table — handed to the judge the same way synthetic's
     `_judge` does, so it stops grading catalog facts from memory (AI-451)."""
     gold = entry.get("gold", {})
     gold_manifest = _golden_manifest(entry["id"])
@@ -611,7 +611,7 @@ def _judge_tier2(entry, manifest_text, verify_result=None):
         '<true|false>, "issues": [<short strings>]}'
     )
     # AI-442: _run_judge is now a 3-tuple (adds cost/usage meta for the
-    # efficiency axis). tier2.py doesn't record judge cost itself yet
+    # efficiency axis). real_world.py doesn't record judge cost itself yet
     # (out of AI-442 PR 1's scope) -- mechanical unpack only, so this
     # call site doesn't break under the new shared-function signature.
     result, err, _meta = _run_judge(prompt)
@@ -728,10 +728,10 @@ def _capture_and_strip_upstream_flox(target_dir):
 
 def process_entry(entry, skill_dir, activate=False, services=False,
                   clone_timeout=900, agent_timeout=1800,
-                  activation_timeout=TIER2_ACTIVATION_TIMEOUT):
+                  activation_timeout=REAL_WORLD_ACTIVATION_TIMEOUT):
     """Clone the repo at its pinned SHA, run /floxify against it, and score
     the produced manifest with structural conformance + LLM judge."""
-    tmpdir = tempfile.mkdtemp(prefix=f"floxify-tier2-{entry['id']}-")
+    tmpdir = tempfile.mkdtemp(prefix=f"floxify-real_world-{entry['id']}-")
     try:
         print(f"  {entry['id']}: cloning {entry['repo_url']} @ {entry['sha']} ...", flush=True)
         clone_err = _clone_at_sha(
@@ -776,10 +776,10 @@ def process_entry(entry, skill_dir, activate=False, services=False,
         print(f"  {entry['id']}: invoking skill (this may take a while) ...", flush=True)
         # AI-442: _run_claude_agent is now a 3-tuple (adds cost/usage/
         # tool-call meta for the efficiency axis) and switched its
-        # transport to --output-format stream-json. tier2.py doesn't
+        # transport to --output-format stream-json. real_world.py doesn't
         # record agent cost itself yet (out of AI-442 PR 1's scope) --
         # mechanical unpack only. `arm` defaults to "skills", preserving
-        # Tier 2's existing always-skill-loaded behavior exactly.
+        # real-world's existing always-skill-loaded behavior exactly.
         agent_out, agent_err, _meta = _run_claude_agent(
             prompt, skill_dir, timeout=agent_timeout
         )
@@ -832,7 +832,7 @@ def process_entry(entry, skill_dir, activate=False, services=False,
             act_ok, act_skipped, act_notes = (
                 None,
                 True,
-                "--activate not set (Tier 2 activation is opt-in — these "
+                "--activate not set (real-world activation is opt-in — these "
                 "dev envs are too heavy to reliably activate)",
             )
 
@@ -853,14 +853,14 @@ def process_entry(entry, skill_dir, activate=False, services=False,
         else:
             svc_results = {}
 
-        # Deterministic manifest check (AI-461's leg, wired into Tier 2 by
+        # Deterministic manifest check (AI-461's leg, wired into real-world by
         # AI-465) — advisory, same reason activation is advisory: the
         # catalog sub-leg needs live flox+network. Re-scans `tmp`, the same
-        # checkout the agent wrote into — unlike Tier 1's small vendored
-        # fixtures, there is no separate pristine copy to preserve at Tier 2
+        # checkout the agent wrote into — unlike synthetic's small vendored
+        # fixtures, there is no separate pristine copy to preserve at real-world
         # scale (re-cloning per rep just to get one would be its own cost).
         # The catalog sub-leg is tied to --activate, same opt-in gate the
-        # rest of Tier 2's live-flox behavior already uses; it degrades to
+        # rest of real-world's live-flox behavior already uses; it degrades to
         # a clean skip when flox is unavailable regardless (check_catalog's
         # own shutil.which guard). The re-scan also walks .flox/ and any
         # activation artifacts; detect's verdict-bearing parsers read only
@@ -873,8 +873,8 @@ def process_entry(entry, skill_dir, activate=False, services=False,
 
         # LLM judge (advisory) — hand it verify.py's confirmed catalog
         # resolution table so it stops grading catalog facts from memory
-        # (AI-451), same treatment Tier 1's _judge already gets.
-        verdict = _judge_tier2(entry, manifest_text, verify_result=verify_result)
+        # (AI-451), same treatment synthetic's _judge already gets.
+        verdict = _judge_real_world(entry, manifest_text, verify_result=verify_result)
 
         status = "PASS" if hard_pass else "FAIL"
         act_str = "skipped" if act_skipped else ("ok" if act_ok else "FAIL")
@@ -935,9 +935,9 @@ def process_entry(entry, skill_dir, activate=False, services=False,
 
 def process_task(entry, skill_dir, reps=1, activate=False, services=False,
                   clone_timeout=900, agent_timeout=1800,
-                  activation_timeout=TIER2_ACTIVATION_TIMEOUT):
+                  activation_timeout=REAL_WORLD_ACTIVATION_TIMEOUT):
     """Run `reps` repetitions of an entry. A single rep returns the plain
-    per-entry result (dashboard-compatible with a Tier-1-shaped result);
+    per-entry result (dashboard-compatible with a synthetic-shaped result);
     multiple reps return an aggregate with each run kept under "runs"."""
     runs = [
         process_entry(
@@ -990,7 +990,7 @@ def _summarize(results, skill_id):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Flox /floxify Tier 2 eval harness (real OSS conversion repos)"
+        description="Flox /floxify real-world eval harness (real OSS conversion repos)"
     )
     ap.add_argument(
         "--skill-dir",
@@ -1002,8 +1002,8 @@ def main():
     )
     ap.add_argument(
         "--registry",
-        default=str(HERE / "tier2.jsonl"),
-        help="Path to tier2.jsonl (default: tier2.jsonl alongside this script)",
+        default=str(HERE / "real-world.jsonl"),
+        help="Path to real-world.jsonl (default: real-world.jsonl alongside this script)",
     )
     ap.add_argument("--only", help="Run a single registered repo id (e.g. mastodon)")
     ap.add_argument(
@@ -1011,14 +1011,14 @@ def main():
         help="Repetitions per repo (default 1; >1 aggregates hard-pass rate)",
     )
     ap.add_argument(
-        "--out", default="tier2.json",
-        help="Output filename under results/ (default: results/tier2.json)",
+        "--out", default="real-world.json",
+        help="Output filename under results/ (gitignored; default: results/real-world.json). Committed baselines live in baselines/ and are never written by a run.",
     )
     ap.add_argument(
         "--activate", action="store_true",
         help=(
-            "Opt in to `flox activate` verification (off by default — Tier "
-            "2 dev envs are too heavy to reliably activate in CI)"
+            "Opt in to `flox activate` verification (off by default — "
+            "real-world dev envs are too heavy to reliably activate in CI)"
         ),
     )
     ap.add_argument(
@@ -1043,10 +1043,10 @@ def main():
         help="Seconds allowed for the /floxify skill run (default 1800)",
     )
     ap.add_argument(
-        "--activation-timeout", type=int, default=TIER2_ACTIVATION_TIMEOUT,
+        "--activation-timeout", type=int, default=REAL_WORLD_ACTIVATION_TIMEOUT,
         help=(
             f"Seconds allowed for `flox activate` (default "
-            f"{TIER2_ACTIVATION_TIMEOUT}; Tier 2 first activations realize a "
+            f"{REAL_WORLD_ACTIVATION_TIMEOUT}; real-world first activations realize a "
             f"full closure). Exceeding it is recorded as a FAILURE, not a skip."
         ),
     )

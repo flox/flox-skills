@@ -56,13 +56,22 @@ The freshness scan found only a **small in-skill post-cutoff surface**: `flox ru
 
 ## Provenance / reproduce
 
+The 19 candidates screened above were `evals/candidates.jsonl` at the time. That
+file no longer exists: AI-509 Ticket 3 folded every active candidate into the one
+registry `evals/flox/tasks/screening.jsonl`. All 19 carry `area` `triggering` or
+`freshness` there, so the selection below reproduces this set **plus**
+`trig-secret-free-shared-env` (carried over from the retired
+`candidates-triggering.jsonl` and never screened here). The run's own outputs are
+the committed `evals/flox/baselines/screen-{haiku,sonnet,opus}.json`.
+
 ```bash
-cd evals
+flox activate
+cd evals/flox
 for m in claude-haiku-4-5-20251001 claude-sonnet-5 claude-opus-4-8; do
-  python3 screen.py --candidates candidates.jsonl --reps 5 --concurrency 4 \
+  python3 screen.py --area triggering --area freshness --reps 5 --concurrency 4 \
     --model "$m" --out results/screen-${m%%-*}.json   # isolated by default
 done
 python3 gen_screening_report.py --results results/screen-*.json \
-    --candidates candidates.jsonl --out SCREENING-REPORT.md
+    --out reports/SCREENING-REPORT.md
 ```
 

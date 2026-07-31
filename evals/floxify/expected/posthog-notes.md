@@ -200,7 +200,7 @@ promise.** The hook invokes the launcher as a bare `docker-compose up`
 (via `COMPOSE_FILE=docker-compose.dev.yml`, not an inline `-f <file>`
 between "compose" and "up") specifically so the harness's own
 manifest-wired-compose check (`verify.py`'s `_manifest_wires_compose`,
-AI-466's carve-out, reused by tier2.py's disposition-aware structural
+AI-466's carve-out, reused by real_world.py's disposition-aware structural
 check, AI-470) recognizes it as a real, invoked mechanism — not merely a
 repo that happens to ship a compose file. An earlier version of this
 golden used `docker-compose -f docker-compose.dev.yml up -d clickhouse`,
@@ -213,7 +213,7 @@ not as standalone Flox services. Both are runtime-oriented infrastructure
 by the same test above (a developer doesn't talk to Kafka/ZooKeeper
 directly either) — they inherit clickhouse's disposition rather than
 needing one of their own, since they're pulled in transitively, not
-independently expected by `tier2.jsonl`.
+independently expected by `real-world.jsonl`.
 
 ## Upstream technique adoption (AI-470)
 
@@ -226,9 +226,9 @@ live against the catalog before any adoption (2026-07-17, flox 1.13.2):
 | Technique | Source | Decision | Why |
 |-----------|--------|----------|-----|
 | `corepack_24` installed explicitly, `priority = 4` | `corepack = { pkg-path = "corepack_24", ..., priority = 4 }` | **Adopt** | Confirmed live: `corepack_24@24.13.0` exists in the catalog, matching the pinned Node version exactly. Without it, `corepack enable` uses whatever corepack ships bundled inside the `nodejs_24` derivation — an unpinned, unverified version. Installing `corepack_24` explicitly with a lower priority (4 < the manifest default of 5, per the flox skill [install] section) than `nodejs_24`'s implicit default guarantees corepack's own binary wins any PATH collision. Resolution-tested (2026-07-17): activates cleanly in its own `pkg-group`, consistent with this golden's exact-pin-isolation convention (AI-457). |
-| `sccache` + `RUSTC_WRAPPER=sccache` (Rust compile cache) | `[install]` sccache; `[vars]` RUSTC_WRAPPER | Keep-ours | Not applicable — this golden's scope is the Python(uv)+Node(pnpm) app surface `tier2.jsonl`'s `expected_runtimes` targets (python3, nodejs_24); it does not model PostHog's separate Go/Rust workspace (a materially larger fixture-scope question, not part of this ticket's service-disposition adjudication). |
+| `sccache` + `RUSTC_WRAPPER=sccache` (Rust compile cache) | `[install]` sccache; `[vars]` RUSTC_WRAPPER | Keep-ours | Not applicable — this golden's scope is the Python(uv)+Node(pnpm) app surface `real-world.jsonl`'s `expected_runtimes` targets (python3, nodejs_24); it does not model PostHog's separate Go/Rust workspace (a materially larger fixture-scope question, not part of this ticket's service-disposition adjudication). |
 | `watchman` (fast file watching for Django/Celery autoreload) | `[install]` watchman | Note | Confirmed live: `watchman@2026.01.19.00` exists, all four systems. A dev-experience nicety (faster autoreload), not required for `uv sync`/activation to succeed — out of this golden's functional-minimum scope. Worth reconsidering if a future ticket targets dev-experience parity rather than functional correctness. |
-| `ffmpeg_5` (media processing) | `[install]` ffmpeg | Note | Present in upstream but not evidenced as required by anything in this golden's Python(uv)+Node(pnpm) scope (no produced Tier 2 rep, including the "base shape" rep, installed it either). Likely serves a specific subsystem (e.g. session-replay processing) outside what this fixture models; not adopted without that investigation. |
+| `ffmpeg_5` (media processing) | `[install]` ffmpeg | Note | Present in upstream but not evidenced as required by anything in this golden's Python(uv)+Node(pnpm) scope (no produced real-world rep, including the "base shape" rep, installed it either). Likely serves a specific subsystem (e.g. session-replay processing) outside what this fixture models; not adopted without that investigation. |
 | `xmlsec`, `freetds` (SAML / MSSQL client libs) | `[install]` xmlsec, freetds | Note | Niche enterprise-integration dependencies (SAML SSO, MSSQL `pymssql`), not part of the core dev path this golden targets. Not adopted. |
 
 ## Compose services deliberately NOT wired (extras)
@@ -289,7 +289,7 @@ pkg-path and version confirmed via `flox show`/`flox search --all`) +
 resolution-tested (AI-457, 2026-07-16, re-confirmed AI-470, 2026-07-17:
 `flox activate -c "echo __ok__"` succeeds in a throwaway directory on
 x86_64-linux, including the AI-470 rebuild's `corepack_24` addition) +
-golden-lint clean (AI-470, 2026-07-17: `test_golden_lint.py` passes with
+golden-lint clean (AI-470, 2026-07-17: `test_real_world_golden_lint.py` passes with
 the EMPTY `KNOWN_VIOLATIONS` allowlist and the live catalog leg). NOT
 functionally tested — no real posthog checkout, so `uv sync`/`pnpm install`
 never ran against real lockfiles and no native build was exercised.

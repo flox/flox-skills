@@ -8,7 +8,7 @@ proves the analyzer extracts the right facts; THIS eval proves the *skill*
 reaches for it — it runs a real, Phase-1-bounded /floxify against a fixture with
 a tool-call-visible stream and asserts a Bash step invoked `detect.py`.
 
-Heavy and opt-in (spawns a real `claude` agent), like the Tier 2 harness — run
+Heavy and opt-in (spawns a real `claude` agent), like the real-world harness — run
 manually or on a schedule, never in the fast gate. Bounded to Phase 1 (no flox
 init / activate) so it stays cheap.
 

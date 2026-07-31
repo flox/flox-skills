@@ -5,13 +5,13 @@ Unlike run.py (which scores text answers to prompts), this harness:
   1. Copies a synthetic fixture repo to a temp dir (no .flox/ — skill creates it)
   2. Runs `claude /floxify <dir>` headlessly with the floxify skill loaded
   3. Reads the produced .flox/env/manifest.toml
-  4. Scores it with deterministic hard-checks + an LLM judge (vs gold/)
+  4. Scores it with deterministic hard-checks + an LLM judge (vs expected/)
 
 Hard checks (deterministic — bind the gate for should-tier under --gate):
   manifest_created     .flox/env/manifest.toml exists
   valid_toml           file parses as valid TOML
   has_install_section  [install] section present
-  has_services_section [services.*] present (only checked where listed in tasks.jsonl)
+  has_services_section [services.*] present (only checked where listed in synthetic.jsonl)
   no_abs_paths         no /home/ /Users/ /usr/local/ etc. in manifest values
   no_fake_install_url  no hallucinated Flox install URLs (curl|sh patterns)
   pins_node_20         manifest names nodejs_20 explicitly
@@ -25,11 +25,11 @@ Activation check (advisory — never gates):
   Recorded as skipped ONLY when we could not run the check (flox not in PATH,
   --skip-activation, or a harness-side error). A timeout is recorded as a
   FAILURE, not a skip — we ran the check and the env did not come up within
-  the budget. Budget is --activation-timeout (default 120s here; Tier 2 uses
+  the budget. Budget is --activation-timeout (default 120s here; real-world uses
   1800s since its first activations realize a full closure).
 
 LLM judge (advisory — reported, never blocks the gate):
-  Grades the produced manifest vs gold/<id>.toml 1-5 on package choices,
+  Grades the produced manifest vs expected/<id>.toml 1-5 on package choices,
   hook quality (uses $FLOX_ENV_CACHE, correct ecosystem patterns), and
   idiomatic Flox usage. Handed verify.py's confirmed catalog resolution
   table (below) so it stops grading catalog facts from memory (AI-451).
@@ -67,7 +67,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 FIXTURES_DIR = HERE / "fixtures"
-GOLD_DIR = HERE / "gold"
+EXPECTED_DIR = HERE / "expected"
 
 
 def _default_skill_dir():
@@ -83,8 +83,10 @@ def _default_skill_dir():
 
 DEFAULT_SKILL_DIR = _default_skill_dir()
 
-# Default comparison target for regression detection: the committed baseline.
-BASELINE_FILE = "floxify-baseline.json"
+# Default comparison target for regression detection: the committed baseline
+# under baselines/ (durable, versioned evidence) — never results/, which is
+# gitignored generated output.
+BASELINE_FILE = "synthetic.json"
 
 
 def _skill_identity(skill_dir):
@@ -396,7 +398,7 @@ def _detect_flox_plugin_contamination(init_event):
     `--strict-mcp-config` only gates MCP servers, not plugins: a bare
     `claude -p` call with NEITHER `--plugin-dir` NOR any plugin flag
     still loaded `flox:floxify` — see
-    testdata/stream-samples/README.md). `--setting-sources project,local`
+    samples/README.md). `--setting-sources project,local`
     on both arms is the primary fix (suppresses user-scope
     `enabledPlugins` entirely); this is the belt-and-suspenders runtime
     check specifically for the baseline arm, so a leak can never
@@ -451,7 +453,7 @@ def _run_claude_agent(prompt, skill_dir, arm="skills", timeout=600, retries=2):
     never applies), while `--plugin-dir` itself is a CLI-level plugin
     load independent of the settings-file plugin-enablement mechanism —
     confirmed live it still loads the skill on the skills arm with this
-    flag present (testdata/stream-samples/README.md carries both
+    flag present (samples/README.md carries both
     directions' verification). Applied unconditionally (both arms): the
     baseline arm needs the leak closed, and there is no reason for the
     skills arm to read this machine's other ambient user-scope settings
@@ -460,7 +462,7 @@ def _run_claude_agent(prompt, skill_dir, arm="skills", timeout=600, retries=2):
     `--output-format stream-json --verbose` (not plain `json`) — AI-442
     Q1: tool-call counting needs the per-event stream, not just the
     final envelope; the flag combination was verified live (PR body /
-    testdata/stream-samples/README.md carry the verification writeup).
+    samples/README.md carry the verification writeup).
     """
     cmd = [
         "claude", "-p", prompt,
@@ -616,7 +618,7 @@ def _judge(task, produced_toml, verify_result=None):
     captured separately from the agent's (the AI-459 split preserved
     across the port), so judge spend never contaminates the agent
     efficiency number."""
-    gold_path = GOLD_DIR / f"{task['id']}.toml"
+    gold_path = EXPECTED_DIR / f"{task['id']}.toml"
     gold = gold_path.read_text() if gold_path.exists() else "(no gold available)"
 
     prompt = (
@@ -677,7 +679,7 @@ def _check_activation(target_dir, timeout=DEFAULT_ACTIVATION_TIMEOUT):
     repo in the corpus yielded no activation signal at all (AI-454).
 
     `timeout` is caller-set because the right budget depends on the tier: small
-    Tier 1 fixtures activate in seconds, while a Tier 2 monorepo's first
+    synthetic fixtures activate in seconds, while a real-world monorepo's first
     activation realizes an entire closure.
     """
     if not shutil.which("flox"):
@@ -729,8 +731,8 @@ def _load_detect_and_verify(skill_dir):
 def _run_verify(skill_dir, fixture_src, manifest_text, check_catalog_live):
     """Ground the produced manifest against detect.py facts re-scanned
     from fixture_src — the deterministic leg alongside activation and
-    the judge. Whether fixture_src is a pristine fixture (Tier 1) or
-    the post-run checkout (Tier 2, which has no pristine copy) is the
+    the judge. Whether fixture_src is a pristine fixture (synthetic) or
+    the post-run checkout (real-world, which has no pristine copy) is the
     call site's choice, documented there.
 
     Returns a result dict on success, or {"error": ...} if detect/verify
@@ -754,8 +756,8 @@ def _run_verify(skill_dir, fixture_src, manifest_text, check_catalog_live):
 # --- per-task runner ----------------------------------------------------------
 
 def _base(task):
-    # `.get("tier", ...)` -- a task fed from tier2.jsonl (AI-463: this
-    # harness is Tier 1 only) has no "tier" key at all, and this function
+    # `.get("tier", ...)` -- a task fed from real-world.jsonl (AI-463: this
+    # harness is synthetic only) has no "tier" key at all, and this function
     # is called from the fixture-not-found error path below, which is
     # exactly the shape that reaches it for such a task. A bare
     # task["tier"] here would just move the KeyError one line down from
@@ -767,7 +769,7 @@ def _base(task):
 # --- verified-anchor strength (AI-442 Q2) --------------------------------------
 # A runtime-only `flox activate` proves packages resolve, not that a
 # declared service actually serves — the same gap AI-447 closed for
-# Tier 2 (tier2.py::_probe_services). Q2's binding decision: use that
+# real-world (real_world.py::_probe_services). Q2's binding decision: use that
 # stronger anchor here too, for exactly the fixtures that declare one.
 
 _CHECK_TO_SERVICE_KIND = {
@@ -793,8 +795,8 @@ def _expected_service_kind(task):
     return None
 
 
-# Same probe-command table and settle-loop technique as tier2.py's AI-447
-# probe (`tier2.py::_probe_services`) — NOT imported from there: tier2.py
+# Same probe-command table and settle-loop technique as real_world.py's AI-447
+# probe (`real_world.py::_probe_services`) — NOT imported from there: real_world.py
 # already imports `_run_claude_agent`/`_run_judge` from this module, so a
 # reverse import would be circular. Small enough to duplicate the idiom
 # rather than restructure either module's dependency direction for it;
@@ -841,11 +843,11 @@ def _probe_service(target_dir, kind, manifest_text, verify_mod,
     activation already established by the caller (probing an
     unactivated env errors — services can only start from inside one).
 
-    Deliberate divergence from `tier2.py`'s own `_probe_services`: that
+    Deliberate divergence from `real_world.py`'s own `_probe_services`: that
     function leaves an unmatched service at its `skipped=True` default
-    (tier2's declared-service gating is advisory-only, never Tier 2's
+    (real_world's declared-service gating is advisory-only, never real-world's
     own gate). This function returns a real `(False, False, ...)`
-    failure for the identical shape instead, because Tier 1's
+    failure for the identical shape instead, because synthetic's
     efficiency axis needs "unwired" to count as `failed-verify`, not a
     dropped observation (see the censoring table in the module
     docstring / README's "Efficiency axis" section). A future pass that
@@ -1024,10 +1026,10 @@ def process_task(task, skill_dir, skip_activation=False,
         return {**_base(task), "arm": arm, "rep": rep,
                 "terminal_disposition": "unverifiable-env", "error": (
             f"no fixtures/{task_id} directory -- this harness (run_floxify.py) "
-            f"is Tier 1 only and needs a local fixture checked into "
+            f"is synthetic only and needs a local fixture checked into "
             f"fixtures/{task_id}. Real-repo entries (cloned at a pinned SHA) "
-            f"live in tier2.jsonl and run via tier2.py, not this script: "
-            f"python3 tier2.py --only {task_id}"
+            f"live in real-world.jsonl and run via real_world.py, not this script: "
+            f"python3 real_world.py --only {task_id}"
         )}
 
     with tempfile.TemporaryDirectory(prefix=f"floxify-eval-{task['id']}-") as tmpdir:
@@ -1154,8 +1156,8 @@ def process_task(task, skill_dir, skip_activation=False,
             "tool_calls": {"agent": agent_meta["tool_calls"]},
             "stream_file": {"agent": stream_file},
             # Full text persisted alongside the excerpt (AI-468, aligning
-            # Tier 1 with Tier 2's own fix) — a truncated excerpt has
-            # blocked forensics on a failing Tier 2 rep twice; Tier 1
+            # synthetic with real-world's own fix) — a truncated excerpt has
+            # blocked forensics on a failing real-world rep twice; synthetic
             # fixtures are the same order of magnitude, so the same gap
             # exists here even though it hasn't bitten yet. manifest_excerpt
             # stays for anything that still displays a short preview.
@@ -1168,9 +1170,15 @@ def process_task(task, skill_dir, skip_activation=False,
 # --- summary helpers ----------------------------------------------------------
 
 def _read_baseline(name):
-    """Load a committed results/<name> baseline snapshot, or None if absent/bad."""
+    """Load a committed baselines/<name> snapshot, or None if absent/bad.
+
+    Baselines are read from baselines/ and never from results/. results/ is
+    gitignored generated output, so a runner that read its comparison point
+    from there would silently grade a run against whatever the last local
+    run happened to leave behind.
+    """
     try:
-        return json.loads((HERE / "results" / name).read_text())
+        return json.loads((HERE / "baselines" / name).read_text())
     except Exception:
         return None
 
@@ -1187,7 +1195,8 @@ def _diff_vs_baseline(summary, results, baseline):
         return [
             f"### Regression diff vs baseline (`{BASELINE_FILE}`)",
             f"_No committed baseline found — record one with "
-            f"`--out results/{BASELINE_FILE}` to enable regression diffs._",
+            f"`--out results/<run>.json` and copy it to "
+            f"`baselines/{BASELINE_FILE}` to enable regression diffs._",
             "",
         ]
 
@@ -1411,7 +1420,7 @@ def _efficiency_summary(results):
 
 def _vacuous_run_message(results):
     """AI-463 I1(a): a run where EVERY task errored (e.g. `--only lemmy
-    --tasks tier2.jsonl` — every id in that file is a real-repo entry with
+    --tasks real-world.jsonl` — every id in that file is a real-repo entry with
     no local fixtures/<id> directory) produces a results.json with
     nothing in it worth reporting, yet exits 0 like a genuine measurement
     run. Returns the hint to print before exiting nonzero, or None if at
@@ -1430,7 +1439,7 @@ def _vacuous_run_message(results):
     return (
         f"ERROR: 0 of {len(results)} task(s) actually ran (all errored) — "
         f"nothing to report. If these are real-repo entries, they belong "
-        f"in tier2.jsonl and run via tier2.py, not this script. "
+        f"in real-world.jsonl and run via real_world.py, not this script. "
         f"Errors: {errors}"
     )
 
@@ -1466,8 +1475,8 @@ def _parse_args():
     ap.add_argument("--model", default=MODEL, help=f"Claude model (default {MODEL})")
     ap.add_argument(
         "--tasks",
-        default=str(HERE / "tasks.jsonl"),
-        help="Path to tasks.jsonl (default: tasks.jsonl alongside this script)",
+        default=str(HERE / "synthetic.jsonl"),
+        help="Path to synthetic.jsonl (default: synthetic.jsonl alongside this script)",
     )
     ap.add_argument(
         "--only",
@@ -1511,7 +1520,7 @@ def _parse_args():
         "--baseline",
         default=BASELINE_FILE,
         help=(
-            f"Committed results/<file> to diff against for regression "
+            f"Committed baselines/<file> to diff against for regression "
             f"detection (default: {BASELINE_FILE}). Reports per-fixture "
             "hard-check flips + judge delta."
         ),
@@ -1536,8 +1545,8 @@ def _parse_args():
         type=int,
         default=1,
         help=(
-            "AI-442: repetitions per (fixture, arm) — default 1. Tier 2 "
-            "already has --reps natively; this brings Tier 1 to parity "
+            "AI-442: repetitions per (fixture, arm) — default 1. real-world "
+            "already has --reps natively; this brings synthetic to parity "
             "for the efficiency axis's n>=5 distribution policy (AI-438). "
             "Note: --baseline's regression-diff and the CI step summary's "
             "per-fixture table both key on fixture id and are not "
@@ -1551,7 +1560,7 @@ def _parse_args():
 
 
 def _load_tasks(path, only):
-    """Load tasks.jsonl from `path` and, if `only` is set, filter to the
+    """Load synthetic.jsonl from `path` and, if `only` is set, filter to the
     comma-separated fixture ids it names (AI-442 Q3: one or more ids,
     e.g. ruby,python-uv,node-postgres,rust-cargo,go-mod, without five
     separate invocations). Exits the process if any requested id doesn't
@@ -1688,9 +1697,11 @@ def main():
     scored = [r for r in results if "judge" in r]
     summary = _build_summary(results, skill_dir, MODEL, args.arm, reps)
 
-    # Snapshot the baseline BEFORE writing output — otherwise a run that
-    # writes to results/floxify-baseline.json would overwrite its own
-    # comparison target and the diff would always be empty.
+    # Read the baseline BEFORE writing output. Since AI-509 Ticket 3 the two
+    # live in separate directories (baselines/ is committed, results/ is
+    # gitignored generated output), so --out can no longer clobber the
+    # comparison target — but keeping the read first preserves the ordering
+    # guarantee independently of that separation.
     baseline = _read_baseline(args.baseline)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

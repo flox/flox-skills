@@ -392,10 +392,17 @@ def process_task(t, mode, allow):
             "answer_excerpt": answer[:1200]}
 
 
-def _read_golden(name):
-    """Load a committed results/<name> golden snapshot, or None if absent/bad."""
+def _read_baseline(name):
+    """Load a committed baselines/<name> snapshot, or None if absent/bad.
+
+    Comparison points come from baselines/ (committed, versioned evidence)
+    and NEVER from results/, which is gitignored generated output. Before
+    AI-509 Ticket 3 both lived in results/, so this run's own `--out` file
+    was also its comparison target: a second local run silently diffed
+    against the first instead of against what is on main.
+    """
     try:
-        return json.loads((HERE / "results" / name).read_text())
+        return json.loads((HERE / "baselines" / name).read_text())
     except Exception:
         return None
 
@@ -477,10 +484,11 @@ def main():
     }
     out = {"summary": summary, "results": results}
     out_path = HERE / "results" / (args.out or f"{args.mode.replace('+', '_')}.json")
-    # Snapshot this arm's committed golden BEFORE overwriting it, so the report can
-    # diff against it (hard-check flips). The cross-arm metrics table reads the
-    # other arms' goldens directly — those files aren't overwritten by this run.
-    prev_golden = _read_golden(out_path.name)
+    # This arm's committed baseline, for the report's hard-check-flip diff. It
+    # lives under baselines/ and this run writes under results/, so the two
+    # can no longer be the same file. The cross-arm metrics table reads the
+    # other arm's baseline the same way.
+    prev_baseline = _read_baseline(out_path.name)
     out_path.write_text(json.dumps(out, indent=2))
     print("\n=== SUMMARY ===")
     print(json.dumps(summary, indent=2))
@@ -494,7 +502,7 @@ def main():
     bad = [r for r in binding if not r["hard_pass"]]
     errs = [r for r in results if "error" in r and r.get("tier", "should") == "should"]
 
-    write_step_summary(summary, results, binding, bad, errs, args.gate, prev_golden)
+    write_step_summary(summary, results, binding, bad, errs, args.gate, prev_baseline)
 
     if args.gate and (bad or errs):
         print(f"\nGATE FAILED: {len(bad)} functional should-tier task(s) failed hard-checks: "
@@ -506,13 +514,13 @@ def main():
               f"should-trigger {summary['should_trigger_rate']}).")
 
 
-def _diff_vs_golden(summary, results, prev_golden):
+def _diff_vs_baseline(summary, results, prev_baseline):
     """Δ vs the of-record same-arm snapshot: hard-check flips (signal) + judge Δ (advisory)."""
     fname = f"{summary['mode'].replace('+', '_')}.json"
-    if not prev_golden:
+    if not prev_baseline:
         return [f"### Δ vs main (`{fname}`)",
-                f"_No committed golden for this arm — commit `evals/flox/results/{fname}` to enable per-PR diffs._", ""]
-    prev = {r["id"]: r for r in prev_golden.get("results", []) if "judge" in r}
+                f"_No committed baseline for this arm — commit `evals/flox/baselines/{fname}` to enable per-PR diffs._", ""]
+    prev = {r["id"]: r for r in prev_baseline.get("results", []) if "judge" in r}
     cur = {r["id"]: r for r in results if "judge" in r}
     regressed, fixed = [], []
     for tid in cur.keys() & prev.keys():
@@ -522,7 +530,7 @@ def _diff_vs_golden(summary, results, prev_golden):
             regressed.append(f"`{tid}` ({cur[tid]['area']})")
     added = sorted(cur.keys() - prev.keys())
     removed = sorted(prev.keys() - cur.keys())
-    ps = prev_golden.get("summary", {})
+    ps = prev_baseline.get("summary", {})
     lines = [f"### Hard-check diff vs main (of-record `{fname}`, model `{ps.get('model', '?')}`)"]
     lines.append(f"- ❌ **hard-check regressions ({len(regressed)}):** " + ", ".join(regressed)
                  if regressed else "- ✅ no hard-check regressions")
@@ -541,14 +549,14 @@ def _diff_vs_golden(summary, results, prev_golden):
 
 
 def _metrics_table(summary):
-    """Cross-arm metrics: this run (live) for its arm, committed golden for the other."""
+    """Cross-arm metrics: this run (live) for its arm, committed baseline for the other."""
     arms = [("baseline", "baseline.json"), ("skills", "skills.json")]
     summ = {}
     for arm, fn in arms:
         if arm == summary["mode"]:
             summ[arm] = summary
         else:
-            g = _read_golden(fn)
+            g = _read_baseline(fn)
             summ[arm] = g.get("summary") if g else None
 
     def cell(arm, key, pct):
@@ -577,7 +585,7 @@ def _metrics_table(summary):
     return rows
 
 
-def write_step_summary(summary, results, binding, bad, errs, gate_enabled, prev_golden=None):
+def write_step_summary(summary, results, binding, bad, errs, gate_enabled, prev_baseline=None):
     """Render a markdown report to $GITHUB_STEP_SUMMARY (the Actions run page)."""
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not path:
@@ -615,8 +623,8 @@ def write_step_summary(summary, results, binding, bad, errs, gate_enabled, prev_
     out += _metrics_table(summary)
     out += ["",
             "_Arms: **baseline** = bare model, no plugin loaded · **skills** = plugin "
-            "loaded. Bold column = this run (live); the other is the last committed "
-            "golden (`—` if none). Δ compares skills-only to baseline._", ""]
+            "loaded. Bold column = this run (live); the other is that arm's "
+            "committed baseline (`—` if none). Δ compares skills-only to baseline._", ""]
 
     areas = {}
     for r in scored:
@@ -629,7 +637,7 @@ def write_step_summary(summary, results, binding, bad, errs, gate_enabled, prev_
         out.append(f"| {area} | {len(rs)} | {hp:.0%} | {aj:.1f} |")
     out.append("")
 
-    out += _diff_vs_golden(summary, results, prev_golden)
+    out += _diff_vs_baseline(summary, results, prev_baseline)
 
     flags = []
     for r in results:

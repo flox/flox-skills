@@ -126,32 +126,32 @@ class TestRunVerify(unittest.TestCase):
 
 
 class TestMissingFixtureErrorPath(unittest.TestCase):
-    """AI-463: run_floxify.py is Tier 1 only (local fixtures/<id>
-    checkouts); feeding it a tier2.jsonl entry (real-repo tasks, no
+    """AI-463: run_floxify.py is synthetic only (local fixtures/<id>
+    checkouts); feeding it a real-world.jsonl entry (real-repo tasks, no
     "tier" key at all) crashed with KeyError: 'tier' in the fixture-not-
     found error path instead of reporting a clean error. Repro:
-    `python3 run_floxify.py --tasks tier2.jsonl --only lemmy`.
+    `python3 run_floxify.py --tasks real-world.jsonl --only lemmy`.
     """
 
     def test_missing_fixture_returns_error_dict_not_a_crash(self):
-        # A tier2.jsonl-shaped task (no "tier" key) must not raise.
+        # A real-world.jsonl-shaped task (no "tier" key) must not raise.
         task = {"id": "definitely-not-a-real-fixture-xyz", "ecosystem": "rust"}
         result = run_floxify.process_task(task, run_floxify.DEFAULT_SKILL_DIR)
         self.assertIn("error", result)
         self.assertEqual(result["id"], task["id"])
         self.assertEqual(result["tier"], "?")
 
-    def test_missing_fixture_error_hints_at_tier2(self):
-        # The clearer rejection: point at tier2.jsonl/tier2.py rather than
+    def test_missing_fixture_error_hints_at_real_world(self):
+        # The clearer rejection: point at real-world.jsonl/real_world.py rather than
         # a bare "fixture not found".
         task = {"id": "lemmy", "ecosystem": "rust"}
         result = run_floxify.process_task(task, run_floxify.DEFAULT_SKILL_DIR)
-        self.assertIn("tier2.jsonl", result["error"])
-        self.assertIn("tier2.py", result["error"])
+        self.assertIn("real-world.jsonl", result["error"])
+        self.assertIn("real_world.py", result["error"])
         self.assertIn("lemmy", result["error"])
 
     def test_missing_fixture_with_tier_key_present_still_works(self):
-        # A Tier 1 task.jsonl-shaped entry (has "tier") but a typo'd/
+        # A synthetic task.jsonl-shaped entry (has "tier") but a typo'd/
         # missing fixture id -- the original working case must stay intact.
         task = {"id": "definitely-not-a-real-fixture-xyz", "tier": "should",
                 "ecosystem": "python"}
@@ -274,19 +274,19 @@ class TestStats(unittest.TestCase):
 
 
 class TestVacuousRunMessage(unittest.TestCase):
-    """AI-463 I1(a): a run where every task errored (e.g. tier2.jsonl
-    entries fed to this Tier-1-only harness) must not exit 0 with an
+    """AI-463 I1(a): a run where every task errored (e.g. real-world.jsonl
+    entries fed to this synthetic-only harness) must not exit 0 with an
     empty-looking "measurement run" — see run_floxify.py's KeyError fix
     above for the failure mode this generalizes past."""
 
     def test_all_errored_returns_a_hint(self):
         results = [
             {"id": "lemmy", "tier": "?", "ecosystem": "rust",
-             "error": "no fixtures/lemmy directory ... tier2.py --only lemmy"},
+             "error": "no fixtures/lemmy directory ... real_world.py --only lemmy"},
         ]
         msg = run_floxify._vacuous_run_message(results)
         self.assertIsNotNone(msg)
-        self.assertIn("tier2.py", msg)
+        self.assertIn("real_world.py", msg)
         self.assertIn("lemmy", msg)
 
     def test_mixed_scored_and_errored_returns_none(self):
@@ -323,12 +323,12 @@ class TestVacuousRunIntegration(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             out_path = str(Path(tmpdir) / "repro-result.json")
             proc = subprocess.run(
-                [sys.executable, "run_floxify.py", "--tasks", "tier2.jsonl",
+                [sys.executable, "run_floxify.py", "--tasks", "real-world.jsonl",
                  "--only", "lemmy", "--out", out_path],
                 cwd=str(run_floxify.HERE), capture_output=True, text=True, timeout=30,
             )
             self.assertNotEqual(proc.returncode, 0)
-            self.assertIn("tier2.py", proc.stderr)
+            self.assertIn("real_world.py", proc.stderr)
             self.assertIn("lemmy", proc.stderr)
 
 
@@ -387,7 +387,7 @@ class TestGateShouldFail(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 STREAM_SAMPLE = (
-    run_floxify.HERE / "testdata" / "stream-samples" / "flox-search-sample.jsonl"
+    run_floxify.HERE / "samples" / "flox-search-sample.jsonl"
 ).read_text(encoding="utf-8")
 
 
@@ -593,7 +593,7 @@ class TestParseStream(unittest.TestCase):
 # machine's user-scope ~/.claude/settings.json has flox@flox-skills
 # enabled in enabledPlugins, and --strict-mcp-config only gates MCP
 # servers, not plugins -- so the "baseline" arm would silently run WITH
-# the skill loaded. The committed testdata/stream-samples/flox-search-
+# the skill loaded. The committed samples/flox-search-
 # sample.jsonl (captured with NEITHER --plugin-dir NOR --setting-sources)
 # is itself the reproduction: its init event shows the flox plugin
 # loaded despite never being requested.
@@ -608,13 +608,13 @@ REAL_CONTAMINATED_INIT_EVENT = next(
 # The two follow-up sanctioned live calls made to verify the C1 fix
 # (--setting-sources project,local): one with --plugin-dir (skills arm,
 # must still load the plugin), one without (baseline arm, must NOT).
-# See testdata/stream-samples/README.md's "C1 fix verification" section.
+# See samples/README.md's "C1 fix verification" section.
 SKILLS_ARM_SAMPLE = (
-    run_floxify.HERE / "testdata" / "stream-samples"
+    run_floxify.HERE / "samples"
     / "skills-arm-setting-sources-sample.jsonl"
 ).read_text(encoding="utf-8")
 BASELINE_ARM_SAMPLE = (
-    run_floxify.HERE / "testdata" / "stream-samples"
+    run_floxify.HERE / "samples"
     / "baseline-arm-setting-sources-sample.jsonl"
 ).read_text(encoding="utf-8")
 
@@ -943,7 +943,7 @@ class TestRunClaudeAgentHarnessMisconfigurationGuard(unittest.TestCase):
 # The real verify.py, loaded once for this module -- exercises
 # `_probe_service`'s actual `parse_manifest`/`matching_service_names`
 # calls rather than a hand-rolled stand-in (same discipline
-# test_tier2.py's `_VERIFY_MOD` module load uses for the AI-447 probe).
+# test_real_world.py's `_VERIFY_MOD` module load uses for the AI-447 probe).
 _, _VERIFY_MOD = run_floxify._load_detect_and_verify(run_floxify.DEFAULT_SKILL_DIR)
 
 
