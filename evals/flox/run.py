@@ -489,6 +489,9 @@ def main():
     # can no longer be the same file. The cross-arm metrics table reads the
     # other arm's baseline the same way.
     prev_baseline = _read_baseline(out_path.name)
+    # results/ is gitignored (AI-509 Ticket 3), so it does not exist on a
+    # fresh checkout the way it did when baselines were committed into it.
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(out, indent=2))
     print("\n=== SUMMARY ===")
     print(json.dumps(summary, indent=2))
