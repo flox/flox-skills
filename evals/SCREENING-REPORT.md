@@ -59,10 +59,10 @@ The freshness scan found only a **small in-skill post-cutoff surface**: `flox ru
 ```bash
 cd evals
 for m in claude-haiku-4-5-20251001 claude-sonnet-5 claude-opus-4-8; do
-  flox activate -- python3 screen.py --candidates candidates.jsonl --reps 5 --concurrency 4 \
+  python3 screen.py --candidates candidates.jsonl --reps 5 --concurrency 4 \
     --model "$m" --out results/screen-${m%%-*}.json   # isolated by default
 done
-flox activate -- python3 gen_screening_report.py --results results/screen-*.json \
+python3 gen_screening_report.py --results results/screen-*.json \
     --candidates candidates.jsonl --out SCREENING-REPORT.md
 ```
 

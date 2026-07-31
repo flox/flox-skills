@@ -7,12 +7,21 @@ name: skill-evals
 # `claude`, authenticated with the org-managed Anthropic key.
 #
 # EVERY job here gets its Python (and, where it needs one, its `claude`) from
-# this repo's own Flox environment — `flox activate -- python3 evals/<...>`,
-# the same command the eval READMEs document for local runs (AI-509 Ticket 1).
-# There is no actions/setup-python and no `npm install -g` anywhere in this
-# workflow: the interpreter is `python311` in .flox/env/manifest.toml, pinned
-# by manifest.lock on all four systems, so a clean checkout needs flox and
-# nothing else. Adding a job? `flox activate --` it too.
+# this repo's own Flox environment (AI-509 Ticket 1). There is no
+# actions/setup-python and no `npm install -g` anywhere in this workflow: the
+# interpreter is `python311` in .flox/env/manifest.toml, pinned by
+# manifest.lock on all four systems, so a clean checkout needs flox and
+# nothing else.
+#
+# The activation is a STEP-LEVEL property, not a per-command prefix. Each step
+# that needs the environment carries
+#
+#   shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
+#
+# so GitHub hands its generated script to bash as `{0}` and the WHOLE script
+# runs inside one activation. Commands inside are plain `python3 ...`, exactly
+# what a developer types after their own `flox activate`. Adding a job? Give
+# its steps that shell key rather than wrapping each command.
 #
 # The job runs on every pull request so the required `evals` status check always
 # reports. The heavy suite runs only when the skill or eval sources change
@@ -142,12 +151,12 @@ jobs:
 
       # The eval interpreter comes from THIS REPO'S Flox environment
       # (.flox/env/manifest.toml pins python311), not from a runner-provided
-      # one — AI-509 Ticket 1. Every command below runs as
-      # `flox activate -- python3 ...`, byte-for-byte the invocation the eval
-      # READMEs document for local runs, so "works on my machine" and "works
-      # in CI" mean the same interpreter. This replaces actions/setup-python,
-      # which pinned 3.11 here and nowhere else: a contributor's ambient
-      # python3 was whatever their OS shipped.
+      # one — AI-509 Ticket 1. The steps below activate that environment once
+      # via their `shell:` key and then run plain `python3 ...`, the same
+      # commands a developer runs after `flox activate`, so "works on my
+      # machine" and "works in CI" mean the same interpreter. This replaces
+      # actions/setup-python, which pinned 3.11 here and nowhere else: a
+      # contributor's ambient python3 was whatever their OS shipped.
       - name: Install flox
         uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
 
@@ -155,8 +164,9 @@ jobs:
         working-directory: evals/floxify
         env:
           FLOX_DISABLE_METRICS: "true"
+        shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
         run: |
-          set -euo pipefail
+          set -u
           # Keeps the required check meaningful rather than a rubber stamp: no
           # credentials, no network, no API spend — and unlike the judge, these
           # cannot be confidently wrong. This is the ONLY place these run: a
@@ -171,10 +181,10 @@ jobs:
           # written not to — see FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 below,
           # which is now load-bearing rather than belt-and-braces.
           echo "::group::detect.py (analyzer extraction)"
-          flox activate -- python3 test_detect.py
+          python3 test_detect.py
           echo "::endgroup::"
           echo "::group::harness logic (tier2 + detect_usage_eval)"
-          flox activate -- python3 -m unittest test_tier2 test_detect_usage_eval -v
+          python3 -m unittest test_tier2 test_detect_usage_eval -v
           echo "::endgroup::"
           # verify.py (AI-461): the checker's own invariants, all mocked at
           # the `flox show` boundary (_run_show_command) — no catalog, no
@@ -188,18 +198,19 @@ jobs:
           # and runs; its real, catalog-backed run (with real teeth against
           # catalog drift) is the golden-lint job below.
           echo "::group::verify.py (manifest checker)"
-          FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 flox activate -- python3 -m unittest test_verify test_verify_usage_eval test_golden_lint -v
+          FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_verify test_verify_usage_eval test_golden_lint -v
           echo "::endgroup::"
           echo "::group::run_floxify.py (harness deterministic-leg wiring)"
-          flox activate -- python3 -m unittest test_run_floxify -v
+          python3 -m unittest test_run_floxify -v
           echo "::endgroup::"
 
       - name: Free deterministic unit tests -- eval harness (run.py, screen.py)
         working-directory: evals
         env:
           FLOX_DISABLE_METRICS: "true"
+        shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
         run: |
-          set -euo pipefail
+          set -u
           # Same discipline as the step above: no catalog, no credentials, no
           # network, no API spend. These suites test the harness itself
           # (run.py, screen.py) rather than the /floxify skill, and import
@@ -211,10 +222,10 @@ jobs:
           # loading and belongs with them, so it runs from evals/floxify/
           # via `cd` rather than a path hack.
           echo "::group::run.py deterministic pieces (test_run)"
-          flox activate -- python3 -m unittest test_run -v
+          python3 -m unittest test_run -v
           echo "::endgroup::"
           echo "::group::screen.py deterministic pieces (test_screen)"
-          flox activate -- python3 -m unittest test_screen -v
+          python3 -m unittest test_screen -v
           echo "::endgroup::"
           # skill_toml_lint.py's own logic: fence extraction, skip markers, the
           # structural/catalog tier split, allowlist staleness. Mocked at the
@@ -223,11 +234,11 @@ jobs:
           # trustworthy enough to gate on: an extractor that silently dropped
           # blocks would report "0 failed" forever.
           echo "::group::skill_toml_lint.py deterministic pieces (test_skill_toml_lint)"
-          flox activate -- python3 -m unittest test_skill_toml_lint -v
+          python3 -m unittest test_skill_toml_lint -v
           echo "::endgroup::"
           echo "::group::_skill_module_loader.py sys.modules collision regression (test_skill_module_loader)"
           cd floxify
-          flox activate -- python3 -m unittest test_skill_module_loader -v
+          python3 -m unittest test_skill_module_loader -v
           echo "::endgroup::"
 
       # No setup-node / `npm install -g @anthropic-ai/claude-code` here any
@@ -250,12 +261,13 @@ jobs:
           # different arm and turn the gate off (e.g. to measure the baseline).
           EVAL_MODE: ${{ github.event.inputs.mode || 'skills' }}
           EVAL_GATE: ${{ github.event.inputs.gate || 'true' }}
+        shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
         run: |
           args=(--mode "$EVAL_MODE" --concurrency 8)
           if [ "$EVAL_GATE" = "true" ]; then
             args+=(--gate)
           fi
-          flox activate -- python3 evals/run.py "${args[@]}"
+          python3 evals/run.py "${args[@]}"
 
       - name: Upload eval results
         if: ${{ always() && steps.changes.outputs.run == 'true' }}
@@ -294,6 +306,7 @@ jobs:
         working-directory: evals/floxify
         env:
           FLOX_DISABLE_METRICS: "true"
+        shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
         run: |
           # Same checker as the free `evals` step, but WITH flox+network,
           # so the catalog leg (pkg-path/version/per-system resolution)
@@ -312,10 +325,11 @@ jobs:
           # see, not something to allowlist.
           #
           # Same interpreter as every other job (AI-509): python3 comes from
-          # this repo's Flox environment. The nested `flox init` / `flox list
-          # -c` calls the lint makes run against their own throwaway
-          # environments in temp dirs, unaffected by this activation.
-          flox activate -- python3 -m unittest test_golden_lint -v
+          # this repo's Flox environment, activated once by this step's
+          # `shell:` key. The nested `flox init` / `flox list -c` calls the
+          # lint makes run against their own throwaway environments in temp
+          # dirs, unaffected by that activation.
+          python3 -m unittest test_golden_lint -v
 
   skill-toml-lint:
     # Parse-check every fenced ```toml block the flox skill SHIPS (AI-494).
@@ -350,13 +364,14 @@ jobs:
         working-directory: evals
         env:
           FLOX_DISABLE_METRICS: "true"
+        shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
         run: |
-          set -euo pipefail
+          set -u
           # python3 from this repo's Flox environment (AI-509). --offline
           # still points the proxy vars at a closed port for the throwaway
           # `flox init` envs the lint drives, so the structural tier remains
           # provably catalog-free.
-          flox activate -- python3 skill_toml_lint.py --offline --verbose \
+          python3 skill_toml_lint.py --offline --verbose \
             --json results/skill-toml-lint.json
 
       - name: Upload skill TOML lint results
@@ -395,8 +410,9 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.MANAGED_SKILLS_ANTHROPIC_API_KEY }}
           FLOX_DISABLE_METRICS: "true"
+        shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
         run: |
-          flox activate -- python3 evals/floxify/run_floxify.py \
+          python3 evals/floxify/run_floxify.py \
             --gate \
             --out "results/floxify-ci.json"
 
@@ -442,8 +458,9 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.MANAGED_SKILLS_ANTHROPIC_API_KEY }}
           FLOX_DISABLE_METRICS: "true"
+        shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
         run: |
-          flox activate -- python3 evals/floxify/tier2.py \
+          python3 evals/floxify/tier2.py \
             --only mastodon \
             --out "results/tier2.json"
 

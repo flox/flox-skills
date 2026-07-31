@@ -17,9 +17,9 @@ detect_usage_eval.py and the Tier 2 harness — spawns a real `claude`
 agent, run manually or on a schedule, never in the fast gate.
 
 Usage:
-    flox activate -- python3 verify_usage_eval.py                     # default fixture (node-postgres)
-    flox activate -- python3 verify_usage_eval.py --fixture ruby
-    flox activate -- python3 verify_usage_eval.py --skill-dir /path/to/flox-plugin
+    python3 verify_usage_eval.py                     # default fixture (node-postgres)
+    python3 verify_usage_eval.py --fixture ruby
+    python3 verify_usage_eval.py --skill-dir /path/to/flox-plugin
 
 Exit 0 if verify.py was invoked against the produced manifest (and, as a
 bonus signal, run through `flox run`); exit 1 otherwise. Pure stdlib.

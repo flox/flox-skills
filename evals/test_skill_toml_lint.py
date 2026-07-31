@@ -17,7 +17,7 @@ Three concerns:
   3. The shipped skill itself — every document extracts cleanly and every
      skip marker carries a reason. Free, so it gates per-PR alongside 1 and 2.
 
-    flox activate -- python3 -m unittest test_skill_toml_lint -v
+    python3 -m unittest test_skill_toml_lint -v
 """
 import unittest
 from unittest.mock import patch

@@ -43,12 +43,12 @@ verify.py check (advisory — never gates, same reason activation doesn't):
   hook mutation, leaf-datastore/runtime cross-checks) always run.
 
 Usage:
-    flox activate -- python3 run_floxify.py                            # all fixtures, skills mode
-    flox activate -- python3 run_floxify.py --only node-20             # single fixture
-    flox activate -- python3 run_floxify.py --gate                     # exit 1 on hard-check failures
-    flox activate -- python3 run_floxify.py --out results/my-run.json  # custom output path
-    flox activate -- python3 run_floxify.py --skill-dir /path/to/flox-plugin
-    flox activate -- python3 run_floxify.py --skip-activation          # skip flox activate checks
+    python3 run_floxify.py                            # all fixtures, skills mode
+    python3 run_floxify.py --only node-20             # single fixture
+    python3 run_floxify.py --gate                     # exit 1 on hard-check failures
+    python3 run_floxify.py --out results/my-run.json  # custom output path
+    python3 run_floxify.py --skill-dir /path/to/flox-plugin
+    python3 run_floxify.py --skip-activation          # skip flox activate checks
 
 Pure stdlib — no additional packages required.
 """
@@ -1027,7 +1027,7 @@ def process_task(task, skill_dir, skip_activation=False,
             f"is Tier 1 only and needs a local fixture checked into "
             f"fixtures/{task_id}. Real-repo entries (cloned at a pinned SHA) "
             f"live in tier2.jsonl and run via tier2.py, not this script: "
-            f"flox activate -- python3 tier2.py --only {task_id}"
+            f"python3 tier2.py --only {task_id}"
         )}
 
     with tempfile.TemporaryDirectory(prefix=f"floxify-eval-{task['id']}-") as tmpdir:

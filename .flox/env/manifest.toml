@@ -8,10 +8,13 @@ flox-ai.pkg-path = "flox/flox-ai"
 # from the toplevel group, and flox-ai alone (custom catalog) can't
 coreutils.pkg-path = "coreutils"
 
-# The eval suite's interpreter. `flox activate -- python3 evals/<...>` is the
-# supported invocation everywhere (README examples and every CI job), so a
-# clean checkout needs flox and no ambient Python, and local runs use the same
-# interpreter CI does. 3.11 is the floor the harnesses actually require —
+# The eval suite's interpreter. Activate this environment and run the
+# harnesses as plain `python3 evals/<...>` — that is the supported invocation
+# everywhere (README examples, and every CI job via a step-level
+# `shell: flox activate -- bash ... {0}`), so a clean checkout needs flox and
+# no ambient Python, and local runs use the same interpreter CI does. The
+# activation is the environment's job; no script or doc example carries it as
+# a prefix. 3.11 is the floor the harnesses actually require —
 # they parse manifests with stdlib `tomllib` — and it is what the workflow
 # used to request from actions/setup-python, so the pin changes nothing about
 # what the tests run under, only where it comes from.

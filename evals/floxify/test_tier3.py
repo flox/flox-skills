@@ -9,8 +9,8 @@ so the default/weekly `run_floxify.py --gate` run stays exactly the six
 should-tier fixtures it was and is not slowed or destabilised by these
 exploratory cases:
 
-    flox activate -- python3 run_floxify.py --tasks tier3.jsonl          # report-only run
-    flox activate -- python3 run_floxify.py --tasks tier3.jsonl --only ruby-native-gems
+    python3 run_floxify.py --tasks tier3.jsonl          # report-only run
+    python3 run_floxify.py --tasks tier3.jsonl --only ruby-native-gems
 
 These are deterministic, no-network unit tests (no `claude`, no `flox`) —
 they check the registry/fixtures/goldens are internally consistent and,
@@ -22,7 +22,7 @@ agentic outcome run is exercised by an actual `run_floxify.py
 --tasks tier3.jsonl` invocation, same as Tier 1/Tier 2's own skill runs.
 
 Run:
-    flox activate -- python3 -m unittest test_tier3 -v
+    python3 -m unittest test_tier3 -v
 """
 import json
 import unittest
