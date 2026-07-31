@@ -69,7 +69,7 @@ on:
         type: boolean
         default: false
       run_paid_evals:
-        description: "Run the PAID skills eval suite (54 Opus calls, ~$5-15). Off by default."
+        description: "Run the PAID skills eval suite (62 Opus calls: 31 tasks x agent+judge, ~$5-15). Off by default."
         type: boolean
         default: false
 

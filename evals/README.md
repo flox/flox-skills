@@ -103,14 +103,26 @@ the manifest; use environment variables, `~/.config/<env_name>/`, or an existing
 credentials file — and nothing exercised it until AI-509 Ticket 6 ported the
 check from [flox/flox-agentic#18](https://github.com/flox/flox-agentic/pull/18)
 (@imkarrer). Two tasks bind it: `env-secrets-api-key` (functional, `should`, so
-it binds the gate) and `trigger-secrets-no-commit` (a trigger test).
+it binds the gate) and `indirect-secrets-no-commit` (a trigger test).
 
-A secret-**named** key (`*SECRET*`, `*TOKEN*`, `*PASSWORD*`, `*API_KEY*`,
-`*ACCESS_KEY*`, `*PRIVATE_KEY*`, …) assigned a real literal inside a fenced
-manifest is a leak. Env references (`$VAR`, `${VAR}`, `$(…)`), placeholders, and
-values that merely *point* at a credentials file (`~/.config/<env>/secrets`,
-`./.secrets/token`) are not — the last of those is the answer the skill teaches,
-so flagging it would redden the correct answer.
+A secret-**named** key (`*SECRET*`, `*TOKEN*`, `*PASSWORD*`, `*PASSPHRASE*`,
+`*CREDENTIAL*`, `*API_KEY*`, `*ACCESS_KEY*`, `*PRIVATE_KEY*`, …) assigned a
+value that *holds* a credential is a leak. So is a connection URL with an
+inline credential — `DATABASE_URL = "postgres://user:hunter2@localhost/db"` —
+under **any** key name, because `DATABASE_URL`, `DSN` and `WEBHOOK_URL` are not
+secret-named and never will be, and that is the form a model writes unprompted
+on a prompt asking for "a database password and an API token".
+
+What a value *is* decides this, not what it starts with. A value that names,
+points at, or stands in for a secret passes wherever the reference sits inside
+it: an env reference or command substitution anywhere (`Bearer $TOKEN`,
+`sk-${SUFFIX}`, `$(pass show api)`), a placeholder, a path
+(`~/.config/<env>/secrets`, `./.secrets/token`, `secrets/token`, `.env`), an
+external secret-store reference (`op://vault/item/field`), an env-var name
+(`API_KEY_ENV = "MY_APP_KEY"`), or a command
+(`PASSWORD_COMMAND = "pass show api"`). Every one of those is what a *good*
+answer to `env-secrets-api-key` contains, and each was a false positive while
+the allowance was anchored at the first token (found by the #84 peer panel).
 
 Every fenced block is scanned two ways and either finding a leak fails the
 check, because neither view alone is enough:
@@ -118,14 +130,37 @@ check, because neither view alone is enough:
 | view | reaches |
 |---|---|
 | text (regex over the raw block) | blocks that aren't valid TOML (the parsed view drops those wholesale), and an assignment inside a `[hook] on-activate = '''…'''` shell body — still the committed manifest, but one opaque string to a parser |
-| parsed (`tomllib` dict) | multi-line arrays, nested tables, dotted keys — shapes no single-line regex reaches |
+| parsed (`tomllib` dict) | values with no single-line form for a regex to capture — a multi-line array, and any multi-line container |
 
-Detection is name-based, so it has blind spots by construction: a secret under a
-non-secret-named key, an unquoted value, and a real value that *begins* with a
-placeholder token all pass. Those are pinned by
+That table is the committed corpus split per leg, not a guess: 3 cases are
+text-only, 1 is parsed-only, and 33 are caught by both. Nested tables and dotted
+keys are reached by *both* legs (`SECRET_ASSIGN`'s line anchor spans them), so
+they are not an argument for the second view; the multi-line shapes are.
+
+Blind spots, by construction. Name-based detection cannot see a secret under a
+non-secret-named key (except the URL form above) or an unquoted value;
+shape-based classification reads a value that *begins* with a placeholder token, one
+that contains whitespace, and one shaped like an env-var name as references. A
+secret-named *table* with innocently-named leaves (`[vars.secrets]` plus
+`db = "…"`) is not inspected either — deliberately, because `[install]` keys
+are package names and propagating the parent name down would redden
+`vault-token.pkg-path = "vault"`. And the seam between the two views is a multi-line value
+inside a block `tomllib` rejects, which neither leg reaches. All of those are
+pinned by
 `tests/test_run.py::TestNoHardcodedSecret::test_known_limitations_are_pinned`,
 so a change in either direction shows up as a failing test to review rather than
 as silence.
+
+Two accepted policy calls, so neither is a surprise later. **Any** real literal
+in **any** fenced manifest in the answer is a leak, including one shown as an
+anti-pattern under a `# BAD — never commit this` comment before the fix is
+shown: the check has no notion of narrative order, and
+`test_one_leaking_block_fails_the_whole_answer` cements that on purpose — an
+answer that pastes a real key is a leak wherever it sits. And "binds the gate"
+is conditional: `env-secrets-api-key` is `should`-tier and non-trigger, so it
+binds `--gate` **when the paid arm runs**, which is `workflow_dispatch` with
+`run_paid_evals=true` only. Nothing here is enforced per-PR; the per-PR leg is
+the free deterministic one below.
 
 ### Trigger tests
 
@@ -243,8 +278,11 @@ chance of an all-green run). So `--gate` is split:
   body reads as a real key, and a `[ -d dir ] || cmd` line reads as a table
   header.
 
-  `no_hardcoded_secret` is the one check that also scans block *text*, and for
-  a reason that is the mirror image of the rule above: it is not asserting that
+  `no_hardcoded_secret` is the one check that scans *both* views and fails on
+  either — `no_abs_paths` also scans block text (`ABS_PATH` over the joined raw
+  bodies), and `has_install_section` and `mentions_containerize` grep the whole
+  answer without extracting a block at all. Scanning both views is for a reason
+  that is the mirror image of the rule above: it is not asserting that
   a manifest is correct, it is asserting that a manifest leaks nothing. A block
   tomllib refuses is dropped from the parsed view entirely, and a secret pasted
   into a `[hook]` shell body is one opaque string to a parser — both would pass
