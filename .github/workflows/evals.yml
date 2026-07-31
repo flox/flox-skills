@@ -6,6 +6,14 @@ name: skill-evals
 # probabilistic, so they're reported but never block. Agent + judge run via
 # `claude`, authenticated with the org-managed Anthropic key.
 #
+# EVERY job here gets its Python (and, where it needs one, its `claude`) from
+# this repo's own Flox environment — `flox activate -- python3 evals/<...>`,
+# the same command the eval READMEs document for local runs (AI-509 Ticket 1).
+# There is no actions/setup-python and no `npm install -g` anywhere in this
+# workflow: the interpreter is `python311` in .flox/env/manifest.toml, pinned
+# by manifest.lock on all four systems, so a clean checkout needs flox and
+# nothing else. Adding a job? `flox activate --` it too.
+#
 # The job runs on every pull request so the required `evals` status check always
 # reports. The heavy suite runs only when the skill or eval sources change
 # (flox-plugin/**, evals/**, or this workflow); other PRs short-circuit to a
@@ -132,46 +140,67 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.11"
+      # The eval interpreter comes from THIS REPO'S Flox environment
+      # (.flox/env/manifest.toml pins python311), not from a runner-provided
+      # one — AI-509 Ticket 1. Every command below runs as
+      # `flox activate -- python3 ...`, byte-for-byte the invocation the eval
+      # READMEs document for local runs, so "works on my machine" and "works
+      # in CI" mean the same interpreter. This replaces actions/setup-python,
+      # which pinned 3.11 here and nowhere else: a contributor's ambient
+      # python3 was whatever their OS shipped.
+      - name: Install flox
+        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
 
       - name: Free deterministic unit tests (always)
         working-directory: evals/floxify
+        env:
+          FLOX_DISABLE_METRICS: "true"
         run: |
           set -euo pipefail
           # Keeps the required check meaningful rather than a rubber stamp: no
-          # flox, no credentials, no network, no API spend — and unlike the
-          # judge, these cannot be confidently wrong. This is the ONLY place
-          # these run: a separate unit-tests job would duplicate the work, and
-          # `evals` has to report on every PR regardless (required check).
+          # credentials, no network, no API spend — and unlike the judge, these
+          # cannot be confidently wrong. This is the ONLY place these run: a
+          # separate unit-tests job would duplicate the work, and `evals` has
+          # to report on every PR regardless (required check).
+          #
+          # `flox` IS on PATH here now (it supplies python3), where it used to
+          # be absent. Nothing in this step calls the catalog: every flox-
+          # touching check is either mocked at its subprocess boundary or
+          # explicitly switched off below. The one guarantee that used to rest
+          # on flox's ambient absence is the golden lint's, and it was already
+          # written not to — see FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 below,
+          # which is now load-bearing rather than belt-and-braces.
           echo "::group::detect.py (analyzer extraction)"
-          python3 test_detect.py
+          flox activate -- python3 test_detect.py
           echo "::endgroup::"
           echo "::group::harness logic (tier2 + detect_usage_eval)"
-          python3 -m unittest test_tier2 test_detect_usage_eval -v
+          flox activate -- python3 -m unittest test_tier2 test_detect_usage_eval -v
           echo "::endgroup::"
           # verify.py (AI-461): the checker's own invariants, all mocked at
-          # the `flox show` boundary (_run_show_command) — no flox, no
+          # the `flox show` boundary (_run_show_command) — no catalog, no
           # network, same discipline as the rest of this step. test_golden_lint
           # also runs here for baseline sanity, with FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0
-          # pinned EXPLICITLY so its no-network guarantee doesn't rely on
-          # flox merely happening to be absent from this runner — this only
-          # proves the allowlist machinery imports and runs; its real,
-          # flox-backed run (with real teeth against catalog drift) is the
-          # golden-lint job below.
+          # pinned EXPLICITLY so its no-network guarantee doesn't rest on
+          # flox merely happening to be absent from this runner. Since AI-509
+          # flox is NOT absent — it supplies python3 — so that switch is now
+          # the only thing making this run catalog-free, exactly the case it
+          # was written for. It only proves the allowlist machinery imports
+          # and runs; its real, catalog-backed run (with real teeth against
+          # catalog drift) is the golden-lint job below.
           echo "::group::verify.py (manifest checker)"
-          FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_verify test_verify_usage_eval test_golden_lint -v
+          FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 flox activate -- python3 -m unittest test_verify test_verify_usage_eval test_golden_lint -v
           echo "::endgroup::"
           echo "::group::run_floxify.py (harness deterministic-leg wiring)"
-          python3 -m unittest test_run_floxify -v
+          flox activate -- python3 -m unittest test_run_floxify -v
           echo "::endgroup::"
 
       - name: Free deterministic unit tests -- eval harness (run.py, screen.py)
         working-directory: evals
+        env:
+          FLOX_DISABLE_METRICS: "true"
         run: |
           set -euo pipefail
-          # Same discipline as the step above: no flox, no credentials, no
+          # Same discipline as the step above: no catalog, no credentials, no
           # network, no API spend. These suites test the harness itself
           # (run.py, screen.py) rather than the /floxify skill, and import
           # their modules by bare name (`import run`, `import screen`), so
@@ -182,10 +211,10 @@ jobs:
           # loading and belongs with them, so it runs from evals/floxify/
           # via `cd` rather than a path hack.
           echo "::group::run.py deterministic pieces (test_run)"
-          python3 -m unittest test_run -v
+          flox activate -- python3 -m unittest test_run -v
           echo "::endgroup::"
           echo "::group::screen.py deterministic pieces (test_screen)"
-          python3 -m unittest test_screen -v
+          flox activate -- python3 -m unittest test_screen -v
           echo "::endgroup::"
           # skill_toml_lint.py's own logic: fence extraction, skip markers, the
           # structural/catalog tier split, allowlist staleness. Mocked at the
@@ -194,22 +223,23 @@ jobs:
           # trustworthy enough to gate on: an extractor that silently dropped
           # blocks would report "0 failed" forever.
           echo "::group::skill_toml_lint.py deterministic pieces (test_skill_toml_lint)"
-          python3 -m unittest test_skill_toml_lint -v
+          flox activate -- python3 -m unittest test_skill_toml_lint -v
           echo "::endgroup::"
           echo "::group::_skill_module_loader.py sys.modules collision regression (test_skill_module_loader)"
           cd floxify
-          python3 -m unittest test_skill_module_loader -v
+          flox activate -- python3 -m unittest test_skill_module_loader -v
           echo "::endgroup::"
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        if: steps.changes.outputs.run == 'true'
-        with:
-          node-version: "20"
-
-      - name: Install Claude Code CLI
-        if: steps.changes.outputs.run == 'true'
-        run: npm install -g @anthropic-ai/claude-code
-
+      # No setup-node / `npm install -g @anthropic-ai/claude-code` here any
+      # more: the Flox environment activated below already installs
+      # `flox/claude-code` (it is what the manifest's claude-code pkg-group is
+      # for), and activation puts it ahead of any npm global bin on PATH — so
+      # an npm install would have been a download nothing then resolved to.
+      # The agent under test is now pinned by manifest.lock like everything
+      # else, which is the point: an eval whose agent floats to npm `latest`
+      # can move between runs for reasons that have nothing to do with the
+      # skill. Secrets are untouched — the key below is still the only
+      # credential this job sees.
       - name: Run skills eval gate
         if: steps.changes.outputs.run == 'true'
         env:
@@ -225,7 +255,7 @@ jobs:
           if [ "$EVAL_GATE" = "true" ]; then
             args+=(--gate)
           fi
-          python3 evals/run.py "${args[@]}"
+          flox activate -- python3 evals/run.py "${args[@]}"
 
       - name: Upload eval results
         if: ${{ always() && steps.changes.outputs.run == 'true' }}
@@ -257,10 +287,6 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.11"
-
       - name: Install flox
         uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
 
@@ -284,7 +310,12 @@ jobs:
           # ("constraints for group 'X' are too tight") — a real
           # cross-pkg-group finding the per-package checks above cannot
           # see, not something to allowlist.
-          python3 -m unittest test_golden_lint -v
+          #
+          # Same interpreter as every other job (AI-509): python3 comes from
+          # this repo's Flox environment. The nested `flox init` / `flox list
+          # -c` calls the lint makes run against their own throwaway
+          # environments in temp dirs, unaffected by this activation.
+          flox activate -- python3 -m unittest test_golden_lint -v
 
   skill-toml-lint:
     # Parse-check every fenced ```toml block the flox skill SHIPS (AI-494).
@@ -312,10 +343,6 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.11"
-
       - name: Install flox
         uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
 
@@ -325,7 +352,11 @@ jobs:
           FLOX_DISABLE_METRICS: "true"
         run: |
           set -euo pipefail
-          python3 skill_toml_lint.py --offline --verbose \
+          # python3 from this repo's Flox environment (AI-509). --offline
+          # still points the proxy vars at a closed port for the throwaway
+          # `flox init` envs the lint drives, so the structural tier remains
+          # provably catalog-free.
+          flox activate -- python3 skill_toml_lint.py --offline --verbose \
             --json results/skill-toml-lint.json
 
       - name: Upload skill TOML lint results
@@ -352,26 +383,20 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.11"
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "20"
-
-      - name: Install Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code
-
       - name: Install flox
         uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
 
+      # Both the interpreter and the `claude` CLI now come from this repo's
+      # Flox environment (AI-509), replacing setup-python + setup-node + an
+      # `npm install -g @anthropic-ai/claude-code` that activation's PATH
+      # would have shadowed anyway. Secrets unchanged: the API key below is
+      # still the only credential this job sees.
       - name: Run /floxify outcome eval gate
         env:
           ANTHROPIC_API_KEY: ${{ secrets.MANAGED_SKILLS_ANTHROPIC_API_KEY }}
           FLOX_DISABLE_METRICS: "true"
         run: |
-          python3 evals/floxify/run_floxify.py \
+          flox activate -- python3 evals/floxify/run_floxify.py \
             --gate \
             --out "results/floxify-ci.json"
 
@@ -408,26 +433,17 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.11"
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "20"
-
-      - name: Install Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code
-
       - name: Install flox
         uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
 
+      # Interpreter and `claude` from this repo's Flox environment (AI-509),
+      # same as floxify-evals above. Secrets unchanged.
       - name: Run /floxify Tier 2 eval (report-only, mastodon)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.MANAGED_SKILLS_ANTHROPIC_API_KEY }}
           FLOX_DISABLE_METRICS: "true"
         run: |
-          python3 evals/floxify/tier2.py \
+          flox activate -- python3 evals/floxify/tier2.py \
             --only mastodon \
             --out "results/tier2.json"
 

@@ -8,7 +8,7 @@ integration-only (same as Tier 1's run_floxify.py has no unit tests around
 `_run_claude_agent`/`_judge`) and are exercised by an actual `--only
 mastodon` run, not here.
 
-Run: python3 -m unittest test_tier2 -v
+Run: flox activate -- python3 -m unittest test_tier2 -v
 """
 import json
 import shutil

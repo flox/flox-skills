@@ -95,12 +95,36 @@ The harness runs a single arm today (`skills`, `--strict-mcp-config`, MCP
 off); an MCP-assisted arm was measured and retired — see the AI-93 finding
 under Baselines below.
 
+## The runtime: run everything through `flox activate`
+
+**Every command in this file and in [`floxify/README.md`](floxify/README.md)
+runs through `flox activate --`, and that is the supported way to run them.**
+The interpreter is declared in this repo's own environment
+(`.flox/env/manifest.toml` → `python311`) and pinned by `manifest.lock` on all
+four systems, so a clean checkout needs flox and no ambient Python. CI runs the
+identical commands — `.github/workflows/evals.yml` has no `actions/setup-python`
+— which is the point: a suite that passes locally and fails in CI because two
+machines shipped different `python3` is not a signal about the skill.
+
+```bash
+flox activate -- python3 run.py --mode skills   # from evals/
+```
+
+`flox activate` finds the environment by searching upward, so it works from
+`evals/`, `evals/floxify/`, or the repo root; only the script path changes.
+Activation also supplies `claude` (the manifest installs `flox/claude-code`),
+so the harnesses' agent and judge calls use a pinned CLI rather than whatever
+happens to be on PATH.
+
+3.11 is a floor, not a preference: the harnesses parse manifests with stdlib
+`tomllib`.
+
 ## Run
 
 ```bash
-python3 run.py --mode skills            # skills-only baseline
-python3 run.py --mode skills --only node-env   # single task
-python3 run.py --mode skills --gate     # exit non-zero if binding gates fail (CI)
+flox activate -- python3 run.py --mode skills            # skills-only baseline
+flox activate -- python3 run.py --mode skills --only node-env   # single task
+flox activate -- python3 run.py --mode skills --gate     # exit non-zero if binding gates fail (CI)
 ```
 
 Results land in `results/<mode>.json` with a summary (hard-pass rate, avg judge
@@ -108,7 +132,9 @@ score, correct rate). Pure stdlib — no node/uv required.
 
 ## Authentication
 
-The harness shells out to `claude`, which needs credentials:
+The harness shells out to `claude`, which needs credentials. The *binary* comes
+from the Flox environment (see the runtime note above); the *credentials* are
+unchanged by that and still come from wherever they always did:
 
 - **Locally** it uses whatever the `claude` CLI is logged in with (an OAuth
   token in `~/.claude/.credentials.json`, e.g. a Claude subscription) — usage
@@ -244,14 +270,20 @@ there absorbing a future regression.
 ### Run
 
 ```bash
-python3 skill_toml_lint.py                     # structural tier (what CI gates on)
-python3 skill_toml_lint.py --offline           # ...and prove it needs no network
-python3 skill_toml_lint.py --tier catalog      # + live catalog resolution (advisory)
-python3 skill_toml_lint.py --only services.md  # one document
-python3 skill_toml_lint.py --list              # extract only, no flox
-python3 skill_toml_lint.py -v                  # print every block, not just failures
-python3 -m unittest test_skill_toml_lint       # the guard's own tests (no flox)
+flox activate -- python3 skill_toml_lint.py                     # structural tier (what CI gates on)
+flox activate -- python3 skill_toml_lint.py --offline           # ...and prove it needs no network
+flox activate -- python3 skill_toml_lint.py --tier catalog      # + live catalog resolution (advisory)
+flox activate -- python3 skill_toml_lint.py --only services.md  # one document
+flox activate -- python3 skill_toml_lint.py --list              # extract only, no catalog
+flox activate -- python3 skill_toml_lint.py -v                  # print every block, not just failures
+flox activate -- python3 -m unittest test_skill_toml_lint       # the guard's own tests (no catalog)
 ```
+
+The outer `flox activate` only supplies the interpreter; the `flox init` /
+`flox edit -f` environments the guard drives are throwaway ones in temp dirs,
+unaffected by it. Two comments above used to say "no flox" — with flox now
+supplying python3 they say **no catalog**, which is what they always meant:
+those paths make no catalog call.
 
 Exit 0 if every checked snippet passed its tier, 1 otherwise. Pure stdlib.
 
@@ -260,7 +292,8 @@ Exit 0 if every checked snippet passed its tier, 1 otherwise. Pure stdlib.
 Two jobs in `.github/workflows/evals.yml`, split by what they cost:
 
 - `test_skill_toml_lint` runs in the free per-PR unit-test step of the `evals`
-  job — no flox, no network, no API spend. It is what makes the guard itself
+  job — no catalog, no network, no API spend (flox is on PATH there now, but
+  only as the interpreter). It is what makes the guard itself
   trustworthy enough to gate on (an extractor that silently drops blocks would
   report "0 failed" forever).
 - `skill-toml-lint` is a separate per-PR job that installs flox and runs the
@@ -286,10 +319,10 @@ historical batch (`candidates-pass2.jsonl`, `candidates-regression.jsonl`,
 `candidates-triggering.jsonl`, `candidates-new-features.jsonl`) instead.
 
 ```bash
-python3 screen.py --reps 5                                    # default set, n=5
-python3 screen.py --candidates candidates-pass2.jsonl --reps 5   # one batch, n=5
-python3 screen.py --only trap-vars-no-interpolation --reps 5
-python3 screen.py --plugin-dir /path/to/fixed-skill/flox-plugin  # test a skill edit
+flox activate -- python3 screen.py --reps 5                                    # default set, n=5
+flox activate -- python3 screen.py --candidates candidates-pass2.jsonl --reps 5   # one batch, n=5
+flox activate -- python3 screen.py --only trap-vars-no-interpolation --reps 5
+flox activate -- python3 screen.py --plugin-dir /path/to/fixed-skill/flox-plugin  # test a skill edit
 ```
 
 Like `run.py`, each `claude` call's cost/usage is read from the JSON envelope

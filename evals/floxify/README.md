@@ -5,6 +5,15 @@ Outcome-based eval suite for the `/floxify` skill. Unlike `../run.py`
 to a temp dir, runs the `/floxify` skill headlessly, and scores the
 `.flox/env/manifest.toml` it produces.
 
+**Every command below runs through `flox activate --`** — see
+[the runtime note in `../README.md`](../README.md#the-runtime-run-everything-through-flox-activate).
+`python3` and `claude` both come from this repo's own environment
+(`.flox/env/manifest.toml`), pinned by `manifest.lock`, and CI runs the
+identical commands. Note the two senses of "activate" in this file: the outer
+`flox activate --` is just how you launch the harness, while the *activation
+check* below is the harness activating a manifest the skill produced, in a temp
+dir, as a scored outcome. They are unrelated.
+
 ## Phase 1 analyzer (`scripts/detect.py`) — grounding, and its two evals
 
 The skill's Phase 1 runs a bundled deterministic analyzer,
@@ -34,7 +43,7 @@ with two eval layers:
   no `claude` calls — safe to run anywhere and cheap enough to gate.
 
   ```bash
-  python3 test_detect.py        # standalone; or: pytest test_detect.py
+  flox activate -- python3 test_detect.py        # standalone (pytest also works, if you have one -- the environment does not ship it)
   ```
 
 - **`detect_usage_eval.py`** — behavioral conformance. Runs a real,
@@ -44,8 +53,8 @@ with two eval layers:
   it's manual/scheduled, never in the fast gate.
 
   ```bash
-  python3 detect_usage_eval.py                 # default fixture (node-postgres)
-  python3 detect_usage_eval.py --fixture ruby
+  flox activate -- python3 detect_usage_eval.py                 # default fixture (node-postgres)
+  flox activate -- python3 detect_usage_eval.py --fixture ruby
   ```
 
 `test_detect.py` proves the analyzer is *correct*; `detect_usage_eval.py`
@@ -97,7 +106,7 @@ Eval layers, same two-tier shape as `detect.py`'s:
   with no network.
 
   ```bash
-  python3 -m unittest test_verify -v
+  flox activate -- python3 -m unittest test_verify -v
   ```
 
 - **`test_golden_lint.py`** — runs the checker over every
@@ -113,15 +122,17 @@ Eval layers, same two-tier shape as `detect.py`'s:
   every allowlist entry still matches a live violation, so AI-457 fixing a
   golden without removing its entry doesn't leave a stale slot that could
   silently absorb a future unrelated regression. Degrades gracefully
-  (passes trivially, no network) without flox — set
+  (passes trivially, no network) without flox — but set
   `FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0` to force that mode explicitly rather
-  than relying on flox's ambient absence; its real teeth need the
-  `golden-lint` CI job's live flox install (see workflow file), not the
-  flox-less free-tests step.
+  than relying on flox's ambient absence. Since AI-509 that switch is the
+  *only* thing holding the free tier catalog-free: flox is now always on
+  PATH there (it supplies `python3`), so the CI step that used to be
+  flox-less pins the switch to 0 and means it. The lint's real teeth are
+  still the `golden-lint` job, which leaves the switch at its default.
 
   ```bash
-  python3 -m unittest test_golden_lint -v
-  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_golden_lint -v  # no network
+  flox activate -- python3 -m unittest test_golden_lint -v
+  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 flox activate -- python3 -m unittest test_golden_lint -v  # no network
   ```
 
   **Whole-manifest lock-resolution leg (AI-479).** Every check above is
@@ -182,7 +193,7 @@ Eval layers, same two-tier shape as `detect.py`'s:
   agent — never in the fast gate.
 
   ```bash
-  python3 verify_usage_eval.py                 # default fixture (node-postgres)
+  flox activate -- python3 verify_usage_eval.py                 # default fixture (node-postgres)
   ```
 
 ### Why verify.py is advisory in the harness
@@ -278,25 +289,25 @@ the gate.
 
 ```bash
 # Single fixture (fastest for development):
-python3 run_floxify.py --only node-20
+flox activate -- python3 run_floxify.py --only node-20
 
 # All 6 fixtures:
-python3 run_floxify.py
+flox activate -- python3 run_floxify.py
 
 # With gate (fails CI if any should-tier hard-check fails):
-python3 run_floxify.py --gate
+flox activate -- python3 run_floxify.py --gate
 
-# Skip activation (no flox install / network):
-python3 run_floxify.py --skip-activation
+# Skip the produced-manifest activation check (no catalog / network):
+flox activate -- python3 run_floxify.py --skip-activation
 
 # Custom skill dir (skill ships in-repo at flox-plugin/; override if needed):
-python3 run_floxify.py --skill-dir /path/to/flox-plugin
+flox activate -- python3 run_floxify.py --skill-dir /path/to/flox-plugin
 
 # Custom output path:
-python3 run_floxify.py --out results/my-run.json
+flox activate -- python3 run_floxify.py --out results/my-run.json
 
 # Diff against a specific committed baseline (default: floxify-baseline.json):
-python3 run_floxify.py --baseline floxify-baseline.json
+flox activate -- python3 run_floxify.py --baseline floxify-baseline.json
 ```
 
 Results land in `results/` as JSON with a summary (hard-pass rate,
@@ -325,15 +336,17 @@ suite with `--out results/floxify-baseline.json` and commit the result.
 
 ## Prerequisites
 
-1. **`claude` CLI** in `PATH`, logged in (`claude auth login` or
-   `ANTHROPIC_API_KEY` set)
-2. **The floxify skill** — ships in this repo at
+1. **`flox` CLI** — the only thing you install by hand. It supplies both
+   `python3` and `claude` through this repo's environment, and the
+   activation checks below need it anyway. (It used to be listed here as
+   *optional*, for activation only; since AI-509 it is the entry point.)
+2. **Credentials for `claude`** — logged in (`claude auth login`) or
+   `ANTHROPIC_API_KEY` set. The deterministic unit tests need neither.
+3. **The floxify skill** — ships in this repo at
    `flox-plugin/skills/floxify/`, no separate checkout needed. The
    default `--skill-dir` resolves to `flox-plugin/` two levels up from
    this file. Override with `--skill-dir` to point at an alternate
    flox-plugin directory.
-3. **`flox` CLI** (optional) — needed for activation checks. Without it,
-   activation is recorded as skipped.
 
 ## Gate policy
 
@@ -415,7 +428,7 @@ are **references for the LLM judge**, not byte-exact match targets.
 2. Create `gold/<new-id>.toml` with the ideal manifest
 3. Add a line to `tasks.jsonl` with `id`, `tier`, `ecosystem`,
    `checks`, `rubric`
-4. Run `python3 run_floxify.py --only <new-id>` to verify end-to-end
+4. Run `flox activate -- python3 run_floxify.py --only <new-id>` to verify end-to-end
 
 ## Baseline
 
@@ -551,11 +564,11 @@ collision was flagged and deliberately avoided.
 # pressure fixture (rust-cargo) + one negative control (go-mod: a
 # single runtime, no services, no hook -- the loop should be short
 # regardless of arm).
-python3 run_floxify.py \
+flox activate -- python3 run_floxify.py \
   --only ruby,python-uv,node-postgres,rust-cargo,go-mod \
   --arm skills --reps 8 --out results/floxify-skills-batch.json
 
-python3 run_floxify.py \
+flox activate -- python3 run_floxify.py \
   --only ruby,python-uv,node-postgres,rust-cargo,go-mod \
   --arm baseline --reps 8 --out results/floxify-baseline-batch.json
 ```
@@ -864,19 +877,19 @@ remain unrun.
 
 ```bash
 # Single repo (validated so far):
-python3 tier2.py --only mastodon
+flox activate -- python3 tier2.py --only mastodon
 
 # All registered repos (heavy — large clones + long skill runs):
-python3 tier2.py
+flox activate -- python3 tier2.py
 
 # Opt in to activation verification:
-python3 tier2.py --only mastodon --activate
+flox activate -- python3 tier2.py --only mastodon --activate
 
 # Custom timeouts (defaults: 900s clone, 1800s agent run):
-python3 tier2.py --only sentry --clone-timeout 1200 --agent-timeout 2400
+flox activate -- python3 tier2.py --only sentry --clone-timeout 1200 --agent-timeout 2400
 
 # Custom skill dir / output path (same conventions as run_floxify.py):
-python3 tier2.py --skill-dir /path/to/flox-plugin --out results/my-run.json
+flox activate -- python3 tier2.py --skill-dir /path/to/flox-plugin --out results/my-run.json
 ```
 
 Results land in `results/tier2.json` by default. Unlike Tier 1, there's
@@ -894,7 +907,7 @@ same as Tier 1 — exercised by an actual `--only <id>` run, not unit
 tests.
 
 ```bash
-python3 -m unittest test_tier2 -v
+flox activate -- python3 -m unittest test_tier2 -v
 ```
 
 ### CI
@@ -918,10 +931,10 @@ stays out of the default/weekly gated run:
 
 ```bash
 # Report-only run (NO --gate — every entry is stretch-tier):
-python3 run_floxify.py --tasks tier3.jsonl
+flox activate -- python3 run_floxify.py --tasks tier3.jsonl
 
 # One fixture:
-python3 run_floxify.py --tasks tier3.jsonl --only ruby-native-gems
+flox activate -- python3 run_floxify.py --tasks tier3.jsonl --only ruby-native-gems
 ```
 
 ### Why it never gates (structural, not a flag)
@@ -961,7 +974,7 @@ dropped from `[options].systems` because several of these packages
 build in the catalog — the same drop the Tier-2 goldens make. No fixture
 was skipped: all six goldens authored and verified clean.
 
-### Deterministic gates (the only things that DO gate — via `python3 -m unittest`)
+### Deterministic gates (the only things that DO gate — via `flox activate -- python3 -m unittest`)
 
 Two fast, no-`claude` test modules, mirroring the two-tier shape the rest
 of this suite uses:
@@ -973,7 +986,7 @@ of this suite uses:
   parseable gold with `[install]`.
 
   ```bash
-  python3 -m unittest test_tier3 -v
+  flox activate -- python3 -m unittest test_tier3 -v
   ```
 
 - **`test_tier3_golden_lint.py`** — golden lint over the six Tier-3
@@ -985,8 +998,8 @@ of this suite uses:
   clean.
 
   ```bash
-  python3 -m unittest test_tier3_golden_lint -v
-  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_tier3_golden_lint -v  # no network
+  flox activate -- python3 -m unittest test_tier3_golden_lint -v
+  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 flox activate -- python3 -m unittest test_tier3_golden_lint -v  # no network
   ```
 
 The agentic outcome run (`run_floxify.py --tasks tier3.jsonl`) is

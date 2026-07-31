@@ -31,8 +31,8 @@ so the CI flox-less step disables both consistently:
   - unset/"1" runs them live when `flox` is on PATH.
 
 Run:
-    python3 -m unittest test_tier3_golden_lint -v
-    FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_tier3_golden_lint -v
+    flox activate -- python3 -m unittest test_tier3_golden_lint -v
+    FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 flox activate -- python3 -m unittest test_tier3_golden_lint -v
 """
 import json
 import os

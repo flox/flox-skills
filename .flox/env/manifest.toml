@@ -8,6 +8,21 @@ flox-ai.pkg-path = "flox/flox-ai"
 # from the toplevel group, and flox-ai alone (custom catalog) can't
 coreutils.pkg-path = "coreutils"
 
+# The eval suite's interpreter. `flox activate -- python3 evals/<...>` is the
+# supported invocation everywhere (README examples and every CI job), so a
+# clean checkout needs flox and no ambient Python, and local runs use the same
+# interpreter CI does. 3.11 is the floor the harnesses actually require —
+# they parse manifests with stdlib `tomllib` — and it is what the workflow
+# used to request from actions/setup-python, so the pin changes nothing about
+# what the tests run under, only where it comes from.
+#
+# Own pkg-group, deliberately: `flox publish` pins the skills-flox base
+# catalog page from the TOPLEVEL group, and adding a fourth constraint there
+# would let the eval runtime move that page. Nothing here shares a closure
+# with python311, so an isolated group costs nothing.
+python311.pkg-path = "python311"
+python311.pkg-group = "python"
+
 # Packages the flox plugin (skills: flox, floxify) for all agents.
 # Stages the plugin under share/claude-code/plugins/flox, then
 # flox_agent_layout rewrites it into the per-agent launch layout

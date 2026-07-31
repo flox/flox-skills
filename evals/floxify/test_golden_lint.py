@@ -61,9 +61,9 @@ reported honestly as such rather than as a resolution finding — see
 `_classify_lock_failure`.
 
 Run:
-    python3 test_golden_lint.py
+    flox activate -- python3 test_golden_lint.py
     pytest test_golden_lint.py
-    FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 test_golden_lint.py   # no network
+    FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 flox activate -- python3 test_golden_lint.py   # no network
 """
 import os
 import shutil
@@ -434,7 +434,7 @@ class TestLockResolutionLeg(unittest.TestCase):
     leg's skip/fail/pass plumbing. The live behavior (does a real golden
     actually lock) belongs to the flox-equipped run — see the dynamically
     generated test_<fixture>_locks_cleanly methods above, exercised by
-    `python3 -m unittest test_golden_lint -v` with `flox` on PATH."""
+    `flox activate -- python3 -m unittest test_golden_lint -v` with `flox` on PATH."""
 
     def _instance(self):
         # Any bound TestGoldenLint instance works here -- we only need

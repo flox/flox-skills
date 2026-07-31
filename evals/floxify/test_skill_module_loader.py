@@ -9,7 +9,7 @@ interpreter, as the CI free-tests step does), then confirm
 `unittest.mock.patch` resolves each name to ITS OWN instance rather than
 whichever was registered last.
 
-    python3 -m unittest test_skill_module_loader -v
+    flox activate -- python3 -m unittest test_skill_module_loader -v
 """
 import unittest
 from pathlib import Path

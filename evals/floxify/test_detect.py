@@ -6,7 +6,7 @@ from a real file, so these tests pin its extraction against the synthetic
 fixtures in evals/floxify/fixtures/ (the same repos the outcome eval uses).
 
 Runnable two ways:
-    python3 test_detect.py            # standalone, prints PASS/FAIL, exits non-zero on failure
+    flox activate -- python3 test_detect.py            # standalone, prints PASS/FAIL, exits non-zero on failure
     pytest test_detect.py             # each test_* function is a pytest case
 
 Pure stdlib — no pytest required.
