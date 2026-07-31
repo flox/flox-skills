@@ -323,6 +323,13 @@ class TestNoHardcodedSecret(unittest.TestCase):
         "no-separator key (APIKEY)": _toml_block('APIKEY = "sk-real-nosep"'),
         "aws access key id": _toml_block('AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7REALKEYX"'),
         "aws secret access key": _toml_block('AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMIrealK7"'),
+        # `/` is in the base64 alphabet and `+` is not in `[\w.-]`, so a base64
+        # key carrying a slash and no plus is spelled exactly like a bare
+        # relative path. AWS's own documented example secret key is that shape,
+        # and it read as `secrets/token` did (#84 review).
+        "aws secret access key with slashes": _toml_block(
+            'AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"'
+        ),
         "bearer token": _toml_block('AUTH_TOKEN = "ghp_realtokenvaluehere1234"'),
         "private key literal": _toml_block('PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY-----abc"'),
         # quoted keys (TOML allows these) — regressed the original regex
@@ -426,6 +433,12 @@ class TestNoHardcodedSecret(unittest.TestCase):
         "bare relative path": _toml_block('TOKEN_FILE = "secrets/token"'),
         "dotfile path": _toml_block('PASSWORD_FILE = ".env"'),
         "path without a leading ./": _toml_block('PRIVATE_KEY_PATH = "keys/id_rsa"'),
+        # The other side of the base64-vs-path discriminator: a long bare path
+        # is still a path when it is spelled like one. One letter case and no
+        # digits, so nothing about its length makes it key material.
+        "long bare relative path": _toml_block(
+            'TOKEN_FILE = "path/to/config/secrets/token"'
+        ),
         "external secret reference (op://)": _toml_block(
             'API_KEY = "op://vault/item/field"'
         ),
@@ -539,6 +552,22 @@ class TestNoHardcodedSecret(unittest.TestCase):
             self.check(_toml_block('API_KEY = "REAL_KEY_9F8A7B"')),
             "known limitation: an env-var-name-shaped value reads as a name",
         )
+        # What is left of the base64-shaped-path blind spot after `_looks_like_
+        # base64_credential` (#84 review). The discriminator is spelling, not
+        # entropy: a slashed key that happens to carry only one letter case, or
+        # no digit, is still spelled like `secrets/token` and still passes.
+        # Closing that would cost `path/to/secrets/token` (in COMPLIANT above),
+        # which is a false POSITIVE on a correct answer — the trade this whole
+        # classifier is built to avoid. Random 40-char keys of the shape land
+        # here 0.04% of the time now, down from the measured ~24%.
+        self.assertTrue(
+            self.check(_toml_block('AWS_SECRET_ACCESS_KEY = "wjalrxutnfemi/k7mdeng"')),
+            "known limitation: a single-case slashed key still reads as a path",
+        )
+        self.assertTrue(
+            self.check(_toml_block('AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/KMDENGb"')),
+            "known limitation: a digitless slashed key still reads as a path",
+        )
         # The seam between the two views: a MULTI-LINE value inside a block
         # that tomllib rejects is reached by neither leg. `SECRET_ASSIGN` is
         # compiled without `re.S`, so none of its alternatives cross a newline,
@@ -591,11 +620,13 @@ class TestNoHardcodedSecret(unittest.TestCase):
         """
         for ok in ("MY_APP_KEY", "pass show api", "secrets/token", ".env",
                    "op://vault/item/field", "Bearer $TOKEN", "sk-${SUFFIX}",
-                   "keys/id_rsa", "~/.config/myapp/secrets"):
+                   "keys/id_rsa", "~/.config/myapp/secrets",
+                   "path/to/config/secrets/token"):
             with self.subTest(points_at=ok):
                 self.assertFalse(run._is_real_secret_value(ok))
         for leak in ("sk-live-abc123", "hunter2real", "AKIAIOSFODNN7REALKEYX",
                      "ghp_realtokenvalue1234", "correct-horse-battery",
+                     "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
                      "-----BEGIN RSA PRIVATE KEY-----abc"):
             with self.subTest(real=leak):
                 self.assertTrue(run._is_real_secret_value(leak))

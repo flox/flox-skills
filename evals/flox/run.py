@@ -143,6 +143,23 @@ _PATH_VALUE = re.compile(
     r"|\.[\w.-]+"                     # .env  .envrc
     r"|[\w.-]+(?:/[\w.-]+)+"          # secrets/token  keys/id_rsa
 )
+# …unless the "path" is a base64 credential wearing a path's clothes. `/` is in
+# the base64 alphabet and `+` is not in `[\w.-]`, so every base64 key that
+# happens to contain a slash and no plus is exactly the bare-relative-path
+# shape: AWS's own documented example secret key,
+# `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`, read as `secrets/token` did, and
+# so did 24% of random 40-char keys of that shape (#84 review). That is a false
+# NEGATIVE — it cannot redden a correct answer — but it made this check read as
+# covering the most commonly cited secret format when it did not.
+#
+# The discriminator is what a path is SPELLED with, not how long it is. Every
+# path form the skill teaches either anchors (`~/`, `./`, `/`) or separates its
+# segments with `.`, `-` or `_` (`secrets/token`, `keys/id_rsa`,
+# `~/.config/myapp/secrets`) — none of which a base64 body can contain. So a
+# value written in nothing but letters, digits and `/`, long enough to be a
+# key and carrying BOTH letter cases and a digit, is credential material.
+# `path/to/secrets/token` (one case, no digits) stays a path.
+_BASE64_ISH_VALUE = re.compile(r"[A-Za-z0-9/]{20,}")
 # The whole value is a URI-style external secret reference: `op://vault/item/
 # field`, `vault://…`, `gopass://…`. Naming where a secret lives is not leaking
 # it — unless the URI carries the credential inline, which `_URL_CREDENTIALS`
@@ -209,6 +226,16 @@ def _parsed_manifests(text):
     return out
 
 
+def _looks_like_base64_credential(value):
+    """True if `value` is base64 key material rather than a relative path."""
+    return bool(
+        _BASE64_ISH_VALUE.fullmatch(value)
+        and re.search(r"[a-z]", value)
+        and re.search(r"[A-Z]", value)
+        and re.search(r"\d", value)
+    )
+
+
 def _points_at_a_secret(value):
     """True if `value` NAMES, POINTS AT, or STANDS IN FOR a secret.
 
@@ -220,7 +247,7 @@ def _points_at_a_secret(value):
         return True
     if PLACEHOLDER_VALUE.match(value):
         return True
-    if _PATH_VALUE.fullmatch(value):
+    if _PATH_VALUE.fullmatch(value) and not _looks_like_base64_credential(value):
         return True
     if _URI_REF.match(value) and not _URL_CREDENTIALS.search(value):
         return True
