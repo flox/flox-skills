@@ -10,9 +10,22 @@ suite's root, and the unit tests live in the `tests/` package beside the
 runners (AI-509 Ticket 2):
 
 ```bash
-python3 -m unittest discover -s tests -t . -v   # the whole unit-test suite
+# every `unittest`-discoverable module (nine of the ten in tests/)
+FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest discover -s tests -t . -v
+python3 tests/test_detect.py                    # the tenth -- see below
 python3 -m unittest tests.test_verify -v        # one module
 ```
+
+`tests/test_detect.py` is invoked as a script on purpose: it is plain
+`def test_*` functions with a hand-rolled runner rather than
+`unittest.TestCase` subclasses, so `discover` collects *none* of its 42
+checks — and `python3 -m unittest tests.test_detect` is a vacuous green
+(`Ran 0 tests ... OK`, exit 0), not an error. Don't fold that line into the
+`unittest` call. The `FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0` prefix matches
+every other golden-lint example in this file: the lock legs in
+`tests/test_real_world_golden_lint.py` and `tests/test_stretch_golden_lint.py`
+default that switch *on*, and the `flox activate` below is what puts `flox` on
+PATH for them to reach the live catalog with.
 
 **Run `flox activate` once before the commands below** — see
 [the runtime note in `../README.md`](../README.md#the-runtime-activate-once).
@@ -495,9 +508,10 @@ Every agent and judge call already returns cost/usage/turn data on the
 envelope (`total_cost_usd`, `usage`, `num_turns`, `duration_ms`) —
 AI-459 proved this for `../flox/run.py`'s single-turn harness, and this
 harness threw it away at both spawn points (`_run_claude_agent`,
-`_run_judge`). AI-442 ports that parsing (`_parse_meta`, mirroring
-`../flox/run.py:81`) into both functions, which changes their return shape
-from `(result, err)` to `(result, err, meta)`. `real_world.py` imports both
+`_run_judge`). AI-442 ports that parsing (`_parse_meta`, mirroring the
+sibling of the same name in `../flox/run.py`) into both functions, which
+changes their return shape from `(result, err)` to `(result, err, meta)`.
+`real_world.py` imports both
 and picks up the port for free at the call-site level — its own two
 call sites now unpack a 3-tuple, but it does not record cost in its
 own output yet (out of PR 1's scope; a mechanical fix, not a feature).

@@ -335,6 +335,14 @@ def main():
              "# ...or from the screen you just ran: --results results/screen-*.json\n"
              "```\n")
 
+    # The default --out lives in reports/, which nothing here creates and which
+    # git tracks only by virtue of the one report sitting in it. Before the
+    # AI-509 Ticket 2 move this default landed in the script's own directory,
+    # which always exists; now a checkout that has not got that one file — or
+    # any `--out` naming a directory yet to be made — is a FileNotFoundError at
+    # the last line of a run that already did all the work. Same discipline as
+    # the generated results/ directory, which run.py mkdirs before writing.
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text("\n".join(L) + "\n")
     print(f"wrote {args.out}  ({len(cands)} of {len(registry)} registry candidates "
           f"screened, {len(unscreened)} unscreened, models: {', '.join(order)})")

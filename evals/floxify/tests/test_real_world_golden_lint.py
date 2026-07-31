@@ -60,10 +60,14 @@ communication error is a different, transient failure class and is
 reported honestly as such rather than as a resolution finding — see
 `_classify_lock_failure`.
 
-Run:
-    python3 test_real_world_golden_lint.py
-    pytest test_real_world_golden_lint.py
-    FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 test_real_world_golden_lint.py   # no network
+Run from the suite root (`evals/floxify/`) — that is what puts
+`_skill_module_loader` on `sys.path`. Running the file by path
+(`python3 tests/test_real_world_golden_lint.py`) fails with
+`ModuleNotFoundError` instead:
+    python3 -m unittest tests.test_real_world_golden_lint -v
+    python3 -m tests.test_real_world_golden_lint       # same, via the __main__ block
+    pytest tests/test_real_world_golden_lint.py
+    FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_real_world_golden_lint  # no network
 """
 import json
 import os
