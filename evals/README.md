@@ -507,3 +507,4 @@ The option analysis this decision was made from, kept as a rationale record:
   strength (fast localization of *which* candidate regressed) so that
   advantage isn't lost — gate on the aggregate, but always report the
   per-task breakdown next to it.
+
