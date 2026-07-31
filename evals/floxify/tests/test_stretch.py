@@ -190,7 +190,7 @@ class TestStretchFixturesAndExpected(unittest.TestCase):
                 self.assertTrue(files, f"fixtures/{e['id']}/ has no files")
 
     def test_fixture_has_no_flox_dir(self):
-        """synthetic discipline (README 'Adding a fixture'): fixtures ship no
+        """synthetic discipline (README 'Adding or updating an eval'): fixtures ship no
         .flox/ — the skill creates it. A vendored .flox/ would let a rep
         score a pre-existing manifest instead of the skill's own output."""
         for e in _STRETCH:
