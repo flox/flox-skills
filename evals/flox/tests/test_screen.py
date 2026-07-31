@@ -4,7 +4,7 @@
 Two concerns, both pure logic — no claude, no network, no API spend:
 
   1. hard_check() against REAL recorded answer excerpts (from earlier
-     screen.py runs, saved in evals/results/screen*.json on the
+     screen.py runs, saved in evals/flox/results/screen*.json on the
      bill/ai-435-discriminating-evals branch before this harness landed on
      main). These are genuine model output, not contrived strings — using
      them proves a check works against how models actually phrase correct
@@ -13,7 +13,7 @@ Two concerns, both pure logic — no claude, no network, no API spend:
   2. _score_arm()'s handling of run_claude/judge's current return shapes
      (mocked at the subprocess boundary, same pattern as test_run.py).
 
-    python3 -m unittest test_screen -v
+    python3 -m unittest tests.test_screen -v
 """
 import json
 import subprocess
@@ -23,7 +23,7 @@ from unittest.mock import MagicMock, patch
 import screen
 
 # ---- real recorded answer excerpts -----------------------------------------
-# Pulled verbatim from evals/results/screen*.json (screen-pass2-haiku.json,
+# Pulled verbatim from evals/flox/results/screen*.json (screen-pass2-haiku.json,
 # screen-sonnet.json, screen.json, screen-regression-n5-old.json) as recorded
 # during the AI-435 investigation, before candidate ids were renamed/fixed.
 # Truncated to 1200 chars, matching _score_arm's own excerpt length.
@@ -115,13 +115,13 @@ UV_BAD_M_UV_INVOCATION = (
 
 
 def _load_candidate(candidates_file: str, candidate_id: str) -> dict:
-    """Load one candidate record by id from a jsonl file next to screen.py.
+    """Load one candidate record by id from a jsonl file under the suite's tasks/.
 
     Reads the file screen.py itself would load, so a future edit to a
     check's must_match/must_not_match is exercised by these tests without
     also needing to change here.
     """
-    path = screen.HERE / candidates_file
+    path = screen.TASKS_DIR / candidates_file
     for line in path.read_text().splitlines():
         line = line.strip()
         if not line:
@@ -284,14 +284,14 @@ class TestDefaultCandidatesFileExcludesStaleEntries(unittest.TestCase):
 
     def test_default_candidates_path_is_the_consolidated_file(self):
         self.assertEqual(
-            (screen.HERE / "candidates-all.jsonl").resolve(),
+            (screen.TASKS_DIR / "candidates-all.jsonl").resolve(),
             screen.DEFAULT_CANDIDATES.resolve(),
         )
 
     def test_stale_duplicate_ids_are_absent_from_default_file(self):
         ids = {
             json.loads(line)["id"]
-            for line in (screen.HERE / "candidates-all.jsonl").read_text().splitlines()
+            for line in (screen.TASKS_DIR / "candidates-all.jsonl").read_text().splitlines()
             if line.strip()
         }
         self.assertNotIn("stretch-layer-vs-compose", ids)

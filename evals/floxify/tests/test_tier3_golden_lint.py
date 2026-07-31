@@ -31,8 +31,8 @@ so the CI flox-less step disables both consistently:
   - unset/"1" runs them live when `flox` is on PATH.
 
 Run:
-    python3 -m unittest test_tier3_golden_lint -v
-    FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_tier3_golden_lint -v
+    python3 -m unittest tests.test_tier3_golden_lint -v
+    FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_tier3_golden_lint -v
 """
 import json
 import os
@@ -44,7 +44,7 @@ from _skill_module_loader import load_module
 
 # Lock-resolution leg + its status constants, reused from the Tier-2 golden
 # lint (they operate on raw manifest text — nothing Tier-2-specific).
-from test_golden_lint import (
+from .test_golden_lint import (
     FLOX_BIN,
     LOCK_OK,
     LOCK_RESOLUTION_ERROR,
@@ -52,9 +52,11 @@ from test_golden_lint import (
 )
 
 HERE = Path(__file__).resolve().parent
-GOLD_DIR = HERE / "gold"
-TIER3_FILE = HERE / "tier3.jsonl"
-VERIFY = HERE.parent.parent / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
+SUITE = HERE.parent          # evals/floxify
+REPO_ROOT = SUITE.parent.parent
+GOLD_DIR = SUITE / "gold"
+TIER3_FILE = SUITE / "tier3.jsonl"
+VERIFY = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
 
 # Unique sys.modules key — the loader's docstring warns that sharing a key
 # across test modules lets whichever load ran last steal the other's

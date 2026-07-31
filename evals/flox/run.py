@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Flox skills eval harness.
 
-Runs each task in tasks.jsonl through `claude` headless, in one of two arms:
+Runs each task in tasks/tasks.jsonl through `claude` headless, in one of two arms:
 
   --mode skills       skills only, MCP disabled (--strict-mcp-config, no --mcp-config)
   --mode baseline     bare model: no plugin, MCP disabled (unassisted baseline)
@@ -22,8 +22,9 @@ from pathlib import Path
 
 import skill_toml_lint
 
-HERE = Path(__file__).resolve().parent
-PLUGIN_DIR = HERE.parent / "flox-plugin"
+HERE = Path(__file__).resolve().parent  # evals/flox — this suite's root
+REPO_ROOT = HERE.parent.parent
+PLUGIN_DIR = REPO_ROOT / "flox-plugin"
 MODEL = "claude-opus-4-8"  # pinned for reproducible scores; override with --model
 
 # Setting-source isolation (screening only). When set (e.g. "project,local"),
@@ -413,7 +414,7 @@ def build_parser():
     ap.add_argument("--mode", choices=["skills", "baseline"], default="skills")
     ap.add_argument("--model", default=MODEL,
                     help=f"model id for both agent and judge (default {MODEL})")
-    ap.add_argument("--tasks", default=str(HERE / "tasks.jsonl"))
+    ap.add_argument("--tasks", default=str(HERE / "tasks" / "tasks.jsonl"))
     ap.add_argument("--only", help="run a single task id")
     ap.add_argument("--gate", action="store_true",
                     # `%%` — argparse percent-expands help strings, and a bare
@@ -510,7 +511,7 @@ def _diff_vs_golden(summary, results, prev_golden):
     fname = f"{summary['mode'].replace('+', '_')}.json"
     if not prev_golden:
         return [f"### Δ vs main (`{fname}`)",
-                f"_No committed golden for this arm — commit `evals/results/{fname}` to enable per-PR diffs._", ""]
+                f"_No committed golden for this arm — commit `evals/flox/results/{fname}` to enable per-PR diffs._", ""]
     prev = {r["id"]: r for r in prev_golden.get("results", []) if "judge" in r}
     cur = {r["id"]: r for r in results if "judge" in r}
     regressed, fixed = [], []

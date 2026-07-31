@@ -38,7 +38,7 @@ Exit 0 if there are no HARD violations, 1 otherwise (ADVISORY notes never
 affect the exit code). Catalog checks (`flox show`) are skipped — not
 failed — when `flox` is not on PATH, mirroring the harness's own activation
 check.  Pure stdlib for everything except the catalog leg, which shells out
-to `flox show` and is fully mockable (see evals/floxify/test_verify.py).
+to `flox show` and is fully mockable (see evals/floxify/tests/test_verify.py).
 """
 import argparse
 import json

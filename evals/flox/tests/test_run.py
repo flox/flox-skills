@@ -4,7 +4,7 @@
 The agent + judge calls are integration-only. Everything here is pure logic
 over mocked subprocesses — no claude, no network, no API spend.
 
-    python3 -m unittest test_run -v
+    python3 -m unittest tests.test_run -v
 """
 import json
 import subprocess

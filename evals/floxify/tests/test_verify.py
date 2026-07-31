@@ -22,8 +22,10 @@ from unittest.mock import patch
 from _skill_module_loader import load_module
 
 HERE = Path(__file__).resolve().parent
-VERIFY = HERE.parent.parent / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
-DETECT = HERE.parent.parent / "flox-plugin" / "skills" / "floxify" / "scripts" / "detect.py"
+SUITE = HERE.parent          # evals/floxify
+REPO_ROOT = SUITE.parent.parent
+VERIFY = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
+DETECT = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "detect.py"
 
 # Unique sys.modules key so @patch("...") resolves THIS file's instance —
 # test_golden_lint.py loads the same verify.py under its OWN unique key.
@@ -202,7 +204,7 @@ command = "postgres -D \\"$FLOX_ENV_CACHE/postgres\\" -p 5433"
 
 class TestAI466LemmyForensicReproduction(unittest.TestCase):
     def _detect(self):
-        return detect.scan(str(HERE / "fixtures" / "lemmy-shaped"))
+        return detect.scan(str(SUITE / "fixtures" / "lemmy-shaped"))
 
     def test_rep3_shaped_manifest_fires_holes_1_and_2(self):
         # No [services.*] at all: HARD-fires both the pq-sys client
@@ -2266,7 +2268,7 @@ class TestMainCLI(unittest.TestCase):
 
 class TestAI467PosthogForensicReproduction(unittest.TestCase):
     def _detect(self):
-        return detect.scan(str(HERE / "fixtures" / "posthog-shaped"))
+        return detect.scan(str(SUITE / "fixtures" / "posthog-shaped"))
 
     def test_posthog_own_manifest_shape_produces_no_leaf_datastore_hard_violation(self):
         # PostHog's actual needs: postgres + redis wired, nothing for

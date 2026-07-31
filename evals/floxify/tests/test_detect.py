@@ -6,8 +6,8 @@ from a real file, so these tests pin its extraction against the synthetic
 fixtures in evals/floxify/fixtures/ (the same repos the outcome eval uses).
 
 Runnable two ways:
-    python3 test_detect.py            # standalone, prints PASS/FAIL, exits non-zero on failure
-    pytest test_detect.py             # each test_* function is a pytest case
+    python3 tests/test_detect.py      # standalone, prints PASS/FAIL, exits non-zero on failure
+    pytest tests/test_detect.py       # each test_* function is a pytest case
 
 Pure stdlib — no pytest required.
 """
@@ -16,8 +16,10 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-FIXTURES = HERE / "fixtures"
-DETECT = HERE.parent.parent / "flox-plugin" / "skills" / "floxify" / "scripts" / "detect.py"
+SUITE = HERE.parent          # evals/floxify
+REPO_ROOT = SUITE.parent.parent
+FIXTURES = SUITE / "fixtures"
+DETECT = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "detect.py"
 
 
 def _load_detect():

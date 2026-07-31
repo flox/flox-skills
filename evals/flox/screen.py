@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Discrimination screening harness for stretch-tier eval candidates.
 
-For each candidate in candidates-all.jsonl (default; override with
+For each candidate in tasks/candidates-all.jsonl (default; override with
 --candidates), runs the baseline arm (bare model,
 no plugin) and the skills arm (plugin loaded, MCP off), scores both, and
 classifies the candidate:
 
   discriminator  skills passes (hard OR judge_correct) while baseline fails
-                 the same measure — promote this candidate to tasks.jsonl
+                 the same measure — promote this candidate to tasks/tasks.jsonl
   skill-gap      both arms fail — the skill may not cover this capability;
                  report separately rather than discarding
   no-signal      baseline already passes — candidate is too easy, needs
@@ -34,11 +34,13 @@ sys.path.insert(0, str(HERE))
 import run as _run
 from run import run_claude, judge, NEUTRAL_SUFFIX, ANSWER_SUFFIX
 
-# candidates-all.jsonl is the consolidated candidate set: every batch
+# tasks/candidates-all.jsonl is the consolidated candidate set: every batch
 # (pass2, regression, triggering, new-features) folded in, with a single
-# current definition per id. Other candidates*.jsonl files hold individual
-# historical batches for `--candidates <file>` runs against just that batch.
-DEFAULT_CANDIDATES = HERE / "candidates-all.jsonl"
+# current definition per id. Other tasks/candidates*.jsonl files hold
+# individual historical batches for `--candidates <file>` runs against just
+# that batch.
+TASKS_DIR = HERE / "tasks"
+DEFAULT_CANDIDATES = TASKS_DIR / "candidates-all.jsonl"
 
 
 def hard_check(answer: str, must_match: list, must_not_match: list) -> bool:
@@ -234,8 +236,8 @@ def main():
     ap.add_argument(
         "--candidates",
         default=str(DEFAULT_CANDIDATES),
-        help="path to a candidates jsonl file (default: candidates-all.jsonl, the "
-             "current consolidated + fixed set, next to screen.py)",
+        help="path to a candidates jsonl file (default: tasks/candidates-all.jsonl, "
+             "the current consolidated + fixed set)",
     )
     ap.add_argument("--only", help="run a single candidate id")
     ap.add_argument(
