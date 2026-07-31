@@ -8,7 +8,7 @@ An eval that a `cat` satisfies is not evidence of anything (AI-455).
 
 Pure logic, no subprocess — safe to gate on.
 
-    flox activate -- python3 -m unittest test_detect_usage_eval -v
+    python3 -m unittest test_detect_usage_eval -v
 """
 import unittest
 

@@ -8,7 +8,7 @@ strongest discriminators (those that separate baseline from skills on the most
 models). Pure stdlib; safe to re-run as models finish (skips missing files).
 
 Usage:
-  flox activate -- python3 gen_screening_report.py \
+  python3 gen_screening_report.py \
       --results results/screen-haiku.json results/screen-sonnet.json results/screen-opus.json \
       --candidates candidates.jsonl \
       --out SCREENING-REPORT.md
@@ -195,10 +195,10 @@ def main():
     L.append("```bash\n"
              "cd evals\n"
              "for m in claude-haiku-4-5-20251001 claude-sonnet-5 claude-opus-4-8; do\n"
-             "  flox activate -- python3 screen.py --candidates candidates.jsonl --reps 5 --concurrency 4 \\\n"
+             "  python3 screen.py --candidates candidates.jsonl --reps 5 --concurrency 4 \\\n"
              "    --model \"$m\" --out results/screen-${m%%-*}.json   # isolated by default\n"
              "done\n"
-             "flox activate -- python3 gen_screening_report.py --results results/screen-*.json \\\n"
+             "python3 gen_screening_report.py --results results/screen-*.json \\\n"
              "    --candidates candidates.jsonl --out SCREENING-REPORT.md\n"
              "```\n")
 

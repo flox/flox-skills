@@ -5,12 +5,12 @@ Outcome-based eval suite for the `/floxify` skill. Unlike `../run.py`
 to a temp dir, runs the `/floxify` skill headlessly, and scores the
 `.flox/env/manifest.toml` it produces.
 
-**Every command below runs through `flox activate --`** — see
-[the runtime note in `../README.md`](../README.md#the-runtime-run-everything-through-flox-activate).
+**Run `flox activate` once before the commands below** — see
+[the runtime note in `../README.md`](../README.md#the-runtime-activate-once).
 `python3` and `claude` both come from this repo's own environment
-(`.flox/env/manifest.toml`), pinned by `manifest.lock`, and CI runs the
-identical commands. Note the two senses of "activate" in this file: the outer
-`flox activate --` is just how you launch the harness, while the *activation
+(`.flox/env/manifest.toml`), pinned by `manifest.lock`, and CI gets the same
+two the same way. Note the two senses of "activate" in this file: your own
+activation is just how you get the harness a Python, while the *activation
 check* below is the harness activating a manifest the skill produced, in a temp
 dir, as a scored outcome. They are unrelated.
 
@@ -43,7 +43,7 @@ with two eval layers:
   no `claude` calls — safe to run anywhere and cheap enough to gate.
 
   ```bash
-  flox activate -- python3 test_detect.py        # standalone (pytest also works, if you have one -- the environment does not ship it)
+  python3 test_detect.py        # standalone (pytest also works, if you have one -- the environment does not ship it)
   ```
 
 - **`detect_usage_eval.py`** — behavioral conformance. Runs a real,
@@ -53,8 +53,8 @@ with two eval layers:
   it's manual/scheduled, never in the fast gate.
 
   ```bash
-  flox activate -- python3 detect_usage_eval.py                 # default fixture (node-postgres)
-  flox activate -- python3 detect_usage_eval.py --fixture ruby
+  python3 detect_usage_eval.py                 # default fixture (node-postgres)
+  python3 detect_usage_eval.py --fixture ruby
   ```
 
 `test_detect.py` proves the analyzer is *correct*; `detect_usage_eval.py`
@@ -106,7 +106,7 @@ Eval layers, same two-tier shape as `detect.py`'s:
   with no network.
 
   ```bash
-  flox activate -- python3 -m unittest test_verify -v
+  python3 -m unittest test_verify -v
   ```
 
 - **`test_golden_lint.py`** — runs the checker over every
@@ -131,8 +131,8 @@ Eval layers, same two-tier shape as `detect.py`'s:
   still the `golden-lint` job, which leaves the switch at its default.
 
   ```bash
-  flox activate -- python3 -m unittest test_golden_lint -v
-  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 flox activate -- python3 -m unittest test_golden_lint -v  # no network
+  python3 -m unittest test_golden_lint -v
+  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_golden_lint -v  # no network
   ```
 
   **Whole-manifest lock-resolution leg (AI-479).** Every check above is
@@ -193,7 +193,7 @@ Eval layers, same two-tier shape as `detect.py`'s:
   agent — never in the fast gate.
 
   ```bash
-  flox activate -- python3 verify_usage_eval.py                 # default fixture (node-postgres)
+  python3 verify_usage_eval.py                 # default fixture (node-postgres)
   ```
 
 ### Why verify.py is advisory in the harness
@@ -289,25 +289,25 @@ the gate.
 
 ```bash
 # Single fixture (fastest for development):
-flox activate -- python3 run_floxify.py --only node-20
+python3 run_floxify.py --only node-20
 
 # All 6 fixtures:
-flox activate -- python3 run_floxify.py
+python3 run_floxify.py
 
 # With gate (fails CI if any should-tier hard-check fails):
-flox activate -- python3 run_floxify.py --gate
+python3 run_floxify.py --gate
 
 # Skip the produced-manifest activation check (no catalog / network):
-flox activate -- python3 run_floxify.py --skip-activation
+python3 run_floxify.py --skip-activation
 
 # Custom skill dir (skill ships in-repo at flox-plugin/; override if needed):
-flox activate -- python3 run_floxify.py --skill-dir /path/to/flox-plugin
+python3 run_floxify.py --skill-dir /path/to/flox-plugin
 
 # Custom output path:
-flox activate -- python3 run_floxify.py --out results/my-run.json
+python3 run_floxify.py --out results/my-run.json
 
 # Diff against a specific committed baseline (default: floxify-baseline.json):
-flox activate -- python3 run_floxify.py --baseline floxify-baseline.json
+python3 run_floxify.py --baseline floxify-baseline.json
 ```
 
 Results land in `results/` as JSON with a summary (hard-pass rate,
@@ -428,7 +428,7 @@ are **references for the LLM judge**, not byte-exact match targets.
 2. Create `gold/<new-id>.toml` with the ideal manifest
 3. Add a line to `tasks.jsonl` with `id`, `tier`, `ecosystem`,
    `checks`, `rubric`
-4. Run `flox activate -- python3 run_floxify.py --only <new-id>` to verify end-to-end
+4. Run `python3 run_floxify.py --only <new-id>` to verify end-to-end
 
 ## Baseline
 
@@ -564,11 +564,11 @@ collision was flagged and deliberately avoided.
 # pressure fixture (rust-cargo) + one negative control (go-mod: a
 # single runtime, no services, no hook -- the loop should be short
 # regardless of arm).
-flox activate -- python3 run_floxify.py \
+python3 run_floxify.py \
   --only ruby,python-uv,node-postgres,rust-cargo,go-mod \
   --arm skills --reps 8 --out results/floxify-skills-batch.json
 
-flox activate -- python3 run_floxify.py \
+python3 run_floxify.py \
   --only ruby,python-uv,node-postgres,rust-cargo,go-mod \
   --arm baseline --reps 8 --out results/floxify-baseline-batch.json
 ```
@@ -877,19 +877,19 @@ remain unrun.
 
 ```bash
 # Single repo (validated so far):
-flox activate -- python3 tier2.py --only mastodon
+python3 tier2.py --only mastodon
 
 # All registered repos (heavy — large clones + long skill runs):
-flox activate -- python3 tier2.py
+python3 tier2.py
 
 # Opt in to activation verification:
-flox activate -- python3 tier2.py --only mastodon --activate
+python3 tier2.py --only mastodon --activate
 
 # Custom timeouts (defaults: 900s clone, 1800s agent run):
-flox activate -- python3 tier2.py --only sentry --clone-timeout 1200 --agent-timeout 2400
+python3 tier2.py --only sentry --clone-timeout 1200 --agent-timeout 2400
 
 # Custom skill dir / output path (same conventions as run_floxify.py):
-flox activate -- python3 tier2.py --skill-dir /path/to/flox-plugin --out results/my-run.json
+python3 tier2.py --skill-dir /path/to/flox-plugin --out results/my-run.json
 ```
 
 Results land in `results/tier2.json` by default. Unlike Tier 1, there's
@@ -907,7 +907,7 @@ same as Tier 1 — exercised by an actual `--only <id>` run, not unit
 tests.
 
 ```bash
-flox activate -- python3 -m unittest test_tier2 -v
+python3 -m unittest test_tier2 -v
 ```
 
 ### CI
@@ -931,10 +931,10 @@ stays out of the default/weekly gated run:
 
 ```bash
 # Report-only run (NO --gate — every entry is stretch-tier):
-flox activate -- python3 run_floxify.py --tasks tier3.jsonl
+python3 run_floxify.py --tasks tier3.jsonl
 
 # One fixture:
-flox activate -- python3 run_floxify.py --tasks tier3.jsonl --only ruby-native-gems
+python3 run_floxify.py --tasks tier3.jsonl --only ruby-native-gems
 ```
 
 ### Why it never gates (structural, not a flag)
@@ -974,7 +974,7 @@ dropped from `[options].systems` because several of these packages
 build in the catalog — the same drop the Tier-2 goldens make. No fixture
 was skipped: all six goldens authored and verified clean.
 
-### Deterministic gates (the only things that DO gate — via `flox activate -- python3 -m unittest`)
+### Deterministic gates (the only things that DO gate — via `python3 -m unittest`)
 
 Two fast, no-`claude` test modules, mirroring the two-tier shape the rest
 of this suite uses:
@@ -986,7 +986,7 @@ of this suite uses:
   parseable gold with `[install]`.
 
   ```bash
-  flox activate -- python3 -m unittest test_tier3 -v
+  python3 -m unittest test_tier3 -v
   ```
 
 - **`test_tier3_golden_lint.py`** — golden lint over the six Tier-3
@@ -998,8 +998,8 @@ of this suite uses:
   clean.
 
   ```bash
-  flox activate -- python3 -m unittest test_tier3_golden_lint -v
-  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 flox activate -- python3 -m unittest test_tier3_golden_lint -v  # no network
+  python3 -m unittest test_tier3_golden_lint -v
+  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_tier3_golden_lint -v  # no network
   ```
 
 The agentic outcome run (`run_floxify.py --tasks tier3.jsonl`) is

@@ -53,12 +53,12 @@ snippet, or allowlist it in KNOWN_PARSE_FAILURES below. See evals/README.md
 ("Skill TOML snippet guard").
 
 Usage:
-    flox activate -- python3 skill_toml_lint.py                          # structural tier
-    flox activate -- python3 skill_toml_lint.py --offline                # ... and prove it needs no network
-    flox activate -- python3 skill_toml_lint.py --tier catalog           # + live catalog resolution
-    flox activate -- python3 skill_toml_lint.py --only references/services.md
-    flox activate -- python3 skill_toml_lint.py --list                   # extract only, no catalog
-    flox activate -- python3 skill_toml_lint.py --json results/skill-toml-lint.json
+    python3 skill_toml_lint.py                          # structural tier
+    python3 skill_toml_lint.py --offline                # ... and prove it needs no network
+    python3 skill_toml_lint.py --tier catalog           # + live catalog resolution
+    python3 skill_toml_lint.py --only references/services.md
+    python3 skill_toml_lint.py --list                   # extract only, no catalog
+    python3 skill_toml_lint.py --json results/skill-toml-lint.json
 
 Exit 0 if every checked snippet passed its tier, 1 otherwise. Pure stdlib.
 """

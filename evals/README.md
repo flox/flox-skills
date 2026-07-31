@@ -95,20 +95,24 @@ The harness runs a single arm today (`skills`, `--strict-mcp-config`, MCP
 off); an MCP-assisted arm was measured and retired — see the AI-93 finding
 under Baselines below.
 
-## The runtime: run everything through `flox activate`
+## The runtime: activate once
 
-**Every command in this file and in [`floxify/README.md`](floxify/README.md)
-runs through `flox activate --`, and that is the supported way to run them.**
-The interpreter is declared in this repo's own environment
-(`.flox/env/manifest.toml` → `python311`) and pinned by `manifest.lock` on all
-four systems, so a clean checkout needs flox and no ambient Python. CI runs the
-identical commands — `.github/workflows/evals.yml` has no `actions/setup-python`
-— which is the point: a suite that passes locally and fails in CI because two
-machines shipped different `python3` is not a signal about the skill.
+**Activate this repo's environment first; every command in this file and in
+[`floxify/README.md`](floxify/README.md) then runs as plain `python3`.**
 
 ```bash
-flox activate -- python3 run.py --mode skills   # from evals/
+flox activate            # once, from anywhere in the repo
 ```
+
+The interpreter is declared in this repo's own environment
+(`.flox/env/manifest.toml` → `python311`) and pinned by `manifest.lock` on all
+four systems, so a clean checkout needs flox and no ambient Python. CI gets the
+same interpreter the same way — `.github/workflows/evals.yml` has no
+`actions/setup-python`; each step that needs it carries
+`shell: flox activate -- bash ... {0}` and then runs the same plain commands
+documented here. That is the point: a suite that passes locally and fails in CI
+because two machines shipped different `python3` is not a signal about the
+skill.
 
 `flox activate` finds the environment by searching upward, so it works from
 `evals/`, `evals/floxify/`, or the repo root; only the script path changes.
@@ -122,9 +126,9 @@ happens to be on PATH.
 ## Run
 
 ```bash
-flox activate -- python3 run.py --mode skills            # skills-only baseline
-flox activate -- python3 run.py --mode skills --only node-env   # single task
-flox activate -- python3 run.py --mode skills --gate     # exit non-zero if binding gates fail (CI)
+python3 run.py --mode skills            # skills-only baseline
+python3 run.py --mode skills --only node-env   # single task
+python3 run.py --mode skills --gate     # exit non-zero if binding gates fail (CI)
 ```
 
 Results land in `results/<mode>.json` with a summary (hard-pass rate, avg judge
@@ -270,16 +274,16 @@ there absorbing a future regression.
 ### Run
 
 ```bash
-flox activate -- python3 skill_toml_lint.py                     # structural tier (what CI gates on)
-flox activate -- python3 skill_toml_lint.py --offline           # ...and prove it needs no network
-flox activate -- python3 skill_toml_lint.py --tier catalog      # + live catalog resolution (advisory)
-flox activate -- python3 skill_toml_lint.py --only services.md  # one document
-flox activate -- python3 skill_toml_lint.py --list              # extract only, no catalog
-flox activate -- python3 skill_toml_lint.py -v                  # print every block, not just failures
-flox activate -- python3 -m unittest test_skill_toml_lint       # the guard's own tests (no catalog)
+python3 skill_toml_lint.py                     # structural tier (what CI gates on)
+python3 skill_toml_lint.py --offline           # ...and prove it needs no network
+python3 skill_toml_lint.py --tier catalog      # + live catalog resolution (advisory)
+python3 skill_toml_lint.py --only services.md  # one document
+python3 skill_toml_lint.py --list              # extract only, no catalog
+python3 skill_toml_lint.py -v                  # print every block, not just failures
+python3 -m unittest test_skill_toml_lint       # the guard's own tests (no catalog)
 ```
 
-The outer `flox activate` only supplies the interpreter; the `flox init` /
+Your own activation only supplies the interpreter; the `flox init` /
 `flox edit -f` environments the guard drives are throwaway ones in temp dirs,
 unaffected by it. Two comments above used to say "no flox" — with flox now
 supplying python3 they say **no catalog**, which is what they always meant:
@@ -319,10 +323,10 @@ historical batch (`candidates-pass2.jsonl`, `candidates-regression.jsonl`,
 `candidates-triggering.jsonl`, `candidates-new-features.jsonl`) instead.
 
 ```bash
-flox activate -- python3 screen.py --reps 5                                    # default set, n=5
-flox activate -- python3 screen.py --candidates candidates-pass2.jsonl --reps 5   # one batch, n=5
-flox activate -- python3 screen.py --only trap-vars-no-interpolation --reps 5
-flox activate -- python3 screen.py --plugin-dir /path/to/fixed-skill/flox-plugin  # test a skill edit
+python3 screen.py --reps 5                                    # default set, n=5
+python3 screen.py --candidates candidates-pass2.jsonl --reps 5   # one batch, n=5
+python3 screen.py --only trap-vars-no-interpolation --reps 5
+python3 screen.py --plugin-dir /path/to/fixed-skill/flox-plugin  # test a skill edit
 ```
 
 Like `run.py`, each `claude` call's cost/usage is read from the JSON envelope

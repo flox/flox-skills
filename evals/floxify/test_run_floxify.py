@@ -5,7 +5,7 @@ The agentic skill run and the LLM judge are integration-only (exercised by a
 real `--only <id>` run). Everything here is pure logic over mocked
 subprocesses, so it is fast and safe to gate on.
 
-    flox activate -- python3 -m unittest test_run_floxify -v
+    python3 -m unittest test_run_floxify -v
 """
 import json
 import subprocess
@@ -130,7 +130,7 @@ class TestMissingFixtureErrorPath(unittest.TestCase):
     checkouts); feeding it a tier2.jsonl entry (real-repo tasks, no
     "tier" key at all) crashed with KeyError: 'tier' in the fixture-not-
     found error path instead of reporting a clean error. Repro:
-    `flox activate -- python3 run_floxify.py --tasks tier2.jsonl --only lemmy`.
+    `python3 run_floxify.py --tasks tier2.jsonl --only lemmy`.
     """
 
     def test_missing_fixture_returns_error_dict_not_a_crash(self):

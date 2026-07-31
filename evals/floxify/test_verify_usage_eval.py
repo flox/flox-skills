@@ -6,7 +6,7 @@ of verify.py counts, never a mention (`cat verify.py`, `grep verify.py`).
 
 Pure logic, no subprocess — safe to gate on.
 
-    flox activate -- python3 -m unittest test_verify_usage_eval -v
+    python3 -m unittest test_verify_usage_eval -v
 """
 import unittest
 
