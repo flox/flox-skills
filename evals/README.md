@@ -90,11 +90,42 @@ How:
 For every task in `tasks/tasks.jsonl`, runs `claude` headless with the Flox plugin
 loaded and scores the answer two ways:
 
-- **Hard checks** — deterministic regex checks (no hallucinated install URL, no
-  absolute paths in manifests, required manifest sections present, correct
-  commands used).
+- **Hard checks** — deterministic checks (no hallucinated install URL, no
+  absolute paths in manifests, no hardcoded secrets in manifests, required
+  manifest sections present, correct commands used).
 - **LLM judge** — a separate `claude` call grades the answer 1–5 against the
   task's rubric and returns a pass/fail.
+
+### `no_hardcoded_secret`
+
+SKILL.md's "Configuration & Secrets" rule is emphatic — *never* store secrets in
+the manifest; use environment variables, `~/.config/<env_name>/`, or an existing
+credentials file — and nothing exercised it until AI-509 Ticket 6 ported the
+check from [flox/flox-agentic#18](https://github.com/flox/flox-agentic/pull/18)
+(@imkarrer). Two tasks bind it: `env-secrets-api-key` (functional, `should`, so
+it binds the gate) and `trigger-secrets-no-commit` (a trigger test).
+
+A secret-**named** key (`*SECRET*`, `*TOKEN*`, `*PASSWORD*`, `*API_KEY*`,
+`*ACCESS_KEY*`, `*PRIVATE_KEY*`, …) assigned a real literal inside a fenced
+manifest is a leak. Env references (`$VAR`, `${VAR}`, `$(…)`), placeholders, and
+values that merely *point* at a credentials file (`~/.config/<env>/secrets`,
+`./.secrets/token`) are not — the last of those is the answer the skill teaches,
+so flagging it would redden the correct answer.
+
+Every fenced block is scanned two ways and either finding a leak fails the
+check, because neither view alone is enough:
+
+| view | reaches |
+|---|---|
+| text (regex over the raw block) | blocks that aren't valid TOML (the parsed view drops those wholesale), and an assignment inside a `[hook] on-activate = '''…'''` shell body — still the committed manifest, but one opaque string to a parser |
+| parsed (`tomllib` dict) | multi-line arrays, nested tables, dotted keys — shapes no single-line regex reaches |
+
+Detection is name-based, so it has blind spots by construction: a secret under a
+non-secret-named key, an unquoted value, and a real value that *begins* with a
+placeholder token all pass. Those are pinned by
+`tests/test_run.py::TestNoHardcodedSecret::test_known_limitations_are_pinned`,
+so a change in either direction shows up as a failing test to review rather than
+as silence.
 
 ### Trigger tests
 
@@ -211,6 +242,14 @@ chance of an all-green run). So `--gate` is split:
   same problem in miniature — without `'''`/`"""` state, a key inside a command
   body reads as a real key, and a `[ -d dir ] || cmd` line reads as a table
   header.
+
+  `no_hardcoded_secret` is the one check that also scans block *text*, and for
+  a reason that is the mirror image of the rule above: it is not asserting that
+  a manifest is correct, it is asserting that a manifest leaks nothing. A block
+  tomllib refuses is dropped from the parsed view entirely, and a secret pasted
+  into a `[hook]` shell body is one opaque string to a parser — both would pass
+  vacuously. So it scans both views and fails on either. Same fenced blocks,
+  same scope; the union is the point.
 - **Advisory (reported, never blocks):** `avg_judge_score`, `judge_correct_rate`,
   per-tier breakdown, and `should_trigger_rate`. These are tracked as quality/
   triggering trends (watch for a sustained drop), not pass/fail gates. `may` and

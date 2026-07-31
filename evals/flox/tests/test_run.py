@@ -288,6 +288,274 @@ class TestFencedManifestExtraction(unittest.TestCase):
         self.assertEqual(run._parsed_manifests(text), [{"version": 1}])
 
 
+def toml(*lines):
+    """Wrap lines in a ```toml manifest block (what a real answer contains)."""
+    return "```toml\n" + "\n".join(lines) + "\n```"
+
+
+class TestNoHardcodedSecret(unittest.TestCase):
+    """`no_hardcoded_secret` — True means PASS (no leaked secret found).
+
+    Ported from flox/flox-agentic#18 (@imkarrer) and extended for this suite's
+    fence extraction + tomllib parsing (AI-509 Ticket 6). This is the
+    security-relevant check, so it is tested adversarially: real leaks in every
+    TOML shape we can think of must be caught, correct patterns must not be
+    punished, and the accepted (name-based) blind spots are pinned explicitly so
+    a future change can't silently widen them.
+    """
+
+    def check(self, answer):
+        return run.CHECKS["no_hardcoded_secret"](answer)
+
+    # --- leaks that MUST be flagged (check returns False) --------------------
+    LEAKS = {
+        # basic shapes
+        "double-quoted value": toml('API_KEY = "sk-live-abc123def456"'),
+        "single-quoted value": toml("API_KEY = 'sk-live-abc123def456'"),
+        "lowercase key": toml('password = "hunter2real"'),
+        "no spaces around equals": toml('API_KEY="sk-real-nospace"'),
+        "indented (spaces)": toml('    SECRET_KEY = "realvalue"'),
+        "indented (tab)": toml('\tSECRET_KEY = "realvalue"'),
+        # key-name variants
+        "prefixed key name": toml('MY_SERVICE_SECRET = "realvalue123"'),
+        "suffixed key name": toml('DATABASE_PASSWORD_PROD = "realpw"'),
+        "hyphenated key": toml('API-KEY = "sk-realvalue"'),
+        "no-separator key (APIKEY)": toml('APIKEY = "sk-real-nosep"'),
+        "aws access key id": toml('AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7REALKEYX"'),
+        "aws secret access key": toml('AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMIrealK7"'),
+        "bearer token": toml('AUTH_TOKEN = "ghp_realtokenvaluehere1234"'),
+        "private key literal": toml('PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY-----abc"'),
+        # quoted keys (TOML allows these) — regressed the original regex
+        "double-quoted key": toml('"API_KEY" = "sk-real-123"'),
+        "single-quoted key": toml("'api_key' = \"sk-real-123\""),
+        # structural: inline tables and arrays
+        "inline table": toml('db = { password = "hunter2real" }'),
+        "nested inline table": toml('svc = { auth = { token = "ghp_real123" } }'),
+        "second key in inline table": toml('db = { host = "x", password = "real" }'),
+        "array of secrets": toml('API_KEYS = ["sk-real-1", "sk-real-2"]'),
+        "array with a real value after a placeholder": toml(
+            'TOKENS = ["$FIRST", "sk-second-real"]'
+        ),
+        # value quoting edge cases
+        "value contains a single quote": toml('API_KEY = "ab\'cd-real"'),
+        "value contains a double quote": toml("API_KEY = 'ab\"cd-real'"),
+        "triple-quoted value": toml('API_KEY = """sk-real-multiline"""'),
+        # placement / whitespace
+        "inside a subtable": toml("[vars]", 'PASSWORD = "realpass123"'),
+        "in a [vars] table under a service": toml(
+            "[services.db.vars]", 'POSTGRES_PASSWORD = "realpass123"'
+        ),
+        "CRLF line endings": "```toml\r\nAPI_KEY = \"sk-real-crlf\"\r\n```",
+        # Shapes only ONE of the two views reaches — the union is the point.
+        # tomllib sees a hook body as one opaque string under `on-activate`;
+        # only the text scan reaches inside it. It is still the committed
+        # manifest, so a literal there is still a leak.
+        "inside a [hook] shell body": toml(
+            "[hook]", "on-activate = '''", 'export API_KEY="sk-real-in-hook"', "'''"
+        ),
+        # A multi-line array has no single-line form for the regex to capture;
+        # only the parsed view reaches it.
+        "multi-line array": toml("API_KEYS = [", '  "sk-real-multiline-array",', "]"),
+        # A block that is not valid TOML is dropped by the parsed view; only
+        # the text scan reaches it.
+        "block that does not parse as TOML": toml(
+            'API_KEY = "sk-real-unparseable"', "this is not = = toml"
+        ),
+    }
+
+    # --- correct patterns that MUST pass (check returns True) ----------------
+    COMPLIANT = {
+        "env ref $VAR": toml('API_KEY = "$API_KEY"'),
+        "env ref ${VAR}": toml('API_KEY = "${API_KEY}"'),
+        "env ref, single quotes": toml("API_KEY = '$API_KEY'"),
+        "command substitution": toml('API_KEY = "$(pass show api)"'),
+        "angle placeholder": toml('API_KEY = "<your-api-key>"'),
+        "handlebars placeholder": toml('TOKEN = "{{token}}"'),
+        "your- placeholder": toml('SECRET = "your-secret-here"'),
+        "YOUR_ uppercase placeholder": toml('API_KEY = "YOUR_API_KEY"'),
+        "changeme placeholder": toml('DB_PASSWORD = "changeme"'),
+        "change_me placeholder": toml('DB_PASSWORD = "change_me"'),
+        "xxxx placeholder": toml('TOKEN = "xxxxxxxx"'),
+        "asterisk-masked placeholder": toml('TOKEN = "********"'),
+        "placeholder word": toml('TOKEN = "placeholder"'),
+        "example placeholder": toml('API_KEY = "example-key"'),
+        "dummy placeholder": toml('API_KEY = "dummy"'),
+        "redacted placeholder": toml('API_KEY = "redacted"'),
+        "TODO placeholder": toml('API_KEY = "TODO"'),
+        "FIXME placeholder": toml('API_KEY = "FIXME"'),
+        "replace-me placeholder": toml('API_KEY = "replace-me"'),
+        "sample placeholder": toml('API_KEY = "sample-key"'),
+        "fake placeholder": toml('API_KEY = "fake-key"'),
+        "empty value": toml('API_KEY = ""'),
+        # The three mechanisms SKILL.md actually recommends. A check that
+        # reddened these would fail the correct answer, which is the whole
+        # failure mode the `env-secrets-api-key` task exists to measure.
+        "points at ~/.config/<env>/": toml('SECRETS_FILE = "~/.config/myapp/secrets"'),
+        "points at an existing credentials file": toml(
+            'AWS_SHARED_CREDENTIALS_FILE = "~/.aws/credentials"'
+        ),
+        "points at a repo-relative file": toml('TOKEN_FILE = "./.secrets/token"'),
+        "points into $FLOX_ENV_CACHE": toml('TOKEN_FILE = "$FLOX_ENV_CACHE/token"'),
+        "non-secret key with literal": toml('name = "my-app"'),
+        "port number (non-secret, unquoted)": toml("port = 5432"),
+        "secret word inside a non-secret value": toml(
+            'description = "reads the API_KEY from the environment"'
+        ),
+        "array of non-secret placeholders": toml('TOKENS = ["$A", "${B}"]'),
+        "secret only in prose (not a code block)": 'Set API_KEY = "sk-real" in your shell.',
+        "secret in bash block (runtime, not manifest)": (
+            '```bash\nexport API_KEY="sk-live-real" && flox activate\n```'
+        ),
+        "secret in python block (out of scope)": (
+            '```python\nSECRET_KEY = "django-insecure-real"\n```'
+        ),
+    }
+
+    def test_leaks_are_flagged(self):
+        for name, ans in self.LEAKS.items():
+            with self.subTest(leak=name):
+                self.assertFalse(self.check(ans), f"should have FLAGGED: {name}")
+
+    def test_compliant_answers_pass(self):
+        for name, ans in self.COMPLIANT.items():
+            with self.subTest(ok=name):
+                self.assertTrue(self.check(ans), f"should have PASSED: {name}")
+
+    def test_known_limitations_are_pinned(self):
+        """Accepted blind spots of name-based detection. These are NOT ideal —
+        they're documented here so the trade-off is explicit and any change in
+        behavior (better or worse) surfaces as a failing test to review."""
+        # A secret in a NON-secret-named key can't be caught by name.
+        self.assertTrue(
+            self.check(toml('config = "sk-live-realsecretvalue"')),
+            "known limitation: secret under a non-secret key name is not detected",
+        )
+        # A real value that happens to START with a placeholder token is allowed.
+        self.assertTrue(
+            self.check(toml('API_KEY = "example-but-actually-a-real-key-9f8a7b"')),
+            "known limitation: value starting with a placeholder token is allowed",
+        )
+        # An unquoted (bare) value parses as an int, not a string literal.
+        self.assertTrue(
+            self.check(toml("API_KEY = 12345678")),
+            "known limitation: unquoted/bare values are not inspected",
+        )
+        # A commented-out line is treated as an example, not a leak.
+        self.assertTrue(
+            self.check(toml('# API_KEY = "sk-real-in-a-comment"')),
+            "known limitation: commented lines are treated as examples",
+        )
+        # A bare ``` fence is not a manifest in this suite: `extract_blocks`
+        # requires a `toml`/`toml-fragment` info string, because matching an
+        # empty one made a closing fence read as an opening one and silently
+        # lost the manifest (see TestFencedManifestExtraction). Same scope as
+        # `no_abs_paths` — deliberately narrower than flox-agentic#18's regex.
+        self.assertTrue(
+            self.check('```\nAPI_KEY = "sk-real-bare-fence"\n```'),
+            "known limitation: only ```toml fences are treated as manifests",
+        )
+
+    def test_helper_operates_on_raw_manifest_text(self):
+        """has_hardcoded_secret works on already-extracted manifest text (no
+        fences). It returns True when a leak is present, False otherwise."""
+        self.assertTrue(run.has_hardcoded_secret('API_KEY = "sk-real"'))
+        self.assertFalse(run.has_hardcoded_secret('API_KEY = "$API_KEY"'))
+
+    def test_parsed_view_operates_on_a_manifest_dict(self):
+        """_secret_leaks_in works on an already-parsed manifest."""
+        self.assertTrue(run._secret_leaks_in({"services": {"db": {"PASSWORD": "real"}}}))
+        self.assertFalse(run._secret_leaks_in({"services": {"db": {"PASSWORD": "$PW"}}}))
+        self.assertFalse(run._secret_leaks_in({"vars": {"PORT": "5432"}}))
+
+    def test_one_leaking_block_fails_the_whole_answer(self):
+        # An answer that shows the right way and then pastes a real key is a
+        # leak; the check is over every fenced manifest, not the first one.
+        answer = (toml('API_KEY = "$API_KEY"') + "\n\nor inline:\n\n"
+                  + toml('API_KEY = "sk-live-real"'))
+        self.assertFalse(self.check(answer))
+
+
+class TestCRLFAnswers(unittest.TestCase):
+    """CRLF answers must not silently skip every manifest-scoped check.
+
+    flox-agentic#18 found the bug on that suite's fence regex — it required a
+    literal `\\n`, so a CRLF answer matched no blocks at all and `no_abs_paths`
+    (and anything else scoped to a manifest) passed vacuously. This suite's
+    extractor is line-based (`skill_toml_lint.extract_blocks` splits with
+    `str.splitlines()`, which consumes `\\r\\n` as one boundary), so it never had
+    the bug — but nothing pinned that, and the next fence change could
+    reintroduce it silently. These are that pin.
+    """
+
+    def test_crlf_manifest_is_extracted(self):
+        self.assertIn("x = 1", run.toml_blocks("```toml\r\nx = 1\r\n```\r\n"))
+
+    def test_crlf_body_carries_no_stray_carriage_returns(self):
+        # A surviving \r would break every anchored check downstream.
+        self.assertNotIn("\r", run.toml_blocks("```toml\r\nx = 1\r\n```\r\n"))
+
+    def test_crlf_manifest_parses(self):
+        self.assertEqual(
+            run._parsed_manifests('```toml\r\nversion = 1\r\n```\r\n'), [{"version": 1}]
+        )
+
+    def test_crlf_does_not_disable_manifest_scoped_checks(self):
+        crlf = '```toml\r\ndir = "/home/isaac/data"\r\n```\r\n'
+        self.assertFalse(run.CHECKS["no_abs_paths"](crlf))
+
+    def test_crlf_mixed_blocks_keep_the_manifest(self):
+        answer = ("```bash\r\nflox edit\r\n```\r\n\r\n"
+                  '```toml\r\nversion = 1\r\n```\r\n')
+        self.assertIn("version = 1", run.toml_blocks(answer))
+
+
+class TestTaskRegistry(unittest.TestCase):
+    """`tasks/tasks.jsonl` is the registry the gate runs; keep it loadable.
+
+    `process_task` does `CHECKS[c]` with no guard, so a task naming a check that
+    doesn't exist raises a KeyError mid-run — after the agent call for that task
+    has already been paid for. Nothing caught that before, because the registry
+    is only read by the paid harness. This reads it for free.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        path = run.HERE / "tasks" / "tasks.jsonl"
+        cls.tasks = [json.loads(line) for line in path.read_text().splitlines()
+                     if line.strip()]
+
+    def test_every_task_has_the_required_fields(self):
+        for t in self.tasks:
+            with self.subTest(task=t.get("id")):
+                for field in ("id", "area", "prompt", "checks", "rubric"):
+                    self.assertIn(field, t)
+                self.assertIn(t.get("tier", "should"), ("should", "may", "stretch"))
+
+    def test_task_ids_are_unique(self):
+        ids = [t["id"] for t in self.tasks]
+        self.assertEqual(sorted(ids), sorted(set(ids)))
+
+    def test_every_referenced_check_exists(self):
+        for t in self.tasks:
+            for c in t["checks"]:
+                with self.subTest(task=t["id"], check=c):
+                    self.assertIn(c, run.CHECKS)
+
+    def test_secret_handling_is_covered(self):
+        """AI-509 Ticket 6: the skill's "never store secrets in manifest" rule
+        needs a functional task that BINDS the gate, not just a trigger test."""
+        by_id = {t["id"]: t for t in self.tasks}
+        functional = by_id["env-secrets-api-key"]
+        self.assertIn("no_hardcoded_secret", functional["checks"])
+        self.assertEqual(functional.get("tier"), "should")
+        self.assertFalse(functional.get("trigger_test"), "must bind the gate")
+        trigger = by_id["trigger-secrets-no-commit"]
+        self.assertIn("no_hardcoded_secret", trigger["checks"])
+        self.assertTrue(trigger.get("trigger_test"))
+        # A trigger prompt that says "flox" tests nothing about triggering.
+        self.assertNotIn("flox", trigger["prompt"].lower())
+
+
 class TestBuildParser(unittest.TestCase):
     def test_help_renders(self):
         # argparse percent-expands help lazily, so a bare `%` only raises when

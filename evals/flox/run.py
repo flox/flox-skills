@@ -61,6 +61,62 @@ FAKE_INSTALL = re.compile(
 )
 ABS_PATH = re.compile(r'=\s*"(/home/|/Users/|/usr/local/|/opt/|/root/)', re.I)
 
+# --- hardcoded-secret detection ---------------------------------------------
+# Ported from flox/flox-agentic#18 (@imkarrer), rehomed onto this suite's fence
+# extraction and tomllib parsing (AI-509 Ticket 6).
+#
+# The skill's rule is emphatic — SKILL.md "Configuration & Secrets": *never*
+# store secrets in the manifest; use environment variables, `~/.config/<env>/`,
+# or an existing credentials file. Nothing in the suite exercised it. A
+# secret-NAMED key assigned a real literal inside a fenced manifest is a leak;
+# env references (`$VAR`, `${VAR}`, `$(...)`), placeholders, and values that
+# merely POINT at a credentials file are not.
+#
+# Two views of the same fenced blocks are scanned, because neither alone is
+# enough and the union is what the check owes the gate:
+#
+#   text   — `SECRET_ASSIGN` over the raw block. Reaches leaks the parsed view
+#            structurally cannot: a block that is not valid TOML (dropped
+#            wholesale by `_parsed_manifests`), and an assignment written inside
+#            a `[hook] on-activate = '''…'''` shell body, which tomllib sees as
+#            one opaque string under a non-secret key.
+#   parsed — `_secret_leaks_in` over the tomllib dict. Reaches shapes no
+#            single-line regex does: multi-line arrays, nested tables, dotted
+#            keys.
+#
+# Either view finding a leak fails the check. Known limits, inherent to
+# name-based detection and pinned by a test: a secret under a NON-secret-named
+# key is not caught, an unquoted/bare value is not inspected, and a real value
+# that happens to *begin* with a placeholder token ("example…") reads as one.
+_SECRET_NAME = (
+    r"(?:SECRET|TOKEN|PASSWORD|PASSWD|API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY)"
+)
+# The same name test applied to a parsed key (which carries no quoting).
+SECRET_KEY = re.compile(_SECRET_NAME, re.I)
+# Matches a secret-named key (optionally quoted, any prefix/suffix; at a line
+# start or inside an inline table / after a comma) and captures its value token:
+# an array, a triple-quoted string, or a single-/double-quoted string. The
+# quote-specific alternatives let a value contain the *other* quote char.
+SECRET_ASSIGN = re.compile(
+    r"(?im)(?:^|[{,])[ \t]*(?:export[ \t]+)?"
+    r"[\"']?[\w.-]*" + _SECRET_NAME + r"[\w.-]*[\"']?[ \t]*=[ \t]*"
+    r"(\[[^\]\n]*\]|\"\"\".*?\"\"\"|'''.*?'''|\"[^\"\n]*\"|'[^'\n]*')"
+)
+# A value is allowed — not a hardcoded secret — if it begins with any of these:
+# an env reference or command substitution, a placeholder of any of the usual
+# spellings, or a PATH. The path forms (`~/…`, `./…`, `../…`, `/…`) matter
+# because the skill's own recommended answer writes one: pointing at
+# `~/.config/<env>/secrets` is the fix, not the leak, and a check that reddened
+# it would fail the correct answer. (An absolute path in a manifest is still
+# caught — by `no_abs_paths`, which is the check that owns that question.)
+PLACEHOLDER_VALUE = re.compile(
+    r"(?i)^\s*(?:\$|<|\{\{|\*{3,}|x{3,}|~|\.{1,2}/|/|changeme|change_me|"
+    r"placeholder|your[_-]|example|dummy|redact|todo|fixme|replace|sample|"
+    r"fake|none|null)"
+)
+# Extracts the inner text of each quoted string in a value token (for arrays).
+_QUOTED_INNER = re.compile(r"\"([^\"\n]*)\"|'([^'\n]*)'")
+
 
 def _fenced_manifests(text):
     """Every fenced ```toml block in `text`, in document order.
@@ -101,6 +157,57 @@ def _parsed_manifests(text):
         except (tomllib.TOMLDecodeError, ValueError):
             continue
     return out
+
+
+def _is_real_secret_value(value):
+    """True if a string value is a real literal rather than a placeholder/env ref."""
+    return bool(value.strip()) and not PLACEHOLDER_VALUE.match(value)
+
+
+def _real_literal(token):
+    """True if a captured value token holds at least one real (non-empty,
+    non-placeholder) literal. `token` is an array or a quoted string."""
+    if token.startswith("["):
+        values = [dq or sq for dq, sq in _QUOTED_INNER.findall(token)]
+    else:
+        values = [token.strip("\"'")]
+    return any(_is_real_secret_value(v) for v in values)
+
+
+def has_hardcoded_secret(text):
+    """True if manifest *text* assigns a real literal to a secret-named key.
+
+    Single linear pass: `SECRET_ASSIGN.finditer` walks the text once and
+    captures each secret-named key's value token; `_real_literal` then
+    classifies that token in time proportional to its own (small) length. So
+    this is O(n) in the manifest size — no per-match slicing or rescans.
+    """
+    return any(_real_literal(m.group(1)) for m in SECRET_ASSIGN.finditer(text))
+
+
+def _secret_leaks_in(node, key=""):
+    """True if a *parsed* manifest assigns a real literal to a secret-named key.
+
+    Recurses into tables and arrays. `key` is the name the current value was
+    assigned to, so an inline table (`db = { password = "…" }`) and a nested
+    one (`[services.db] password = "…"`) are the same fact. Only strings are
+    inspected: an unquoted `API_KEY = 12345678` parses as an int, and treating
+    a number as a leaked credential would redden port and replica settings.
+    """
+    if isinstance(node, dict):
+        return any(_secret_leaks_in(v, k) for k, v in node.items())
+    if isinstance(node, list):
+        return any(_secret_leaks_in(v, key) for v in node)
+    if not isinstance(node, str) or not SECRET_KEY.search(key):
+        return False
+    return _is_real_secret_value(node)
+
+
+def _hardcodes_secret(answer):
+    """The `no_hardcoded_secret` check's negation: text view OR parsed view."""
+    return has_hardcoded_secret(toml_blocks(answer)) or any(
+        _secret_leaks_in(m) for m in _parsed_manifests(answer)
+    )
 
 
 # `services.auto-start` (AI-503). Two things are checkable and both are things a
@@ -216,6 +323,10 @@ def _sandbox_schema_version(answer):
 CHECKS = {
     "no_fake_install_url": lambda a: not FAKE_INSTALL.search(a),
     "no_abs_paths": lambda a: not ABS_PATH.search(toml_blocks(a)),
+    # No secret hardcoded into the manifest — secrets belong in env vars,
+    # `~/.config/<env_name>/`, or an existing credentials file, never in the
+    # committed manifest (SKILL.md "Configuration & Secrets").
+    "no_hardcoded_secret": lambda a: not _hardcodes_secret(a),
     "has_install_section": lambda a: "[install]" in a,
     "has_services_section": lambda a: "[services" in a,
     "has_build_section": lambda a: "[build" in a,
