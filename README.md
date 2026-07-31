@@ -56,10 +56,10 @@ task calls for it — so the agent stays fast and focused.
   environment, replacing a page of setup instructions with a single `flox activate`.
 - **Verified, not guessed.** The skills activate the environment and exercise its
   services before calling a setup done.
-- **Measured, not asserted.** The skills are evaluated continuously against a
-  no-skill baseline. In the latest batch, skill-guided runs produced **zero** hard
-  portability defects, versus a majority of baseline runs shipping one. See
-  [`evals/`](evals/README.md) for the methodology and full numbers.
+- **Measured, not asserted.** The skills are evaluated against a no-skill
+  baseline, with deterministic unit tests and manifest lints gating every PR and
+  the agentic outcome evals run on demand. See [`evals/`](evals/README.md) for
+  the methodology, what binds CI, and how to run a batch yourself.
 
 ## Install
 

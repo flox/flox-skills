@@ -35,12 +35,10 @@ name: skill-evals
 # pinned real repositories) are SEPARATE from the per-PR skills gate. The /floxify evals are outcome-based:
 # they run the skill against fixture/real repos and need a live flox + catalog
 # + network, so they are too slow and too environment-dependent to gate every
-# PR. They run weekly, on manual dispatch (run_floxify=true), and — via the
-# `changes` job below — on pull requests that actually touch the floxify eval
-# sources or the skill (evals/floxify/** or flox-plugin/skills/**). They never
-# run on unrelated PRs, and they never gate: the synthetic tier reports its own
-# hard-check gate only on schedule/dispatch, and the real-world tier is
-# report-only in all modes.
+# PR. They are DISPATCH-ONLY (run_floxify=true): there is no scheduled run and
+# no per-PR path, so they never run on a pull request at all. The synthetic
+# tier reports its own hard-check gate within a dispatched run; the real-world
+# tier is report-only in all modes.
 #
 # golden-lint is DIFFERENT from those two: it spawns no `claude` (zero
 # Anthropic API spend, only `flox show` calls), so it does NOT need the
@@ -126,13 +124,13 @@ jobs:
       - name: Decide whether to spend on the paid eval suite
         id: changes
         run: |
-          # PAID EVALS ARE OFF IN CI. The skills suite is 27 tasks x (1 agent +
-          # 1 judge) = 54 Opus calls per run, and the path filter it used to
+          # PAID EVALS ARE OFF IN CI. The skills suite is 31 tasks x (1 agent +
+          # 1 judge) = 62 Opus calls per run, and the path filter it used to
           # rely on matches 'evals/' and 'flox-plugin/' — i.e. essentially every
           # PR in this workstream. It is off for two independent reasons:
           #
           #   1. Cost. Measured floor is ~$0.088 for a *4-token* Opus reply
-          #      (~23k tokens of context are created/read regardless), so 54
+          #      (~23k tokens of context are created/read regardless), so 62
           #      calls cost several dollars minimum, per PR, per push.
           #   2. Trust. The suite is under active repair and is currently wrong
           #      in both directions: the real-world judge fabricated a catalog
@@ -298,8 +296,7 @@ jobs:
     # `flox list -c` calls, no closure realization), so it does NOT need
     # their dispatch-only cost gate — it runs per-PR via the `changes`
     # filter, exactly as this workflow's header comment describes, PLUS
-    # on manual dispatch and (if the schedule trigger is restored)
-    # weekly. This is where KNOWN_VIOLATIONS (test_real_world_golden_lint.py) gets
+    # on manual dispatch. This is where KNOWN_VIOLATIONS (test_real_world_golden_lint.py) gets
     # real teeth against catalog drift; the free `evals` step above only
     # proves the allowlist machinery imports (no flox there by design).
     # Also where the whole-manifest lock-resolution leg (AI-479) gets its
@@ -404,13 +401,12 @@ jobs:
   floxify-evals:
     # Synthetic-fixture outcome-based /floxify eval — runs the skill against synthetic
     # fixture repos and verifies the manifest it produces (plus `flox
-    # activate`). Needs a live flox + catalog, so it runs weekly, on manual
-    # dispatch, and on PRs that touch the floxify eval sources or the skill
-    # (via the `changes` filter). --gate binds on should-tier hard-checks;
-    # judge score and activation are advisory.
+    # activate`). Needs a live flox + catalog, so it is dispatch-only (see the
+    # `if:` below). --gate binds on should-tier hard-checks; judge score and
+    # activation are advisory.
     needs: changes
-    # Dispatch-only: this spends real Opus money (6 fixtures x agent+judge =
-    # 12 calls) and needs a live flox + catalog. The per-PR and weekly paths
+    # Dispatch-only: this spends real Opus money (7 fixtures x agent+judge =
+    # 14 calls) and needs a live flox + catalog. The per-PR and weekly paths
     # are retired until the suite is trustworthy again.
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_floxify == 'true' }}
     runs-on: ubuntu-latest
@@ -452,17 +448,17 @@ jobs:
   floxify-real-world:
     # Real-world outcome eval — runs /floxify against a real OSS repo cloned at a
     # pinned SHA and scores structural conformance (runtime pins + service
-    # wiring). Same trigger as the synthetic tier (schedule / manual / floxify-touching
-    # PR). REPORT-ONLY: real_world.py has no --gate, so this job never fails the
+    # wiring). Same trigger as the synthetic tier (manual dispatch with
+    # run_floxify=true). REPORT-ONLY: real_world.py has no --gate, so this job never fails the
     # build on eval outcome. Activation stays OFF for CI cost — the manifest's
     # hook commands (e.g. Ruby's bundler pin) are not validated here; a live
     # Ruby-activation run is a known follow-up (AI-431).
     needs: changes
-    # Dispatch-only: this spends real Opus money (6 fixtures x agent+judge =
-    # 12 calls) and needs a live flox + catalog. The per-PR and weekly paths
-    # are retired until the suite is trustworthy again.
-    # Dispatch-only for the same reason: clones real repos, runs a full
-    # agentic pass, and realizes whole closures.
+    # Dispatch-only: this spends real Opus money (one repo per dispatch here,
+    # agent+judge = 2 calls; the whole registry is 8 repos = 16) and needs a
+    # live flox + catalog. It also clones real repos and realizes whole
+    # closures. The per-PR and weekly paths are retired until the suite is
+    # trustworthy again.
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_floxify == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
