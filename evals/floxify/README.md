@@ -1,9 +1,18 @@
 # Flox /floxify skill evals
 
-Outcome-based eval suite for the `/floxify` skill. Unlike `../run.py`
+Outcome-based eval suite for the `/floxify` skill. Unlike `../flox/run.py`
 (which scores text answers), this harness copies a synthetic fixture repo
 to a temp dir, runs the `/floxify` skill headlessly, and scores the
 `.flox/env/manifest.toml` it produces.
+
+Run every command below from this directory (`evals/floxify/`) — it is this
+suite's root, and the unit tests live in the `tests/` package beside the
+runners (AI-509 Ticket 2):
+
+```bash
+python3 -m unittest discover -s tests -t . -v   # the whole unit-test suite
+python3 -m unittest tests.test_verify -v        # one module
+```
 
 **Run `flox activate` once before the commands below** — see
 [the runtime note in `../README.md`](../README.md#the-runtime-activate-once).
@@ -35,7 +44,7 @@ flox run -p python313 -- python3 "<skill-dir>/scripts/detect.py" "$TARGET_DIR"
 Per the repo-wide new-feature eval policy (`../README.md`), this feature ships
 with two eval layers:
 
-- **`test_detect.py`** — fast, deterministic unit tests. Asserts the analyzer
+- **`tests/test_detect.py`** — fast, deterministic unit tests. Asserts the analyzer
   extracts the right facts from every `fixtures/` repo (Node from `.nvmrc`,
   Ruby + bundler from `Gemfile`/`Gemfile.lock`, `requires-python` from
   `pyproject.toml`, `pg` → postgres, deno from `deno.json` / an
@@ -43,7 +52,7 @@ with two eval layers:
   no `claude` calls — safe to run anywhere and cheap enough to gate.
 
   ```bash
-  python3 test_detect.py        # standalone (pytest also works, if you have one -- the environment does not ship it)
+  python3 tests/test_detect.py  # standalone (pytest also works, if you have one -- the environment does not ship it)
   ```
 
 - **`detect_usage_eval.py`** — behavioral conformance. Runs a real,
@@ -57,7 +66,7 @@ with two eval layers:
   python3 detect_usage_eval.py --fixture ruby
   ```
 
-`test_detect.py` proves the analyzer is *correct*; `detect_usage_eval.py`
+`tests/test_detect.py` proves the analyzer is *correct*; `detect_usage_eval.py`
 proves the skill *reaches for it*. Together they close the loop the policy asks
 for: guidance added, guidance verified.
 
@@ -93,12 +102,12 @@ Three consumers, one checker (no duplicated logic):
   1's `_run_verify`/`_catalog_note` rather than duplicating them — see
   "What's different from Tier 1" under the Tier 2 section below.
 - **The goldens** (`testdata/gold/*.toml`) — linted by the same checker as a
-  cheap unit-test-tier check (no `claude`, no agent); see `test_golden_lint.py`
+  cheap unit-test-tier check (no `claude`, no agent); see `tests/test_golden_lint.py`
   below.
 
 Eval layers, same two-tier shape as `detect.py`'s:
 
-- **`test_verify.py`** — fast, deterministic unit tests. Every invariant
+- **`tests/test_verify.py`** — fast, deterministic unit tests. Every invariant
   carries a positive test (fires on the real defect) and a negative test
   against a realistic manifest shape (proves it does NOT false-fire) — "a
   wrong invariant is worse than no invariant." Catalog checks are mocked at
@@ -106,10 +115,10 @@ Eval layers, same two-tier shape as `detect.py`'s:
   with no network.
 
   ```bash
-  python3 -m unittest test_verify -v
+  python3 -m unittest tests.test_verify -v
   ```
 
-- **`test_golden_lint.py`** — runs the checker over every
+- **`tests/test_golden_lint.py`** — runs the checker over every
   `testdata/gold/*.toml` reference. Two hand reviews (AI-455) found real
   defects in those goldens that had never been linted before; this check
   found 16 more (per-system catalog gaps across 6 of 8 goldens) the moment
@@ -131,8 +140,8 @@ Eval layers, same two-tier shape as `detect.py`'s:
   still the `golden-lint` job, which leaves the switch at its default.
 
   ```bash
-  python3 -m unittest test_golden_lint -v
-  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_golden_lint -v  # no network
+  python3 -m unittest tests.test_golden_lint -v
+  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_golden_lint -v  # no network
   ```
 
   **Whole-manifest lock-resolution leg (AI-479).** Every check above is
@@ -140,7 +149,7 @@ Eval layers, same two-tier shape as `detect.py`'s:
   resolve individually but cannot co-resolve TOGETHER on any single
   catalog page (`constraints for group 'X' are too tight`). AI-457 and
   AI-478 only caught that class by hand, running `flox activate`
-  themselves against a scratch directory. `test_golden_lint.py` now adds
+  themselves against a scratch directory. `tests/test_golden_lint.py` now adds
   one more test per golden, `test_<fixture>_locks_cleanly`, that attempts
   a real `flox list -c` in a throwaway environment with the candidate
   manifest written directly into it. `flox list -c` is resolution-only:
@@ -159,7 +168,7 @@ Eval layers, same two-tier shape as `detect.py`'s:
   check. A catalog-API communication error is a different, transient
   failure class: it gets one retry and, if it persists, is reported with
   an honest "likely transient" message rather than the resolution-defect
-  verdict — see `_classify_lock_failure` in `test_golden_lint.py`.
+  verdict — see `_classify_lock_failure` in `tests/test_golden_lint.py`.
   `TestLockResolutionLeg` covers the skip/fail/pass/retry/classification
   plumbing with mocked, no-network unit tests; the live behavior (does a
   real golden actually lock) is exercised by the per-golden tests above,
@@ -362,7 +371,7 @@ are `should`). Add them when non-blocking exploratory fixtures are needed.
 
 ## CI: scheduled/manual, NOT per-PR
 
-Unlike the text-answer `skills` eval (`evals/run.py`), which gates on
+Unlike the text-answer `skills` eval (`evals/flox/run.py`), which gates on
 **every** pull request, the `/floxify` eval does **not** run per-PR. It is
 an outcome eval: it runs the skill against fixture repos and then attempts
 `flox activate`, which needs a live `flox` binary, a reachable Flox
@@ -384,7 +393,7 @@ dispatch) rather than never.
 Per-PR floxify regression-catching is therefore **manual/scheduled by
 design** — the live-flox dependency makes a fast per-PR gate impractical.
 
-**Exception: `golden-lint`.** The golden-manifest lint (`test_golden_lint.py`,
+**Exception: `golden-lint`.** The golden-manifest lint (`tests/test_golden_lint.py`,
 see "Phase 3c checker" above) is a SEPARATE job from `floxify-evals` and
 does NOT follow the dispatch-only rule above — it needs `flox` (for
 `flox show`) but never spawns `claude`, so it carries none of the cost or
@@ -474,10 +483,10 @@ budget.
 
 Every agent and judge call already returns cost/usage/turn data on the
 envelope (`total_cost_usd`, `usage`, `num_turns`, `duration_ms`) —
-AI-459 proved this for `../run.py`'s single-turn harness, and this
+AI-459 proved this for `../flox/run.py`'s single-turn harness, and this
 harness threw it away at both spawn points (`_run_claude_agent`,
 `_run_judge`). AI-442 ports that parsing (`_parse_meta`, mirroring
-`../run.py:81`) into both functions, which changes their return shape
+`../flox/run.py:81`) into both functions, which changes their return shape
 from `(result, err)` to `(result, err, meta)`. `tier2.py` imports both
 and picks up the port for free at the call-site level — its own two
 call sites now unpack a 3-tuple, but it does not record cost in its
@@ -538,7 +547,7 @@ reporting median + p25/p75 + `n` for turns, tool-calls (total /
 **never** a single pooled number across fixtures (Q5: a trivial
 fixture's short loop and a service fixture's long one would hide
 exactly the contrast that makes a result credible). The
-`test_decision_verification_*` test in `test_run_floxify.py` is the
+`test_decision_verification_*` test in `tests/test_run_floxify.py` is the
 one to trust most: a giving-up arm (every rep `failed-verify`) must
 produce `verify_rate = 0` and an EMPTY `cost_to_verify` (`n=0`), never
 a deceptively low mean — confirmed by deliberately breaking the
@@ -742,7 +751,7 @@ well-structured produced manifest may differ in layout, comments, or hook style
 and still score 5/5.
 
 These are distinct from `testdata/mastodon-manifest.toml`, which is a
-*representative capture of actual skill output* used by `test_tier2.py` as a
+*representative capture of actual skill output* used by `tests/test_tier2.py` as a
 regex-drift guard (bugs and all). The golden references are the *ideal*.
 
 Each `<id>.toml` has a sibling `<id>-notes.md` recording provenance (every pin
@@ -764,7 +773,7 @@ as functionally tested — no real repo was checked out, so no gem/wheel
 native build ever compiled and hook commands that touch project files
 (`bundle install`, `composer install`, ...) fail on missing inputs by
 design. Each golden passes its own registry entry's structural checks and
-the deterministic golden lint (`test_golden_lint.py`, AI-456/AI-457).
+the deterministic golden lint (`tests/test_golden_lint.py`, AI-456/AI-457).
 
 ### Registry (`tier2.jsonl`)
 
@@ -899,7 +908,7 @@ a run to compare against.
 
 ### Unit tests
 
-`test_tier2.py` covers the deterministic, unit-testable pieces
+`tests/test_tier2.py` covers the deterministic, unit-testable pieces
 (structural-conformance regexes, registry loading, the clone-at-SHA
 fallback chain) with `unittest` + mocked `subprocess`/clone-strategy
 calls. The agentic skill run and LLM judge call are integration-only,
@@ -907,7 +916,7 @@ same as Tier 1 — exercised by an actual `--only <id>` run, not unit
 tests.
 
 ```bash
-python3 -m unittest test_tier2 -v
+python3 -m unittest tests.test_tier2 -v
 ```
 
 ### CI
@@ -979,27 +988,27 @@ was skipped: all six goldens authored and verified clean.
 Two fast, no-`claude` test modules, mirroring the two-tier shape the rest
 of this suite uses:
 
-- **`test_tier3.py`** — harness plumbing (pure stdlib, no network): the
+- **`tests/test_tier3.py`** — harness plumbing (pure stdlib, no network): the
   registry is well-formed, every entry is `stretch` (so the tier can never
   gate), ids don't collide with Tier 1, every declared check is a real
   `run_floxify.CHECKS` key, and each id has a non-`.flox/` fixture + a
   parseable gold with `[install]`.
 
   ```bash
-  python3 -m unittest test_tier3 -v
+  python3 -m unittest tests.test_tier3 -v
   ```
 
-- **`test_tier3_golden_lint.py`** — golden lint over the six Tier-3
+- **`tests/test_tier3_golden_lint.py`** — golden lint over the six Tier-3
   goldens: `verify.py`'s manifest-only checks (`[vars]` literalness,
   hook-mutation, catalog resolution) plus the whole-manifest lock leg,
-  reusing `test_golden_lint.py`'s `_attempt_lock` and sharing its
+  reusing `tests/test_golden_lint.py`'s `_attempt_lock` and sharing its
   `FLOXIFY_GOLDEN_LINT_LIVE_CATALOG` switch. Unlike the Tier-2 goldens
   there is **no `KNOWN_VIOLATIONS` allowlist** — a Tier-3 gold must be
   clean.
 
   ```bash
-  python3 -m unittest test_tier3_golden_lint -v
-  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_tier3_golden_lint -v  # no network
+  python3 -m unittest tests.test_tier3_golden_lint -v
+  FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_tier3_golden_lint -v  # no network
   ```
 
 The agentic outcome run (`run_floxify.py --tasks tier3.jsonl`) is

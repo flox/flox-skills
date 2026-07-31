@@ -74,7 +74,7 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_SKILL_DIR = HERE.parent / "flox-plugin" / "skills" / "flox"
+DEFAULT_SKILL_DIR = HERE.parent.parent / "flox-plugin" / "skills" / "flox"
 
 # ```toml / ```toml-fragment ... ```  (indented fences included: the skill nests
 # blocks under list items). The closing fence must match the opening indent+run.
@@ -121,7 +121,7 @@ SKIPPED = "skipped"
 # Escape hatch for snippets that are NOT fragments -- they are meant to be real
 # manifests and they genuinely do not parse -- when the fix is too large to land
 # alongside the change that caught them. Same discipline as
-# evals/floxify/test_golden_lint.py's KNOWN_VIOLATIONS.
+# evals/floxify/tests/test_golden_lint.py's KNOWN_VIOLATIONS.
 #
 # It is EMPTY, and that is the intended steady state: the five snippets this
 # guard found on its first run (three `[hook]`-as-bare-shell CUDA examples, a
@@ -417,7 +417,7 @@ def _print_report(results, summary, verbose):
     for entry in summary["stale_allowlist_entries"]:
         print("STALE allowlist entry no longer matches any failing block: %s" % entry)
     if summary["stale_allowlist_entries"]:
-        print("Remove it from KNOWN_PARSE_FAILURES in evals/skill_toml_lint.py.")
+        print("Remove it from KNOWN_PARSE_FAILURES in evals/flox/skill_toml_lint.py.")
     if summary["failed"]:
         print(
             "\nA snippet in the flox skill does not parse. Fix the snippet -- or, if it is\n"

@@ -103,8 +103,8 @@ jobs:
               - 'flox-plugin/skills/**'
             skill_toml:
               - 'flox-plugin/skills/flox/**'
-              - 'evals/skill_toml_lint.py'
-              - 'evals/test_skill_toml_lint.py'
+              - 'evals/flox/skill_toml_lint.py'
+              - 'evals/flox/tests/test_skill_toml_lint.py'
               - '.github/workflows/evals.yml'
 
   evals:
@@ -181,10 +181,10 @@ jobs:
           # written not to — see FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 below,
           # which is now load-bearing rather than belt-and-braces.
           echo "::group::detect.py (analyzer extraction)"
-          python3 test_detect.py
+          python3 tests/test_detect.py
           echo "::endgroup::"
           echo "::group::harness logic (tier2 + detect_usage_eval)"
-          python3 -m unittest test_tier2 test_detect_usage_eval -v
+          python3 -m unittest tests.test_tier2 tests.test_detect_usage_eval -v
           echo "::endgroup::"
           # verify.py (AI-461): the checker's own invariants, all mocked at
           # the `flox show` boundary (_run_show_command) — no catalog, no
@@ -198,14 +198,14 @@ jobs:
           # and runs; its real, catalog-backed run (with real teeth against
           # catalog drift) is the golden-lint job below.
           echo "::group::verify.py (manifest checker)"
-          FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest test_verify test_verify_usage_eval test_golden_lint -v
+          FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_verify tests.test_verify_usage_eval tests.test_golden_lint -v
           echo "::endgroup::"
           echo "::group::run_floxify.py (harness deterministic-leg wiring)"
-          python3 -m unittest test_run_floxify -v
+          python3 -m unittest tests.test_run_floxify -v
           echo "::endgroup::"
 
       - name: Free deterministic unit tests -- eval harness (run.py, screen.py)
-        working-directory: evals
+        working-directory: evals/flox
         env:
           FLOX_DISABLE_METRICS: "true"
         shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
@@ -215,17 +215,20 @@ jobs:
           # network, no API spend. These suites test the harness itself
           # (run.py, screen.py) rather than the /floxify skill, and import
           # their modules by bare name (`import run`, `import screen`), so
-          # they need evals/ as their sys.path root -- a separate step
-          # rather than folding them into the evals/floxify step above,
-          # which needs evals/floxify/ instead. test_skill_module_loader.py
-          # is a regression test for those floxify suites' own module
-          # loading and belongs with them, so it runs from evals/floxify/
-          # via `cd` rather than a path hack.
+          # they need evals/flox/ -- their own suite root -- as the sys.path
+          # root (AI-509 Ticket 2). `python3 -m` puts the working directory
+          # there, and the tests are addressed as `tests.<module>` because
+          # each suite now owns a tests/ package. A separate step rather than
+          # folding them into the evals/floxify step above, which needs
+          # evals/floxify/ instead. test_skill_module_loader.py is a
+          # regression test for those floxify suites' own module loading and
+          # belongs with them, so it runs from evals/floxify/ via `cd` rather
+          # than a path hack.
           echo "::group::run.py deterministic pieces (test_run)"
-          python3 -m unittest test_run -v
+          python3 -m unittest tests.test_run -v
           echo "::endgroup::"
           echo "::group::screen.py deterministic pieces (test_screen)"
-          python3 -m unittest test_screen -v
+          python3 -m unittest tests.test_screen -v
           echo "::endgroup::"
           # skill_toml_lint.py's own logic: fence extraction, skip markers, the
           # structural/catalog tier split, allowlist staleness. Mocked at the
@@ -234,11 +237,11 @@ jobs:
           # trustworthy enough to gate on: an extractor that silently dropped
           # blocks would report "0 failed" forever.
           echo "::group::skill_toml_lint.py deterministic pieces (test_skill_toml_lint)"
-          python3 -m unittest test_skill_toml_lint -v
+          python3 -m unittest tests.test_skill_toml_lint -v
           echo "::endgroup::"
           echo "::group::_skill_module_loader.py sys.modules collision regression (test_skill_module_loader)"
-          cd floxify
-          python3 -m unittest test_skill_module_loader -v
+          cd ../floxify
+          python3 -m unittest tests.test_skill_module_loader -v
           echo "::endgroup::"
 
       # No setup-node / `npm install -g @anthropic-ai/claude-code` here any
@@ -267,14 +270,14 @@ jobs:
           if [ "$EVAL_GATE" = "true" ]; then
             args+=(--gate)
           fi
-          python3 evals/run.py "${args[@]}"
+          python3 evals/flox/run.py "${args[@]}"
 
       - name: Upload eval results
         if: ${{ always() && steps.changes.outputs.run == 'true' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: eval-results-${{ github.event.inputs.mode || 'skills' }}
-          path: evals/results/
+          path: evals/flox/results/
 
   golden-lint:
     # Golden-manifest lint (verify.py, no claude — AI-456 item 2). Unlike
@@ -329,7 +332,7 @@ jobs:
           # `shell:` key. The nested `flox init` / `flox list -c` calls the
           # lint makes run against their own throwaway environments in temp
           # dirs, unaffected by that activation.
-          python3 -m unittest test_golden_lint -v
+          python3 -m unittest tests.test_golden_lint -v
 
   skill-toml-lint:
     # Parse-check every fenced ```toml block the flox skill SHIPS (AI-494).
@@ -361,7 +364,7 @@ jobs:
         uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
 
       - name: Parse-check the flox skill's TOML snippets
-        working-directory: evals
+        working-directory: evals/flox
         env:
           FLOX_DISABLE_METRICS: "true"
         shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
@@ -379,7 +382,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: skill-toml-lint-results
-          path: evals/results/skill-toml-lint.json
+          path: evals/flox/results/skill-toml-lint.json
 
   floxify-evals:
     # Tier 1 outcome-based /floxify eval — runs the skill against synthetic

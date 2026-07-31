@@ -5,7 +5,7 @@ The agentic skill run and the LLM judge are integration-only (exercised by a
 real `--only <id>` run). Everything here is pure logic over mocked
 subprocesses, so it is fast and safe to gate on.
 
-    python3 -m unittest test_run_floxify -v
+    python3 -m unittest tests.test_run_floxify -v
 """
 import json
 import subprocess

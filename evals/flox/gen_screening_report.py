@@ -10,8 +10,8 @@ models). Pure stdlib; safe to re-run as models finish (skips missing files).
 Usage:
   python3 gen_screening_report.py \
       --results results/screen-haiku.json results/screen-sonnet.json results/screen-opus.json \
-      --candidates candidates.jsonl \
-      --out SCREENING-REPORT.md
+      --candidates tasks/candidates.jsonl \
+      --out reports/SCREENING-REPORT.md
 """
 import argparse
 import json
@@ -56,8 +56,8 @@ def hp(arm):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", nargs="+", required=True)
-    ap.add_argument("--candidates", default=str(HERE / "candidates.jsonl"))
-    ap.add_argument("--out", default=str(HERE / "SCREENING-REPORT.md"))
+    ap.add_argument("--candidates", default=str(HERE / "tasks" / "candidates.jsonl"))
+    ap.add_argument("--out", default=str(HERE / "reports" / "SCREENING-REPORT.md"))
     args = ap.parse_args()
 
     models = load(args.results)  # ordered by insertion of existing files
@@ -97,14 +97,14 @@ def main():
     L.append("Research pass for AI-439 (child of AI-435). **Nothing here is promoted "
              "into `tasks.jsonl`** — promotion and the eval-model-policy choice are "
              "Bill decisions (AI-439 is blocked on the model policy). This artifact is "
-             "`evals/candidates.jsonl` + this report only.\n")
+             "`evals/flox/tasks/candidates.jsonl` + this report only.\n")
 
     # --- Method ---
     n_trig = sum(1 for c in cands if c["area"] == "triggering")
     n_fresh = sum(1 for c in cands if c["area"] == "freshness")
     L.append("## Method\n")
     L.append(f"- **{len(cands)} candidates** — {n_trig} triggering, {n_fresh} freshness "
-             "— screened with `evals/screen.py` at **reps=5** (per AI-438 multi-rep "
+             "— screened with `evals/flox/screen.py` at **reps=5** (per AI-438 multi-rep "
              "policy) on each model below.")
     L.append("- **Arms.** *baseline* = bare model, no plugin; *skills* = the flox plugin "
              "loaded via `--plugin-dir`. A candidate is a **discriminator** when the "
@@ -193,13 +193,13 @@ def main():
 
     L.append("## Provenance / reproduce\n")
     L.append("```bash\n"
-             "cd evals\n"
+             "cd evals/flox\n"
              "for m in claude-haiku-4-5-20251001 claude-sonnet-5 claude-opus-4-8; do\n"
-             "  python3 screen.py --candidates candidates.jsonl --reps 5 --concurrency 4 \\\n"
+             "  python3 screen.py --candidates tasks/candidates.jsonl --reps 5 --concurrency 4 \\\n"
              "    --model \"$m\" --out results/screen-${m%%-*}.json   # isolated by default\n"
              "done\n"
              "python3 gen_screening_report.py --results results/screen-*.json \\\n"
-             "    --candidates candidates.jsonl --out SCREENING-REPORT.md\n"
+             "    --candidates tasks/candidates.jsonl --out reports/SCREENING-REPORT.md\n"
              "```\n")
 
     Path(args.out).write_text("\n".join(L) + "\n")

@@ -9,7 +9,7 @@ interpreter, as the CI free-tests step does), then confirm
 `unittest.mock.patch` resolves each name to ITS OWN instance rather than
 whichever was registered last.
 
-    python3 -m unittest test_skill_module_loader -v
+    python3 -m unittest tests.test_skill_module_loader -v
 """
 import unittest
 from pathlib import Path
@@ -18,7 +18,9 @@ from unittest.mock import patch
 from _skill_module_loader import load_module
 
 HERE = Path(__file__).resolve().parent
-VERIFY_PATH = HERE.parent.parent / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
+SUITE = HERE.parent          # evals/floxify
+REPO_ROOT = SUITE.parent.parent
+VERIFY_PATH = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
 
 
 class TestNoModuleCollision(unittest.TestCase):
