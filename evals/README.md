@@ -19,13 +19,31 @@ so a directory name says what kind of thing is inside it:
 | `fixtures/` | Input repositories the skill is pointed at | yes |
 | `expected/` | Semantic reference manifests a produced manifest is graded against — expected *properties*, not byte-exact output | yes |
 | `samples/` | Captured inputs (agent stream transcripts, a real run's manifest) that tests parse | yes |
-| `baselines/` | Committed comparison measurements. Runners READ these and never write them | yes |
+| `baselines/` | Committed comparison measurements. Nothing here writes them by default; what reads them varies (see below) | yes |
 | `reports/` | Selected human-readable analyses worth keeping | yes |
-| `results/` | Generated run output. Every `--out` lands here | **no — gitignored** |
+| `results/` | Generated run output. A runner's `--out` lands here | **no — gitignored** |
 
 The `baselines/` ↔ `results/` split is load-bearing: before it, a runner's
 `--out` file and its comparison target were the same path, so a second local
 run diffed against the first rather than against what is on `main`.
+
+Not every baseline has an automatic reader, and the table above should not be
+read as promising one. `run.py` diffs against `flox/baselines/baseline.json`
+and `skills.json`, and `run_floxify.py --baseline` against
+`floxify/baselines/synthetic.json` — those three are wired up. The three
+`flox/baselines/screen-*.json` are the committed measurements the screening
+report is generated from, which is a documented command
+(`gen_screening_report.py --results baselines/screen-*.json`) rather than
+something a runner does on its own. `floxify/baselines/real-world.json` is a
+committed snapshot with no reader at all: `real_world.py` has no `--baseline`
+flag and no regression diff, so today it is evidence a human compares by hand.
+
+Neither directory is enforced by a path resolver. `--out` is taken at its word,
+so passing `--out baselines/...` from inside a suite directory will overwrite a
+committed baseline; refreshing one is a deliberate copy (`cp
+results/refresh.json baselines/synthetic.json`), not a flag. Likewise
+`gen_screening_report.py` defaults its `--out` to `reports/`, because its
+product is a report rather than a run's measurements.
 
 The rest of this file documents the `flox` suite; run its commands from
 `evals/flox/`. `floxify/` has its own [README](floxify/README.md).

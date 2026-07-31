@@ -1,10 +1,10 @@
 # AI-435 / AI-439 — Triggering + Freshness Discrimination Screening
 
-Research pass for AI-439 (child of AI-435). **Nothing here is promoted into `tasks.jsonl`** — promotion and the eval-model-policy choice are Bill decisions (AI-439 is blocked on the model policy). This artifact is `evals/candidates.jsonl` + this report only.
+Research pass for AI-439 (child of AI-435). **Nothing here is promoted into `tasks.jsonl`** — promotion and the eval-model-policy choice are Bill decisions (AI-439 is blocked on the model policy). This artifact is `evals/flox/tasks/screening.jsonl` + this report only.
 
 ## Method
 
-- **19 candidates** — 13 triggering, 6 freshness — screened with `evals/screen.py` at **reps=5** (per AI-438 multi-rep policy) on each model below.
+- **19 candidates screened** — 13 triggering, 6 freshness — of the 46 entries in `screening.jsonl`, with `evals/flox/screen.py` at **reps=5** (per AI-438 multi-rep policy) on each model below. Every number in this report comes from a measurement; the 27 registry entries with no result are listed under *Not screened* and counted nowhere else.
 - **Arms.** *baseline* = bare model, no plugin; *skills* = the flox plugin loaded via `--plugin-dir`. A candidate is a **discriminator** when the skills arm passes (hard-check majority OR judge-correct) while the baseline fails the same measure; **skill-gap** when both arms fail (flagged, not discarded); **no-signal** when the baseline already passes.
 - **Baseline isolation (harness fix).** On this host the flox plugin is enabled globally in `~/.claude/settings.json`, so the plain baseline arm loaded it and stopped being a bare model (it answered *"Based on the Flox guide"* and knew post-cutoff commands). `screen.py`/`run.py` now pass `--setting-sources project,local` to every arm, dropping user-level `enabledPlugins` while keeping OAuth; the skills arm re-adds exactly one plugin. Without this the whole screen collapses to no-signal.
 - **Freshness axis = post-training-cutoff Flox behavior** (model cutoff ~Jan 2026). Scanned the local `flox`, `floxdocs`, `floxhandbook` checkouts and the installed CLI (v1.13.2).
@@ -49,6 +49,7 @@ Ranked by number of models on which the candidate discriminates, then by mean ju
 - **Discriminates on some models (11):** `fresh-auto-activate-cd` (2/3), `fresh-nix-build-location` (2/3), `fresh-run-no-version` (1/3), `fresh-run-npx-equivalent` (1/3), `trig-gpu-pytorch` (1/3), `trig-image-no-dockerfile` (1/3), `trig-go-node-monorepo` (1/3), `trig-one-command-onboarding` (1/3), `trig-new-python-project` (1/3), `trig-share-exact-toolchain` (1/3), `trig-node-version-pin` (1/3)
 - **Skill-gap on all models — skill may be missing coverage (0):** none
 - **No-signal — baseline already passes (6):** `trig-distribute-cli`, `trig-project-postgres`, `trig-redis-cache`, `trig-ci-laptop-parity`, `trig-project-local-clis`, `trig-newer-than-system`
+- **Not screened — no measurement in this run (27):** `stretch-build-sandbox-pure`, `stretch-build-runtime-packages`, `stretch-service-daemon-shutdown`, `stretch-compose-include-remote`, `stretch-vars-static-env`, `stretch-options-systems`, `stretch-remote-activate`, `stretch-venv-cache-location`, `stretch-publish-prereqs`, `stretch-manifest-vs-nix-build`, `stretch-implicit-monorepo`, `stretch-cuda-torch-linux`, `trap-hook-return-not-exit`, `trap-cpp-libstdcxx-unwrapped`, `trap-cpp-exact-pkgpaths`, `trap-darwin-framework-attrpath`, `trap-vars-no-interpolation`, `trap-alias-profile-not-hook`, `trap-uv-venv-invocation`, `trap-hook-runs-every-activation`, `trap-manifest-syntax-lockout`, `trap-noninteractive-edit-idiom`, `trap-containerize-nopush-fixed`, `trap-layer-vs-compose-fixed`, `feat-override-newer-version`, `feat-flox-run-oneoff`, `trig-secret-free-shared-env`. These are registry entries the run did not cover. They are **not** no-signal: nothing was measured, so nothing is claimed.
 
 ## Freshness was thin — weighted toward triggering
 
@@ -56,22 +57,21 @@ The freshness scan found only a **small in-skill post-cutoff surface**: `flox ru
 
 ## Provenance / reproduce
 
-The 19 candidates screened above were `evals/candidates.jsonl` at the time. That
-file no longer exists: AI-509 Ticket 3 folded every active candidate into the one
-registry `evals/flox/tasks/screening.jsonl`. All 19 carry `area` `triggering` or
-`freshness` there, so the selection below reproduces this set **plus**
-`trig-secret-free-shared-env` (carried over from the retired
-`candidates-triggering.jsonl` and never screened here). The run's own outputs are
-the committed `evals/flox/baselines/screen-{haiku,sonnet,opus}.json`.
+Screened **19 of the 46** entries in `tasks/screening.jsonl`, across areas `freshness`, `triggering`. Measurements read from `baselines/screen-haiku.json`, `baselines/screen-sonnet.json`, `baselines/screen-opus.json`.
+
+The registry is the full candidate set, not the screened set — 27 entries were not measured in this run and appear only under *Not screened* above. Selecting the areas above today yields 20 entries — 1 more than were screened here: `trig-secret-free-shared-env`, present in the registry with no measurement in this run.
 
 ```bash
 flox activate
 cd evals/flox
 for m in claude-haiku-4-5-20251001 claude-sonnet-5 claude-opus-4-8; do
-  python3 screen.py --area triggering --area freshness --reps 5 --concurrency 4 \
+  python3 screen.py --area freshness --area triggering --reps 5 --concurrency 4 \
     --model "$m" --out results/screen-${m%%-*}.json   # isolated by default
 done
-python3 gen_screening_report.py --results results/screen-*.json \
-    --out reports/SCREENING-REPORT.md
+# Regenerate THIS report from the committed measurements:
+python3 gen_screening_report.py \
+    --results baselines/screen-haiku.json baselines/screen-sonnet.json baselines/screen-opus.json \
+    --candidates tasks/screening.jsonl --out reports/SCREENING-REPORT.md
+# ...or from the screen you just ran: --results results/screen-*.json
 ```
 

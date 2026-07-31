@@ -17,6 +17,7 @@ Two concerns, both pure logic — no claude, no network, no API spend:
 """
 import json
 import subprocess
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -190,7 +191,7 @@ class TestHardCheckLayerVsCompose(unittest.TestCase):
     """trap-layer-vs-compose-fixed: a correct answer explains that [include]
     is NOT what's wanted here, using it as a counter-example -- false-fired
     the must_not_match \\[include\\] that the superseded stretch-layer-vs-
-    compose id still carries in the retired candidates-all.jsonl batch."""
+    compose id still carries in the retired candidates.jsonl batch."""
 
     def setUp(self):
         self.candidate = _load_candidate(
@@ -275,7 +276,7 @@ class TestHardCheckUvVenvInvocation(unittest.TestCase):
 
 
 class TestDefaultCandidatesFileExcludesStaleEntries(unittest.TestCase):
-    """The retired candidates-all.jsonl batch carried stretch-layer-vs-compose and
+    """The retired candidates.jsonl batch carried stretch-layer-vs-compose and
     stretch-containerize-nopush with the same false-firing must_not_match
     patterns audited above, under different ids, and screen.py's --candidates
     default pointed at it. screening.jsonl is a superset that replaces
@@ -296,6 +297,117 @@ class TestDefaultCandidatesFileExcludesStaleEntries(unittest.TestCase):
         }
         self.assertNotIn("stretch-layer-vs-compose", ids)
         self.assertNotIn("stretch-containerize-nopush", ids)
+
+
+class TestSelect(unittest.TestCase):
+    """screen.select() plus --only/--area/--regression are the whole replacement
+    for the six retired batch files: a subset used to be a file you named, and
+    is now a predicate over per-entry metadata. That moves the subset's
+    definition into editable data -- dropping `"regression": true` from an entry
+    silently shrinks the guard set, on a run that costs real model calls -- so
+    the filters and the registry invariants they read are pinned here.
+
+    Same pattern as TestDefaultCandidatesFileExcludesStaleEntries above: assert
+    the data invariant against a known id set, not just the function."""
+
+    # The set that used to be candidates-regression.jsonl. A fix guarded by one
+    # of these ids stops being guarded the moment its flag goes missing.
+    REGRESSION_IDS = {
+        "stretch-build-sandbox-pure",
+        "stretch-build-runtime-packages",
+        "trap-cpp-libstdcxx-unwrapped",
+        "trap-cpp-exact-pkgpaths",
+        "trap-vars-no-interpolation",
+        "trap-containerize-nopush-fixed",
+    }
+
+    def setUp(self):
+        self.registry = [
+            json.loads(line)
+            for line in screen.DEFAULT_CANDIDATES.read_text().splitlines()
+            if line.strip()
+        ]
+
+    def _ids(self, **kwargs):
+        return {c["id"] for c in screen.select(self.registry, **kwargs)}
+
+    def test_no_filter_returns_the_whole_registry(self):
+        self.assertEqual(len(screen.select(self.registry)), len(self.registry))
+
+    def test_registry_ids_are_unique(self):
+        # select() dedupes nothing, and --only takes the first match by id, so a
+        # duplicated id would silently halve a subset.
+        ids = [c["id"] for c in self.registry]
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_regression_flag_selects_exactly_the_guard_set(self):
+        self.assertEqual(self._ids(regression=True), self.REGRESSION_IDS)
+
+    def test_every_entry_carries_an_area(self):
+        # --area is a lookup on `area`; an entry missing the key is unreachable
+        # by every area selection, including the report's reproduce recipe.
+        self.assertEqual([c["id"] for c in self.registry if not c.get("area")], [])
+
+    def test_single_area_selects_only_that_area(self):
+        selected = screen.select(self.registry, areas=["freshness"])
+        self.assertTrue(selected)
+        self.assertEqual({c["area"] for c in selected}, {"freshness"})
+
+    def test_repeated_area_is_a_union(self):
+        trig = self._ids(areas=["triggering"])
+        fresh = self._ids(areas=["freshness"])
+        both = self._ids(areas=["triggering", "freshness"])
+        self.assertEqual(both, trig | fresh)
+        self.assertEqual(len(both), len(trig) + len(fresh))
+
+    def test_area_and_regression_compose_as_and(self):
+        # AND across flags, OR within repeated --area -- the two directions the
+        # SCREENING-REPORT reproduce recipe depends on.
+        builds_regression = self._ids(areas=["builds"], regression=True)
+        self.assertEqual(
+            builds_regression, self._ids(areas=["builds"]) & self.REGRESSION_IDS
+        )
+        self.assertTrue(builds_regression)
+        self.assertLess(len(builds_regression), len(self._ids(areas=["builds"])))
+
+    def test_only_selects_one_entry_and_composes_with_area(self):
+        cid = "trap-vars-no-interpolation"
+        area = next(c["area"] for c in self.registry if c["id"] == cid)
+        self.assertEqual(self._ids(only=cid), {cid})
+        self.assertEqual(self._ids(only=cid, areas=[area]), {cid})
+        # AND, so a contradictory pair matches nothing rather than falling back.
+        self.assertEqual(self._ids(only=cid, areas=["containers"]), set())
+
+    def test_unknown_area_matches_nothing(self):
+        self.assertEqual(screen.select(self.registry, areas=["nosucharea"]), [])
+
+    def test_blank_area_strings_are_ignored_not_treated_as_no_filter(self):
+        self.assertEqual(screen.select(self.registry, areas=["  "]), [])
+
+    def test_area_selection_reproducing_the_screening_report_is_intact(self):
+        # reports/SCREENING-REPORT.md's generated recipe screens the 19 measured
+        # candidates via `--area freshness --area triggering`; that selection is
+        # the report's superset by exactly trig-secret-free-shared-env.
+        measured = {
+            r["id"]
+            for r in json.loads(
+                (screen.HERE / "baselines" / "screen-haiku.json").read_text()
+            )["results"]
+        }
+        selected = self._ids(areas=["freshness", "triggering"])
+        self.assertTrue(measured <= selected)
+        self.assertEqual(selected - measured, {"trig-secret-free-shared-env"})
+
+    def test_empty_selection_exits_nonzero_rather_than_screening_everything(self):
+        # A filter that matches nothing must not silently degrade into "run the
+        # whole registry" -- that is 46 candidates' worth of real model calls.
+        proc = subprocess.run(
+            [sys.executable, str(screen.HERE / "screen.py"), "--area", "nosucharea"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("No candidate", proc.stderr)
+        self.assertIn("nosucharea", proc.stderr)
 
 
 # A realistic `claude -p --output-format json` envelope, matching test_run.py's

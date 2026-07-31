@@ -119,8 +119,10 @@ Eval layers, same two-tier shape as `detect.py`'s:
   python3 -m unittest tests.test_verify -v
   ```
 
-- **`tests/test_real_world_golden_lint.py`** — runs the checker over every
-  `expected/*.toml` reference. Two hand reviews (AI-455) found real
+- **`tests/test_real_world_golden_lint.py`** — runs the checker over the
+  real-world goldens named in `real-world.jsonl`. Selection is by registry,
+  not by globbing `expected/`, which since AI-509 Ticket 3 also holds the
+  synthetic and stretch reference manifests. Two hand reviews (AI-455) found real
   defects in those goldens that had never been linted before; this check
   found 16 more (per-system catalog gaps across 6 of 8 goldens) the moment
   it ran with live flox. Golden content is intentionally NOT fixed here —
@@ -909,11 +911,12 @@ python3 real_world.py --only sentry --clone-timeout 1200 --agent-timeout 2400
 python3 real_world.py --skill-dir /path/to/flox-plugin --out results/my-run.json
 ```
 
-Results land in `results/real-world.json` by default (gitignored; the
-committed snapshot is `baselines/real-world.json`). Unlike synthetic, there's
-no committed baseline or regression diff yet — with only one of four
-repos run so far, a diff isn't meaningful. Add one once more repos have
-a run to compare against.
+Results land in `results/real-world.json` by default (gitignored). One run's
+output is committed as `baselines/real-world.json`, but nothing reads it:
+unlike synthetic, `real_world.py` has no `--baseline` flag and no regression
+diff — with only one of four repos run so far, a diff isn't meaningful. So that
+file is a snapshot to compare against by hand, not a baseline the harness
+enforces. Wire one up once more repos have a run to compare against.
 
 ### Unit tests
 
