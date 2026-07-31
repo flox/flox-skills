@@ -61,6 +61,129 @@ FAKE_INSTALL = re.compile(
 )
 ABS_PATH = re.compile(r'=\s*"(/home/|/Users/|/usr/local/|/opt/|/root/)', re.I)
 
+# --- hardcoded-secret detection ---------------------------------------------
+# Ported from flox/flox-agentic#18 (@imkarrer), rehomed onto this suite's fence
+# extraction and tomllib parsing (AI-509 Ticket 6).
+#
+# The skill's rule is emphatic — SKILL.md "Configuration & Secrets": *never*
+# store secrets in the manifest; use environment variables, `~/.config/<env>/`,
+# or an existing credentials file. Nothing in the suite exercised it. A
+# secret-NAMED key assigned a real literal inside a fenced manifest is a leak,
+# as is a connection URL with an inline credential under ANY key name; env
+# references (`$VAR`, `${VAR}`, `$(...)`), placeholders, and values that merely
+# NAME or POINT AT a secret are not.
+#
+# Two views of the same fenced blocks are scanned, because neither alone is
+# enough and the union is what the check owes the gate:
+#
+#   text   — `SECRET_ASSIGN` over the raw block. Reaches leaks the parsed view
+#            structurally cannot: a block that is not valid TOML (dropped
+#            wholesale by `_parsed_manifests`), and an assignment written inside
+#            a `[hook] on-activate = '''…'''` shell body, which tomllib sees as
+#            one opaque string under a non-secret key.
+#   parsed — `_secret_leaks_in` over the tomllib dict. Reaches shapes no
+#            single-line regex does: multi-line arrays, nested tables, dotted
+#            keys.
+#
+# Either view finding a leak fails the check. Known limits, inherent to
+# name-based detection and pinned by a test: a secret under a NON-secret-named
+# key is not caught (except the connection-URL form below, which is caught by
+# value shape), an unquoted/bare value is not inspected, and a real value that
+# happens to *begin* with a placeholder token ("example…") reads as one.
+_SECRET_NAME = (
+    r"(?:SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|API[_-]?KEY|"
+    r"ACCESS[_-]?KEY|PRIVATE[_-]?KEY)"
+)
+# The same name test applied to a parsed key (which carries no quoting).
+SECRET_KEY = re.compile(_SECRET_NAME, re.I)
+# Matches a secret-named key (optionally quoted, at a line start or inside an
+# inline table / after a comma) and captures its value token: an array, a
+# triple-quoted string, or a single-/double-quoted string. The quote-specific
+# alternatives let a value contain the *other* quote char.
+#
+# The name test applies to the key's LAST dotted segment, with any number of
+# dotted parents allowed in front (`vars.API_KEY` is a secret assignment). The
+# runs either side of the name deliberately do not span `.`: when they did,
+# `[install]` + `vault-token.pkg-path = "vault"` read as a secret-named key,
+# because the prefix run swallowed `vault-token.` and matched TOKEN inside it.
+SECRET_ASSIGN = re.compile(
+    r"(?im)(?:^|[{,])[ \t]*(?:export[ \t]+)?"
+    r"[\"']?(?:[\w-]+\.)*[\w-]*" + _SECRET_NAME + r"[\w-]*[\"']?[ \t]*=[ \t]*"
+    r"(\[[^\]\n]*\]|\"\"\".*?\"\"\"|'''.*?'''|\"[^\"\n]*\"|'[^'\n]*')"
+)
+
+# --- what a value IS, not what it starts with --------------------------------
+# A secret-named key is only a leak when its value HOLDS a credential. It does
+# not when the value merely names, points at, or stands in for one — and those
+# are exactly what a *good* answer to `env-secrets-api-key` writes, so each
+# false positive here reddens a correct answer on a gate-binding task.
+#
+# This is a value-SHAPE test, not a first-token test. The predecessor anchored
+# every allowance at `^`, which flagged `AUTH_TOKEN = "Bearer $TOKEN"`,
+# `API_KEY = "sk-${SUFFIX}"`, `TOKEN_FILE = "secrets/token"`,
+# `PASSWORD_FILE = ".env"`, `API_KEY = "op://vault/item/field"`,
+# `PASSWORD_COMMAND = "pass show api"` and `API_KEY_ENV = "MY_APP_KEY"`.
+#
+# An env reference or command substitution ANYWHERE in the value.
+_ENV_REF = re.compile(r"\$\{?\w|\$\(")
+# A placeholder spelling, still anchored: a value that merely *contains* the
+# word "example" can be a real key. The path forms moved to `_PATH_VALUE`.
+PLACEHOLDER_VALUE = re.compile(
+    r"(?i)^\s*(?:<|\{\{|\*{3,}|x{3,}|changeme|change_me|"
+    r"placeholder|your[_-]|example|dummy|redact|todo|fixme|replace|sample|"
+    r"fake|none|null)"
+)
+# The whole value is a filesystem path: `~/…`, `./…`, `../…`, `/…`, a dotfile
+# (`.env`), or a bare relative path (`secrets/token`, `keys/id_rsa`). Pointing
+# at a credentials file is the fix the skill teaches, not the leak. (An
+# absolute path in a manifest is still caught — by `no_abs_paths`, the check
+# that owns that question.)
+_PATH_VALUE = re.compile(
+    r"(?:~|\.{1,2})?/[\w.\-/~]*"      # ~/x  ./x  ../x  /x
+    r"|\.[\w.-]+"                     # .env  .envrc
+    r"|[\w.-]+(?:/[\w.-]+)+"          # secrets/token  keys/id_rsa
+)
+# …unless the "path" is a base64 credential wearing a path's clothes. `/` is in
+# the base64 alphabet and `+` is not in `[\w.-]`, so every base64 key that
+# happens to contain a slash and no plus is exactly the bare-relative-path
+# shape: AWS's own documented example secret key,
+# `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`, read as `secrets/token` did, and
+# so did 24% of random 40-char keys of that shape (#84 review). That is a false
+# NEGATIVE — it cannot redden a correct answer — but it made this check read as
+# covering the most commonly cited secret format when it did not.
+#
+# The discriminator is what a path is SPELLED with, not how long it is. Every
+# path form the skill teaches either anchors (`~/`, `./`, `/`) or separates its
+# segments with `.`, `-` or `_` (`secrets/token`, `keys/id_rsa`,
+# `~/.config/myapp/secrets`) — none of which a base64 body can contain. So a
+# value written in nothing but letters, digits and `/`, long enough to be a
+# key and carrying BOTH letter cases and a digit, is credential material.
+# `path/to/secrets/token` (one case, no digits) stays a path.
+_BASE64_ISH_VALUE = re.compile(r"[A-Za-z0-9/]{20,}")
+# The whole value is a URI-style external secret reference: `op://vault/item/
+# field`, `vault://…`, `gopass://…`. Naming where a secret lives is not leaking
+# it — unless the URI carries the credential inline, which `_URL_CREDENTIALS`
+# below decides.
+_URI_REF = re.compile(r"(?i)^[a-z][\w.+-]*://")
+# The whole value is an environment-variable NAME (`MY_APP_KEY`): uppercase
+# segments joined by underscores. A credential of this shape is not something a
+# model writes; `AKIAIOSFODNN7REALKEYX` and `ghp_realtoken…` are not it.
+_ENV_VAR_NAME = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")
+# A PEM body is a credential even though it contains spaces, so it is tested
+# before the whitespace rule below.
+_PEM_BODY = re.compile(r"-----BEGIN[ \t]")
+# A connection URL carrying inline credentials — `postgres://user:hunter2@host`,
+# `https://abc:def@sentry.io/1`. This is the one leak shape that is decided by
+# VALUE and not by key name: the canonical spelling is `DATABASE_URL`, `DSN` or
+# `WEBHOOK_URL`, none of which a name test can reach, and it is what a model
+# writes unprompted on `indirect-secrets-no-commit` ("a database password and an
+# API token"). The password group is classified by the same value test as any
+# other, so `postgres://user:$PGPASSWORD@host` is not a leak. `git@github.com`
+# and `host:5432/db` have no `user:password@` authority and do not match.
+_URL_CREDENTIALS = re.compile(r"(?i)[a-z][\w.+-]*://([^\s:@/\"']+):([^\s@/\"']*)@")
+# Extracts the inner text of each quoted string in a value token (for arrays).
+_QUOTED_INNER = re.compile(r"\"([^\"\n]*)\"|'([^'\n]*)'")
+
 
 def _fenced_manifests(text):
     """Every fenced ```toml block in `text`, in document order.
@@ -101,6 +224,126 @@ def _parsed_manifests(text):
         except (tomllib.TOMLDecodeError, ValueError):
             continue
     return out
+
+
+def _looks_like_base64_credential(value):
+    """True if `value` is base64 key material rather than a relative path."""
+    return bool(
+        _BASE64_ISH_VALUE.fullmatch(value)
+        and re.search(r"[a-z]", value)
+        and re.search(r"[A-Z]", value)
+        and re.search(r"\d", value)
+    )
+
+
+def _points_at_a_secret(value):
+    """True if `value` NAMES, POINTS AT, or STANDS IN FOR a secret.
+
+    The shapes a correct answer writes: an env reference, a placeholder, a
+    path, an external secret-store reference, an env-var name, or a command.
+    Anything else under a secret-named key is treated as the credential itself.
+    """
+    if _ENV_REF.search(value):
+        return True
+    if PLACEHOLDER_VALUE.match(value):
+        return True
+    if _PATH_VALUE.fullmatch(value) and not _looks_like_base64_credential(value):
+        return True
+    if _URI_REF.match(value) and not _URL_CREDENTIALS.search(value):
+        return True
+    if _ENV_VAR_NAME.fullmatch(value):
+        return True
+    # A value with whitespace in it is a command or a sentence (`pass show
+    # api`), not an opaque credential. A credential that contains a space
+    # (other than a PEM body, tested by the caller) is a shape no model writes.
+    return bool(re.search(r"\s", value))
+
+
+def _is_real_secret_value(value):
+    """True if a string value holds a credential rather than pointing at one."""
+    value = value.strip()
+    if not value:
+        return False
+    if _PEM_BODY.search(value):
+        return True
+    return not _points_at_a_secret(value)
+
+
+def _has_url_credentials(text):
+    """True if `text` contains a URL with a real credential in its authority.
+
+    `postgres://user:hunter2@localhost:5432/mydb` is a leak wherever it is
+    written and whatever key it is written under; the same URL with
+    `$PGPASSWORD` in the password position is not.
+    """
+    return any(
+        _is_real_secret_value(m.group(2)) for m in _URL_CREDENTIALS.finditer(text)
+    )
+
+
+def _real_literal(token):
+    """True if a captured value token holds at least one real (non-empty,
+    non-placeholder) literal. `token` is an array or a quoted string."""
+    if token.startswith("["):
+        values = [dq or sq for dq, sq in _QUOTED_INNER.findall(token)]
+    else:
+        values = [token.strip("\"'")]
+    return any(_is_real_secret_value(v) for v in values)
+
+
+def has_hardcoded_secret(text):
+    """True if manifest *text* leaks a credential, by name or by value shape.
+
+    Two `finditer` passes over the text, neither of which slices or rescans it:
+    `SECRET_ASSIGN` captures each secret-named key's value token (classified by
+    `_real_literal` in time proportional to that token's own small length), and
+    `_URL_CREDENTIALS` captures any inline `user:password@` authority whatever
+    key it sits under.
+
+    Not O(n): both key-name runs flanking `_SECRET_NAME` are an ambiguous
+    decomposition of one unbroken `[\\w-]` run, so matching is quadratic in the
+    length of any such run that contains a secret-name substring ("TOKEN" * n
+    is 4x per doubling). Bounded in practice because real manifest lines break
+    those runs with spaces and `=`: a 40k-char manifest of ordinary lines
+    measures ~2.5ms.
+    """
+    return any(
+        _real_literal(m.group(1)) for m in SECRET_ASSIGN.finditer(text)
+    ) or _has_url_credentials(text)
+
+
+def _secret_leaks_in(node, key=""):
+    """True if a *parsed* manifest leaks a credential.
+
+    Recurses into tables and arrays. `key` is the name the value was assigned
+    to, so an inline table (`db = { password = "…" }`) and a nested one
+    (`[services.db] password = "…"`) are the same fact. The name context does
+    NOT propagate down a table: a secret-named table with innocently-named
+    leaves (`[vars.secrets] db = "…"`) is not inspected, deliberately —
+    `[install]` keys are package names, so carrying the parent down would read
+    `vault-token.pkg-path = "vault"` as a leaked token. An array keeps its
+    parent key because a list has no names of its own. Only strings are
+    inspected for that name test: an unquoted `API_KEY = 12345678` parses as an
+    int, and treating a number as a leaked credential would redden port and
+    replica settings. Any string is checked for an inline URL credential, which
+    is a leak by value shape under any key name.
+    """
+    if isinstance(node, dict):
+        return any(_secret_leaks_in(v, k) for k, v in node.items())
+    if isinstance(node, list):
+        return any(_secret_leaks_in(v, key) for v in node)
+    if not isinstance(node, str):
+        return False
+    if _has_url_credentials(node):
+        return True
+    return bool(SECRET_KEY.search(key)) and _is_real_secret_value(node)
+
+
+def _hardcodes_secret(answer):
+    """The `no_hardcoded_secret` check's negation: text view OR parsed view."""
+    return has_hardcoded_secret(toml_blocks(answer)) or any(
+        _secret_leaks_in(m) for m in _parsed_manifests(answer)
+    )
 
 
 # `services.auto-start` (AI-503). Two things are checkable and both are things a
@@ -216,6 +459,10 @@ def _sandbox_schema_version(answer):
 CHECKS = {
     "no_fake_install_url": lambda a: not FAKE_INSTALL.search(a),
     "no_abs_paths": lambda a: not ABS_PATH.search(toml_blocks(a)),
+    # No secret hardcoded into the manifest — secrets belong in env vars,
+    # `~/.config/<env_name>/`, or an existing credentials file, never in the
+    # committed manifest (SKILL.md "Configuration & Secrets").
+    "no_hardcoded_secret": lambda a: not _hardcodes_secret(a),
     "has_install_section": lambda a: "[install]" in a,
     "has_services_section": lambda a: "[services" in a,
     "has_build_section": lambda a: "[build" in a,
@@ -362,6 +609,25 @@ def judge(task, answer):
             "issues": raw.get("issues", [])}, meta
 
 
+def _run_check(name, answer, task_id):
+    """Run one hard-check, converting a crash into a FAIL rather than a lost run.
+
+    Every check here is pure logic over the answer text, but the answer is
+    model-written and unbounded: a 600-component dotted key parses fine under
+    `tomllib` and then hits Python's recursion limit in `_secret_leaks_in`.
+    Unguarded, that exception propagates out of `list(ex.map(...))` in `main`
+    and kills the process BEFORE `out_path.write_text` — losing every agent and
+    judge call the run had already paid for. A check that cannot answer is
+    recorded as a failure of that check, with the reason on stdout.
+    """
+    try:
+        return CHECKS[name](answer)
+    except Exception as e:  # noqa: BLE001 — one bad answer must not cost a run
+        print(f"    [check error] {task_id}/{name}: {type(e).__name__}: {e}",
+              flush=True)
+        return False
+
+
 def process_task(t, mode, allow):
     """Run + score one task (agent call, hard-checks, judge). Thread-safe."""
     suffix = NEUTRAL_SUFFIX if t.get("trigger_test") else ANSWER_SUFFIX
@@ -374,7 +640,7 @@ def process_task(t, mode, allow):
         return {**base, "error": err, "cost": {
             "agent_usd": agent_meta["cost_usd"], "judge_usd": 0.0,
             "total_usd": agent_meta["cost_usd"]}}
-    hard = {c: CHECKS[c](answer) for c in t["checks"]}
+    hard = {c: _run_check(c, answer, t["id"]) for c in t["checks"]}
     hard_pass = all(hard.values())
     verdict, judge_meta = judge(t, answer)
     cost = {
