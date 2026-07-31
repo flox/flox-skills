@@ -7,8 +7,25 @@ its `tests/` package, and its own data:
 
 | Suite | What it measures |
 |---|---|
-| [`flox/`](flox/) | The `flox` skill's written guidance and implicit triggering — `run.py`, `screen.py`, `skill_toml_lint.py`, `tasks/`, `tests/`, `results/`, `reports/` |
-| [`floxify/`](floxify/) | `/floxify` repo-conversion outcomes — `run_floxify.py`, `tier2.py`, `tests/`, `fixtures/`, `gold/`, `testdata/`, `results/` |
+| [`flox/`](flox/) | The `flox` skill's written guidance and implicit triggering — `run.py`, `screen.py`, `skill_toml_lint.py`, `tasks/`, `tests/`, `baselines/`, `reports/`, `results/` |
+| [`floxify/`](floxify/) | `/floxify` repo-conversion outcomes — `run_floxify.py`, `real_world.py`, `tests/`, `fixtures/`, `expected/`, `samples/`, `baselines/`, `results/` |
+
+Every suite uses the same directory names for the same roles (AI-509 Ticket 3),
+so a directory name says what kind of thing is inside it:
+
+| Directory | Role | Committed? |
+|---|---|---|
+| `tasks/` | Registries of cases a runner executes | yes |
+| `fixtures/` | Input repositories the skill is pointed at | yes |
+| `expected/` | Semantic reference manifests a produced manifest is graded against — expected *properties*, not byte-exact output | yes |
+| `samples/` | Captured inputs (agent stream transcripts, a real run's manifest) that tests parse | yes |
+| `baselines/` | Committed comparison measurements. Runners READ these and never write them | yes |
+| `reports/` | Selected human-readable analyses worth keeping | yes |
+| `results/` | Generated run output. Every `--out` lands here | **no — gitignored** |
+
+The `baselines/` ↔ `results/` split is load-bearing: before it, a runner's
+`--out` file and its comparison target were the same path, so a second local
+run diffed against the first rather than against what is on `main`.
 
 The rest of this file documents the `flox` suite; run its commands from
 `evals/flox/`. `floxify/` has its own [README](floxify/README.md).
@@ -34,8 +51,8 @@ a skill PR without one. Two rules:
 1. **RED first.** Write the eval before the fix, run it, and watch it **fail for
    the reason you claim**. A test written after the change only proves the change
    is self-consistent. This is not ceremony — see the worked example below.
-2. **Prefer the cheap tier.** A Tier 1 fixture or prompt eval is the inner loop
-   (seconds); the Tier 2 OSS runs are *confirmation* (a clone + a full agentic
+2. **Prefer the cheap tier.** A synthetic fixture or prompt eval is the inner loop
+   (seconds); the real-world OSS runs are *confirmation* (a clone + a full agentic
    pass + realization). Reserve the expensive tier for proving the fix holds on
    real repos and for non-regression.
 
@@ -153,7 +170,7 @@ python3 -m unittest discover -s tests -t . -v   # the whole suite
 python3 -m unittest tests.test_run -v           # one module
 ```
 
-Results land in `results/<mode>.json` with a summary (hard-pass rate, avg judge
+Results land in `results/<mode>.json` (gitignored) with a summary (hard-pass rate, avg judge
 score, correct rate). Pure stdlib — no node/uv required.
 
 ## Authentication
@@ -179,7 +196,7 @@ Recorded on the original 7-skill layout (pre-consolidation):
 
 | Arm | Hard-check pass | Avg judge score | Correct rate | File |
 |-----|-----------------|-----------------|--------------|------|
-| skills-only | 8/8 (100%) | 4.62 / 5 | 8/8 | `results/skills.json` |
+| skills-only | 8/8 (100%) | 4.62 / 5 | 8/8 | `baselines/skills.json` |
 
 **AI-93 finding:** an MCP-assisted arm (skills + the flox-mcp server) was
 measured alongside skills-only and scored 8/8 (100%) hard-pass, 4.25/5 avg
@@ -288,7 +305,7 @@ The reason text is mandatory in practice — `test_skill_toml_lint.py` fails any
 block marked without one. **Never add a marker to silence a real parse error:**
 fix the snippet. `KNOWN_PARSE_FAILURES` in the script is the escape hatch for a
 genuine defect too large to fix in the same PR (same discipline as
-`floxify/test_golden_lint.py`'s `KNOWN_VIOLATIONS`); it is currently **empty**
+`floxify/tests/test_real_world_golden_lint.py`'s `KNOWN_VIOLATIONS`); it is currently **empty**
 and meant to stay that way. Entries are keyed by content hash, so a stale one —
 left behind after its snippet was fixed — is itself a failure and can't sit
 there absorbing a future regression.
@@ -330,25 +347,35 @@ Two jobs in `.github/workflows/evals.yml`, split by what they cost:
 ## Screening (`screen.py`)
 
 `screen.py` develops the *discriminating stretch tier*: it runs candidate prompts
-(`candidates*.jsonl`) through the **baseline** arm (bare model) and the **skills**
+through the **baseline** arm (bare model) and the **skills**
 arm (plugin loaded) and classifies each as a **discriminator** (skill lifts over
 baseline), a **skill-gap** (both fail — the skill may be missing coverage), or
 **no-signal** (baseline already passes — too easy). Hard-checks are data-driven
 per candidate via `must_match` / `must_not_match` regex lists.
 
-`tasks/candidates-all.jsonl` is the default and the only candidate set this
-harness ships — it is a superset of the original `tasks/candidates.jsonl`
-(retired) with the
-same false-firing checks fixed under new ids
-(`trap-layer-vs-compose-fixed`, `trap-containerize-nopush-fixed`) plus the
-pass2/regression batches folded in. Pass `--candidates` to screen a specific
-historical batch (`tasks/candidates-pass2.jsonl`,
-`tasks/candidates-regression.jsonl`, `tasks/candidates-triggering.jsonl`,
-`tasks/candidates-new-features.jsonl`) instead.
+### The registry
+
+`tasks/screening.jsonl` is THE registry of active screening candidates and the
+only one this harness ships (AI-509 Ticket 3). It replaced six batch files whose
+names recorded which development pass created them rather than what the entries
+are; Git retains them.
+
+Subsets come from **stable entry metadata**, never from a second file:
+
+| Selector | Entry field | Example |
+|---|---|---|
+| `--area` (repeatable) | `area` — `triggering`, `freshness`, `environments`, `builds`, `services`, `composition`, `sharing`, `publish`, `cuda`, `containers` | `--area triggering --area freshness` |
+| `--regression` | `regression: true` — kept to guard a specific check or skill fix | `--regression` |
+| `--only` | `id` | `--only trap-vars-no-interpolation` |
+
+Adding a candidate means appending one line to `tasks/screening.jsonl` with the
+`area` (and `regression`, if it guards a fix) that makes it selectable. Do not
+add a batch file.
 
 ```bash
-python3 screen.py --reps 5                                    # default set, n=5
-python3 screen.py --candidates tasks/candidates-pass2.jsonl --reps 5  # one batch, n=5
+python3 screen.py --reps 5                                    # whole registry, n=5
+python3 screen.py --area triggering --reps 5                  # one area, n=5
+python3 screen.py --regression --reps 5                       # the fix-guard set
 python3 screen.py --only trap-vars-no-interpolation --reps 5
 python3 screen.py --plugin-dir /path/to/fixed-skill/flox-plugin  # test a skill edit
 ```
@@ -405,7 +432,7 @@ No separate weaker-model arm.
   `uv pip install\b.*--python\b` (same line, either order) rather than
   enumerating every permutation.
 - **Validate a new/edited check against a real known-good answer** (the
-  `answer_excerpt` fields in `results/*.json`, or a fixture copied into a unit
+  `answer_excerpt` fields in `results/*.json` (or `baselines/*.json`), or a fixture copied into a unit
   test) before trusting it — the check is a pure function of the answer text,
   so this needs no model calls. `evals/flox/tests/test_screen.py` does this for every
   check above.
@@ -443,7 +470,7 @@ The option analysis this decision was made from, kept as a rationale record:
 
 - **Option A: gate at `--reps` ≥ 3 per task.** Run screening at reduced `n=3`
   (cheaper than the documented `n=5` promotion bar) on every PR that touches
-  `tasks/candidates-all.jsonl` or a skill file, and fail if any `should`-tier
+  `tasks/screening.jsonl` or a skill file, and fail if any `should`-tier
   candidate's `hard_pass_rate` drops under a threshold (e.g. < 2/3). Pro:
   catches a regression on the exact candidate that changed, fast. Con: n=3
   is below the harness's own documented reliability floor (n≥5), so the gate
@@ -452,12 +479,12 @@ The option analysis this decision was made from, kept as a rationale record:
 - **Option B: gate on aggregate pass-rate, not per-task.** Run the full
   screening batch at n=5 on a schedule (not per-PR, given cost) and gate on
   `mean_skills_hard_pass_rate` staying above a floor (e.g. no more than a
-  5pp drop from the last committed golden), rather than any single
+  5pp drop from the last committed baseline), rather than any single
   candidate's cell. Pro: matches the harness's own reliability
   recommendation (n≥5) and is less prone to single-candidate flakiness. Con:
   a real regression on one candidate can be masked by noise/improvement on
   others; slower feedback (schedule, not per-PR); needs a committed
-  `results/screen.json` golden to diff against, which does not yet exist.
+  `baselines/screen.json` snapshot to diff against, which does not yet exist.
 - **Chosen: Option B**, with per-task visibility folded in from Option A's
   strength (fast localization of *which* candidate regressed) so that
   advantage isn't lost — gate on the aggregate, but always report the

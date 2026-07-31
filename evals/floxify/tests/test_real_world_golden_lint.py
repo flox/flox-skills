@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Golden-manifest lint: run verify.py's checker over every hand-curated
-reference in testdata/gold/*.toml (AI-456 item 2).
+reference in expected/*.toml (AI-456 item 2).
 
 These manifests are the reference every produced manifest is judged
 against, and until now nothing had ever linted them — two hand reviews
@@ -61,10 +61,11 @@ reported honestly as such rather than as a resolution finding — see
 `_classify_lock_failure`.
 
 Run:
-    python3 test_golden_lint.py
-    pytest test_golden_lint.py
-    FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 test_golden_lint.py   # no network
+    python3 test_real_world_golden_lint.py
+    pytest test_real_world_golden_lint.py
+    FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 test_real_world_golden_lint.py   # no network
 """
+import json
 import os
 import shutil
 import subprocess
@@ -79,14 +80,15 @@ from _skill_module_loader import load_module
 HERE = Path(__file__).resolve().parent
 SUITE = HERE.parent          # evals/floxify
 REPO_ROOT = SUITE.parent.parent
-GOLD_DIR = SUITE / "testdata" / "gold"
+EXPECTED_DIR = SUITE / "expected"
+REAL_WORLD_FILE = SUITE / "real-world.jsonl"
 VERIFY = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
 
 # Unique sys.modules key — see _skill_module_loader.py's docstring for the
 # incident this avoids (test_verify.py loads the same verify.py under ITS
 # own unique key; sharing a key let whichever load ran last silently
 # steal the other's @patch target).
-verify_mod = load_module(VERIFY, sys_modules_key="verify_under_test_golden_lint")
+verify_mod = load_module(VERIFY, sys_modules_key="verify_under_test_real_world_golden_lint")
 verify = verify_mod.verify
 
 LIVE_CATALOG = os.environ.get("FLOXIFY_GOLDEN_LINT_LIVE_CATALOG", "1") != "0"
@@ -275,20 +277,38 @@ def _attempt_lock(manifest_text, timeout=60):
 
 
 def _gold_ids():
-    return sorted(p.stem for p in GOLD_DIR.glob("*.toml"))
+    """The real-world goldens, named by the real-world registry.
+
+    Selection is by REGISTRY, not by globbing expected/. Before AI-509
+    Ticket 3 the real-world goldens had their own directory
+    (testdata/gold/) and a glob meant exactly "the real-repo goldens";
+    now every suite's reference manifests share expected/, so a glob
+    would silently pull in the synthetic and stretch goldens, which are
+    deliberately out of scope here (they are linted, at their own
+    scope, by test_stretch_golden_lint.py). Naming the registry keeps
+    this lint's scope the same set it has always had. The sibling
+    stretch lint selects the same way.
+    """
+    return sorted(
+        json.loads(line)["id"]
+        for line in REAL_WORLD_FILE.read_text().splitlines()
+        if line.strip()
+    )
 
 
 _GOLD_IDS = _gold_ids()
-# A path typo or refactor that empties this glob must fail loudly at
-# collection time, not silently report "0 tests, all passed."
-assert _GOLD_IDS, f"no golden manifests found under {GOLD_DIR} — check the path"
+# A path typo or an emptied registry must fail loudly at collection time,
+# not silently report "0 tests, all passed."
+assert _GOLD_IDS, f"no real-world ids found in {REAL_WORLD_FILE} — check the path"
+_MISSING = [i for i in _GOLD_IDS if not (EXPECTED_DIR / f"{i}.toml").is_file()]
+assert not _MISSING, f"real-world entries with no expected/<id>.toml: {_MISSING}"
 
 
 class TestGoldenLint(unittest.TestCase):
     """One test per golden so a failure names the exact fixture."""
 
     def _lint(self, fixture_id):
-        manifest_text = (GOLD_DIR / f"{fixture_id}.toml").read_text(encoding="utf-8")
+        manifest_text = (EXPECTED_DIR / f"{fixture_id}.toml").read_text(encoding="utf-8")
         # No detect facts for these repos (not vendored) -- manifest-only
         # checks only; see module docstring.
         result = verify({}, manifest_text, check_catalog_live=LIVE_CATALOG)
@@ -321,7 +341,7 @@ class TestGoldenLint(unittest.TestCase):
         if not available:
             self.skipTest("flox not on PATH -- cannot attempt lock resolution")
 
-        manifest_text = (GOLD_DIR / f"{fixture_id}.toml").read_text(encoding="utf-8")
+        manifest_text = (EXPECTED_DIR / f"{fixture_id}.toml").read_text(encoding="utf-8")
         status, message, elapsed = _attempt_lock(manifest_text)
         print(
             f"  [lock] {fixture_id}: {status} in {elapsed:.2f}s",
@@ -350,7 +370,7 @@ class TestGoldenLint(unittest.TestCase):
 
     def test_catalog_leg_ran_when_expected(self):
         """Distinguishes 'genuinely clean' from 'silently skipped.'"""
-        sample = (GOLD_DIR / f"{_GOLD_IDS[0]}.toml").read_text(encoding="utf-8")
+        sample = (EXPECTED_DIR / f"{_GOLD_IDS[0]}.toml").read_text(encoding="utf-8")
         result = verify({}, sample, check_catalog_live=LIVE_CATALOG)
         if LIVE_CATALOG:
             if shutil.which("flox"):
@@ -384,7 +404,7 @@ class TestGoldenLint(unittest.TestCase):
 
         consumed = set()
         for fixture_id in _GOLD_IDS:
-            manifest_text = (GOLD_DIR / f"{fixture_id}.toml").read_text(encoding="utf-8")
+            manifest_text = (EXPECTED_DIR / f"{fixture_id}.toml").read_text(encoding="utf-8")
             result = verify({}, manifest_text, check_catalog_live=True)
             if not result["catalog_checked"]:
                 self.skipTest(f"catalog leg did not run for {fixture_id}")
@@ -436,7 +456,7 @@ class TestLockResolutionLeg(unittest.TestCase):
     leg's skip/fail/pass plumbing. The live behavior (does a real golden
     actually lock) belongs to the flox-equipped run — see the dynamically
     generated test_<fixture>_locks_cleanly methods above, exercised by
-    `python3 -m unittest tests.test_golden_lint -v` with `flox` on PATH."""
+    `python3 -m unittest tests.test_real_world_golden_lint -v` with `flox` on PATH."""
 
     def _instance(self):
         # Any bound TestGoldenLint instance works here -- we only need

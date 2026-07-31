@@ -2,7 +2,7 @@
 """Shared helper for loading skill scripts (detect.py, verify.py) as fresh
 module instances from an arbitrary skill directory.
 
-Both test_verify.py and test_golden_lint.py used to load
+Both test_verify.py and test_real_world_golden_lint.py used to load
 flox-plugin/skills/floxify/scripts/verify.py via their own copy of this
 same ~6-line loader, and both registered the result under the SAME global
 key, `sys.modules["verify"]`. Whichever file's module import ran second

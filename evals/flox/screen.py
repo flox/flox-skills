@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Discrimination screening harness for stretch-tier eval candidates.
 
-For each candidate in tasks/candidates-all.jsonl (default; override with
+For each candidate in tasks/screening.jsonl (default; override with
 --candidates), runs the baseline arm (bare model,
 no plugin) and the skills arm (plugin loaded, MCP off), scores both, and
 classifies the candidate:
@@ -34,13 +34,34 @@ sys.path.insert(0, str(HERE))
 import run as _run
 from run import run_claude, judge, NEUTRAL_SUFFIX, ANSWER_SUFFIX
 
-# tasks/candidates-all.jsonl is the consolidated candidate set: every batch
-# (pass2, regression, triggering, new-features) folded in, with a single
-# current definition per id. Other tasks/candidates*.jsonl files hold
-# individual historical batches for `--candidates <file>` runs against just
-# that batch.
+# tasks/screening.jsonl is THE registry of active screening candidates and
+# the only one this harness ships (AI-509 Ticket 3). The historical batch
+# files it replaced (candidates-all / candidates / candidates-pass2 /
+# candidates-regression / candidates-triggering / candidates-new-features)
+# are gone; Git retains them. Subsets come from stable per-entry metadata —
+# `--area`, `--regression`, `--only` below — rather than from a file whose
+# name records which development pass created it.
 TASKS_DIR = HERE / "tasks"
-DEFAULT_CANDIDATES = TASKS_DIR / "candidates-all.jsonl"
+DEFAULT_CANDIDATES = TASKS_DIR / "screening.jsonl"
+
+
+def select(candidates, only=None, areas=None, regression=False):
+    """Filter the registry down to a subset, using entry metadata only.
+
+    `only` is an exact id, `areas` matches the entry's `area`, and
+    `regression` keeps entries flagged `"regression": true` — candidates
+    kept to guard a specific fix, which used to be a separate batch file.
+    Filters compose (AND).
+    """
+    out = list(candidates)
+    if only:
+        out = [c for c in out if c["id"] == only]
+    if areas:
+        wanted = {a.strip() for a in areas if a.strip()}
+        out = [c for c in out if c.get("area") in wanted]
+    if regression:
+        out = [c for c in out if c.get("regression") is True]
+    return out
 
 
 def hard_check(answer: str, must_match: list, must_not_match: list) -> bool:
@@ -236,10 +257,29 @@ def main():
     ap.add_argument(
         "--candidates",
         default=str(DEFAULT_CANDIDATES),
-        help="path to a candidates jsonl file (default: tasks/candidates-all.jsonl, "
-             "the current consolidated + fixed set)",
+        help="path to a candidates jsonl file (default: tasks/screening.jsonl, "
+             "the one active screening registry)",
     )
     ap.add_argument("--only", help="run a single candidate id")
+    ap.add_argument(
+        "--area",
+        action="append",
+        help=(
+            "screen only candidates in this area (repeatable, e.g. --area "
+            "triggering --area freshness). Areas are entry metadata: "
+            "triggering, freshness, environments, builds, services, "
+            "composition, sharing, publish, cuda, containers."
+        ),
+    )
+    ap.add_argument(
+        "--regression",
+        action="store_true",
+        help=(
+            "screen only candidates flagged `regression` — the set kept to "
+            "guard a specific check/skill fix (replaces the retired "
+            "candidates-regression.jsonl batch file)."
+        ),
+    )
     ap.add_argument(
         "--concurrency",
         type=int,
@@ -306,11 +346,25 @@ def main():
         for line in Path(args.candidates).read_text().splitlines()
         if line.strip()
     ]
-    if args.only:
-        candidates = [c for c in candidates if c["id"] == args.only]
-        if not candidates:
-            print(f"No candidate with id '{args.only}' found.", file=sys.stderr)
-            sys.exit(1)
+    total = len(candidates)
+    candidates = select(
+        candidates, only=args.only, areas=args.area, regression=args.regression
+    )
+    if not candidates:
+        criteria = []
+        if args.only:
+            criteria.append(f"id={args.only}")
+        if args.area:
+            criteria.append(f"area={','.join(args.area)}")
+        if args.regression:
+            criteria.append("regression=true")
+        print(
+            f"No candidate in {args.candidates} matches "
+            f"{' and '.join(criteria) or '(no filter)'} "
+            f"({total} entr{'y' if total == 1 else 'ies'} in the registry).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     n = min(args.concurrency, len(candidates)) or 1
     print(

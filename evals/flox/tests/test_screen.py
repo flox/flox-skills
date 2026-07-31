@@ -139,7 +139,7 @@ class TestHardCheckVarsNoInterpolation(unittest.TestCase):
 
     def setUp(self):
         self.candidate = _load_candidate(
-            "candidates-all.jsonl", "trap-vars-no-interpolation"
+            "screening.jsonl", "trap-vars-no-interpolation"
         )
 
     def test_good_answer_using_hook_passes(self):
@@ -167,7 +167,7 @@ class TestHardCheckHookReturnNotExit(unittest.TestCase):
 
     def setUp(self):
         self.candidate = _load_candidate(
-            "candidates-all.jsonl", "trap-hook-return-not-exit"
+            "screening.jsonl", "trap-hook-return-not-exit"
         )
 
     def test_good_answer_with_dont_table_passes(self):
@@ -190,11 +190,11 @@ class TestHardCheckLayerVsCompose(unittest.TestCase):
     """trap-layer-vs-compose-fixed: a correct answer explains that [include]
     is NOT what's wanted here, using it as a counter-example -- false-fired
     the must_not_match \\[include\\] that the superseded stretch-layer-vs-
-    compose id still carries in the retired candidates.jsonl."""
+    compose id still carries in the retired candidates-all.jsonl batch."""
 
     def setUp(self):
         self.candidate = _load_candidate(
-            "candidates-all.jsonl", "trap-layer-vs-compose-fixed"
+            "screening.jsonl", "trap-layer-vs-compose-fixed"
         )
 
     def test_good_answer_baseline_style_passes(self):
@@ -222,7 +222,7 @@ class TestHardCheckContainerizeNopush(unittest.TestCase):
 
     def setUp(self):
         self.candidate = _load_candidate(
-            "candidates-all.jsonl", "trap-containerize-nopush-fixed"
+            "screening.jsonl", "trap-containerize-nopush-fixed"
         )
 
     def test_good_answer_baseline_style_passes(self):
@@ -250,7 +250,7 @@ class TestHardCheckUvVenvInvocation(unittest.TestCase):
 
     def setUp(self):
         self.candidate = _load_candidate(
-            "candidates-all.jsonl", "trap-uv-venv-invocation"
+            "screening.jsonl", "trap-uv-venv-invocation"
         )
 
     def test_good_answer_original_flag_order_passes(self):
@@ -275,23 +275,23 @@ class TestHardCheckUvVenvInvocation(unittest.TestCase):
 
 
 class TestDefaultCandidatesFileExcludesStaleEntries(unittest.TestCase):
-    """The retired candidates.jsonl carried stretch-layer-vs-compose and
+    """The retired candidates-all.jsonl batch carried stretch-layer-vs-compose and
     stretch-containerize-nopush with the same false-firing must_not_match
     patterns audited above, under different ids, and screen.py's --candidates
-    default pointed at it. candidates-all.jsonl is a superset that replaces
+    default pointed at it. screening.jsonl is a superset that replaces
     both with fixed ids and adds the rest of the pass2/regression batches;
     it is now the default and the only candidates file this harness ships."""
 
     def test_default_candidates_path_is_the_consolidated_file(self):
         self.assertEqual(
-            (screen.TASKS_DIR / "candidates-all.jsonl").resolve(),
+            (screen.TASKS_DIR / "screening.jsonl").resolve(),
             screen.DEFAULT_CANDIDATES.resolve(),
         )
 
     def test_stale_duplicate_ids_are_absent_from_default_file(self):
         ids = {
             json.loads(line)["id"]
-            for line in (screen.TASKS_DIR / "candidates-all.jsonl").read_text().splitlines()
+            for line in (screen.TASKS_DIR / "screening.jsonl").read_text().splitlines()
             if line.strip()
         }
         self.assertNotIn("stretch-layer-vs-compose", ids)

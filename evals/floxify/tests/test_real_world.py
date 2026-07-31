@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Unit tests for the Tier 2 /floxify eval harness (tier2.py).
+"""Unit tests for the real-world /floxify eval harness (real_world.py).
 
 Covers the deterministic, unit-testable pieces: structural-conformance
 checks (runtime pin / service-block regexes), registry loading, and the
 clone-at-SHA fallback chain. The agentic skill run and LLM judge call are
-integration-only (same as Tier 1's run_floxify.py has no unit tests around
+integration-only (same as synthetic's run_floxify.py has no unit tests around
 `_run_claude_agent`/`_judge`) and are exercised by an actual `--only
 mastodon` run, not here.
 
-Run: python3 -m unittest tests.test_tier2 -v
+Run: python3 -m unittest tests.test_real_world -v
 """
 import json
 import shutil
@@ -19,13 +19,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import tier2
+import real_world
 
 # Loaded once for the whole module: the real verify.py under the in-repo
 # skill dir, used wherever a test needs the actual `matching_service_names`/
 # `_service_covers` rule (AI-468) rather than re-deriving the alias table
 # in test code. Pure logic, no network — safe to load at import time.
-_VERIFY_MOD = tier2._load_verify_module(tier2.DEFAULT_SKILL_DIR)
+_VERIFY_MOD = real_world._load_verify_module(real_world.DEFAULT_SKILL_DIR)
 
 # A registry entry expecting a single wired postgres service, with no
 # runtime pins -- read-only in every test that uses it (_structural_checks
@@ -51,7 +51,7 @@ def _agent_writes_manifest(manifest_text):
         (target / ".flox" / "env").mkdir(parents=True, exist_ok=True)
         (target / ".flox" / "env" / "manifest.toml").write_text(manifest_text)
         # AI-442: _run_claude_agent is a 3-tuple now (adds cost/usage/
-        # tool-call meta) -- tier2.py's own call site only mechanically
+        # tool-call meta) -- real_world.py's own call site only mechanically
         # unpacks and discards the third element (out of AI-442 PR 1's
         # scope), so a zeroed stand-in is enough here.
         return "agent output", None, {
@@ -65,28 +65,28 @@ def _agent_writes_manifest(manifest_text):
 class TestRunGit(unittest.TestCase):
     """`_run_git` wraps subprocess.run into a (ok, error) tuple."""
 
-    @patch("tier2.subprocess.run")
+    @patch("real_world.subprocess.run")
     def test_success(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="", stderr=""
         )
-        ok, err = tier2._run_git(["git", "init"], timeout=10)
+        ok, err = real_world._run_git(["git", "init"], timeout=10)
         self.assertTrue(ok)
         self.assertEqual(err, "")
 
-    @patch("tier2.subprocess.run")
+    @patch("real_world.subprocess.run")
     def test_failure_captures_stderr(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=128, stdout="", stderr="fatal: repository not found"
         )
-        ok, err = tier2._run_git(["git", "clone", "bad-url"], timeout=10)
+        ok, err = real_world._run_git(["git", "clone", "bad-url"], timeout=10)
         self.assertFalse(ok)
         self.assertIn("fatal: repository not found", err)
 
-    @patch("tier2.subprocess.run")
+    @patch("real_world.subprocess.run")
     def test_timeout(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="git", timeout=10)
-        ok, err = tier2._run_git(["git", "fetch"], timeout=10)
+        ok, err = real_world._run_git(["git", "fetch"], timeout=10)
         self.assertFalse(ok)
         self.assertIn("timed out", err)
 
@@ -95,47 +95,47 @@ class TestCloneAtSha(unittest.TestCase):
     """`_clone_at_sha` falls back direct-fetch -> partial-clone -> full-clone."""
 
     def setUp(self):
-        self.tmpdir = tempfile.mkdtemp(prefix="tier2-clone-test-")
+        self.tmpdir = tempfile.mkdtemp(prefix="real_world-clone-test-")
 
     def tearDown(self):
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    @patch("tier2._try_full_clone")
-    @patch("tier2._try_partial_clone")
-    @patch("tier2._try_direct_fetch")
+    @patch("real_world._try_full_clone")
+    @patch("real_world._try_partial_clone")
+    @patch("real_world._try_direct_fetch")
     def test_direct_fetch_succeeds_short_circuits(
         self, mock_direct, mock_partial, mock_full
     ):
         mock_direct.return_value = None
-        result = tier2._clone_at_sha("https://example.com/r", "abc123", self.tmpdir)
+        result = real_world._clone_at_sha("https://example.com/r", "abc123", self.tmpdir)
         self.assertIsNone(result)
         mock_direct.assert_called_once()
         mock_partial.assert_not_called()
         mock_full.assert_not_called()
 
-    @patch("tier2._try_full_clone")
-    @patch("tier2._try_partial_clone")
-    @patch("tier2._try_direct_fetch")
+    @patch("real_world._try_full_clone")
+    @patch("real_world._try_partial_clone")
+    @patch("real_world._try_direct_fetch")
     def test_falls_back_to_partial_clone(self, mock_direct, mock_partial, mock_full):
         mock_direct.return_value = "couldn't find remote ref abc123"
         mock_partial.return_value = None
-        result = tier2._clone_at_sha("https://example.com/r", "abc123", self.tmpdir)
+        result = real_world._clone_at_sha("https://example.com/r", "abc123", self.tmpdir)
         self.assertIsNone(result)
         mock_direct.assert_called_once()
         mock_partial.assert_called_once()
         mock_full.assert_not_called()
 
-    @patch("tier2._try_full_clone")
-    @patch("tier2._try_partial_clone")
-    @patch("tier2._try_direct_fetch")
+    @patch("real_world._try_full_clone")
+    @patch("real_world._try_partial_clone")
+    @patch("real_world._try_direct_fetch")
     def test_all_strategies_fail_reports_combined_error(
         self, mock_direct, mock_partial, mock_full
     ):
         mock_direct.return_value = "direct failed"
         mock_partial.return_value = "partial failed"
         mock_full.return_value = "full failed"
-        result = tier2._clone_at_sha("https://example.com/r", "abc123", self.tmpdir)
+        result = real_world._clone_at_sha("https://example.com/r", "abc123", self.tmpdir)
         self.assertIsNotNone(result)
         self.assertIn("direct failed", result)
         self.assertIn("partial failed", result)
@@ -151,13 +151,13 @@ class TestCaptureAndStripUpstreamFlox(unittest.TestCase):
     harness scored the UPSTREAM manifest instead of the skill's output."""
 
     def setUp(self):
-        self.tmpdir = tempfile.mkdtemp(prefix="tier2-upstream-flox-test-")
+        self.tmpdir = tempfile.mkdtemp(prefix="real_world-upstream-flox-test-")
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_no_flox_dir_returns_false_none_empty(self):
-        had, manifest, files, note = tier2._capture_and_strip_upstream_flox(
+        had, manifest, files, note = real_world._capture_and_strip_upstream_flox(
             self.tmpdir
         )
         self.assertFalse(had)
@@ -170,7 +170,7 @@ class TestCaptureAndStripUpstreamFlox(unittest.TestCase):
         flox_env.mkdir(parents=True)
         (flox_env / "manifest.toml").write_text('[install]\nfoo.pkg-path = "foo"\n')
 
-        had, manifest, files, note = tier2._capture_and_strip_upstream_flox(
+        had, manifest, files, note = real_world._capture_and_strip_upstream_flox(
             self.tmpdir
         )
 
@@ -185,7 +185,7 @@ class TestCaptureAndStripUpstreamFlox(unittest.TestCase):
         flox_dir.mkdir()
         (flox_dir / ".gitignore").write_text("cache/\n")
 
-        had, manifest, files, note = tier2._capture_and_strip_upstream_flox(
+        had, manifest, files, note = real_world._capture_and_strip_upstream_flox(
             self.tmpdir
         )
 
@@ -205,7 +205,7 @@ class TestCaptureAndStripUpstreamFlox(unittest.TestCase):
         (flox_env / "manifest.toml").write_text("[install]\n")
         (flox_env / "on-activate.sh").write_text("#!/usr/bin/env bash\n")
 
-        had, _manifest, files, _note = tier2._capture_and_strip_upstream_flox(
+        had, _manifest, files, _note = real_world._capture_and_strip_upstream_flox(
             self.tmpdir
         )
 
@@ -221,14 +221,14 @@ class TestCaptureAndStripUpstreamFlox(unittest.TestCase):
         # pool.map catches it — a symlinked .flox must never reach that
         # path. The symlink target itself must survive: unlinking the
         # symlink must not delete (or even read) whatever it points to.
-        target = Path(tempfile.mkdtemp(prefix="tier2-symlink-target-"))
+        target = Path(tempfile.mkdtemp(prefix="real_world-symlink-target-"))
         try:
             (target / "env").mkdir()
             (target / "env" / "manifest.toml").write_text("SENSITIVE\n")
             flox_link = Path(self.tmpdir) / ".flox"
             flox_link.symlink_to(target, target_is_directory=True)
 
-            had, manifest, files, note = tier2._capture_and_strip_upstream_flox(
+            had, manifest, files, note = real_world._capture_and_strip_upstream_flox(
                 self.tmpdir
             )
 
@@ -251,7 +251,7 @@ class TestCaptureAndStripUpstreamFlox(unittest.TestCase):
         # symlinked manifest.toml would land arbitrary host-file content
         # in upstream_manifest — a value that persists to the results
         # JSON and uploads as a CI artifact. Must never be read through.
-        secret = Path(tempfile.mkdtemp(prefix="tier2-symlink-secret-"))
+        secret = Path(tempfile.mkdtemp(prefix="real_world-symlink-secret-"))
         try:
             secret_file = secret / "secret.toml"
             secret_file.write_text("SENSITIVE\n")
@@ -259,7 +259,7 @@ class TestCaptureAndStripUpstreamFlox(unittest.TestCase):
             flox_env.mkdir(parents=True)
             (flox_env / "manifest.toml").symlink_to(secret_file)
 
-            had, manifest, files, note = tier2._capture_and_strip_upstream_flox(
+            had, manifest, files, note = real_world._capture_and_strip_upstream_flox(
                 self.tmpdir
             )
 
@@ -277,27 +277,27 @@ class TestCaptureAndStripUpstreamFlox(unittest.TestCase):
 class TestRuntimePinned(unittest.TestCase):
     def test_matches_generic_pkg_path(self):
         manifest = 'ruby.pkg-path = "ruby"\n'
-        self.assertTrue(tier2._runtime_pinned(manifest, r"ruby(_[0-9_]+)?"))
+        self.assertTrue(real_world._runtime_pinned(manifest, r"ruby(_[0-9_]+)?"))
 
     def test_matches_versioned_pkg_path(self):
         manifest = 'ruby.pkg-path = "ruby_3_3"\n'
-        self.assertTrue(tier2._runtime_pinned(manifest, r"ruby(_[0-9_]+)?"))
+        self.assertTrue(real_world._runtime_pinned(manifest, r"ruby(_[0-9_]+)?"))
 
     def test_rejects_near_miss_package(self):
         # rubyPackages.foo must not satisfy a "ruby" runtime pin.
         manifest = 'lint.pkg-path = "rubyPackages.foo"\n'
-        self.assertFalse(tier2._runtime_pinned(manifest, r"ruby(_[0-9_]+)?"))
+        self.assertFalse(real_world._runtime_pinned(manifest, r"ruby(_[0-9_]+)?"))
 
     def test_matches_nodejs_24_exactly(self):
         manifest = 'nodejs.pkg-path = "nodejs_24"\n'
-        self.assertTrue(tier2._runtime_pinned(manifest, "nodejs_24"))
+        self.assertTrue(real_world._runtime_pinned(manifest, "nodejs_24"))
 
     def test_rejects_wrong_node_version(self):
         manifest = 'nodejs.pkg-path = "nodejs_20"\n'
-        self.assertFalse(tier2._runtime_pinned(manifest, "nodejs_24"))
+        self.assertFalse(real_world._runtime_pinned(manifest, "nodejs_24"))
 
     def test_none_manifest_returns_false(self):
-        self.assertFalse(tier2._runtime_pinned(None, "nodejs_24"))
+        self.assertFalse(real_world._runtime_pinned(None, "nodejs_24"))
 
 
 class TestLoadVerifyModule(unittest.TestCase):
@@ -315,7 +315,7 @@ class TestLoadVerifyModule(unittest.TestCase):
     `_structural_checks`, crashing the run. Both exports are now
     required together (`_REQUIRED_VERIFY_EXPORTS`)."""
 
-    @patch("tier2._load_detect_and_verify")
+    @patch("real_world._load_detect_and_verify")
     def test_module_missing_the_export_degrades_to_none(self, mock_load):
         # Has parse_manifest (the older, pre-AI-468 function) but neither
         # of the two required exports — the exact shape of a checkout
@@ -324,9 +324,9 @@ class TestLoadVerifyModule(unittest.TestCase):
             parse_manifest=lambda text: ({}, None),
         )
         mock_load.return_value = (None, old_verify_mod)
-        self.assertIsNone(tier2._load_verify_module("/some/skill/dir"))
+        self.assertIsNone(real_world._load_verify_module("/some/skill/dir"))
 
-    @patch("tier2._load_detect_and_verify")
+    @patch("real_world._load_detect_and_verify")
     def test_module_with_matching_service_names_but_not_compose_check_degrades_to_none(
         self, mock_load
     ):
@@ -340,9 +340,9 @@ class TestLoadVerifyModule(unittest.TestCase):
             matching_service_names=lambda manifest, kind: [],
         )
         mock_load.return_value = (None, partial_verify_mod)
-        self.assertIsNone(tier2._load_verify_module("/some/skill/dir"))
+        self.assertIsNone(real_world._load_verify_module("/some/skill/dir"))
 
-    @patch("tier2._load_detect_and_verify")
+    @patch("real_world._load_detect_and_verify")
     def test_module_with_both_exports_loads_normally(self, mock_load):
         current_verify_mod = types.SimpleNamespace(
             parse_manifest=lambda text: ({}, None),
@@ -351,12 +351,12 @@ class TestLoadVerifyModule(unittest.TestCase):
         )
         mock_load.return_value = (None, current_verify_mod)
         self.assertIs(
-            tier2._load_verify_module("/some/skill/dir"), current_verify_mod
+            real_world._load_verify_module("/some/skill/dir"), current_verify_mod
         )
 
-    @patch("tier2._load_detect_and_verify", side_effect=FileNotFoundError("boom"))
+    @patch("real_world._load_detect_and_verify", side_effect=FileNotFoundError("boom"))
     def test_load_failure_returns_none(self, _mock_load):
-        self.assertIsNone(tier2._load_verify_module("/nonexistent"))
+        self.assertIsNone(real_world._load_verify_module("/nonexistent"))
 
     def test_partial_module_flows_through_structural_checks_without_crashing(self):
         # End-to-end through the same path PR #51 review reproduced the
@@ -368,9 +368,9 @@ class TestLoadVerifyModule(unittest.TestCase):
             parse_manifest=lambda text: ({"services": {}}, None),
             matching_service_names=lambda manifest, kind: [],
         )
-        with patch("tier2._load_detect_and_verify",
+        with patch("real_world._load_detect_and_verify",
                     return_value=(None, partial_verify_mod)):
-            verify_mod = tier2._load_verify_module("/some/skill/dir")
+            verify_mod = real_world._load_verify_module("/some/skill/dir")
         self.assertIsNone(verify_mod)
         entry = {
             "id": "x", "expected_runtimes": [],
@@ -382,7 +382,7 @@ class TestLoadVerifyModule(unittest.TestCase):
             '[hook]\n'
             'on-activate = "docker-compose up -d clickhouse"\n'
         )
-        checks = tier2._structural_checks(entry, manifest, verify_mod=verify_mod)
+        checks = real_world._structural_checks(entry, manifest, verify_mod=verify_mod)
         self.assertFalse(checks["has_service_clickhouse"], checks)
 
     def test_old_module_flows_through_structural_checks_without_crashing(self):
@@ -392,10 +392,10 @@ class TestLoadVerifyModule(unittest.TestCase):
         old_verify_mod = types.SimpleNamespace(
             parse_manifest=lambda text: ({"services": {"postgres": {}}}, None),
         )
-        with patch("tier2._load_detect_and_verify",
+        with patch("real_world._load_detect_and_verify",
                     return_value=(None, old_verify_mod)):
-            verify_mod = tier2._load_verify_module("/some/skill/dir")
-        checks = tier2._structural_checks(
+            verify_mod = real_world._load_verify_module("/some/skill/dir")
+        checks = real_world._structural_checks(
             _POSTGRES_ENTRY, "[services.postgres]\ncommand = \"postgres\"\n",
             verify_mod=verify_mod,
         )
@@ -403,7 +403,7 @@ class TestLoadVerifyModule(unittest.TestCase):
 
 
 class TestMatchingServiceNames(unittest.TestCase):
-    """AI-468: `_matching_service_names`/`_parsed_manifest` are the tier2-
+    """AI-468: `_matching_service_names`/`_parsed_manifest` are the real_world-
     side glue around verify.py's shared `matching_service_names` rule —
     name OR command match against SERVICE_KIND_ALIASES, not name-only.
     The alias table itself is exercised in verify.py's own test_verify.py;
@@ -411,42 +411,42 @@ class TestMatchingServiceNames(unittest.TestCase):
     module rather than a stub, so no alias table is re-derived here."""
 
     def test_name_match_still_works(self):
-        manifest = tier2._parsed_manifest(
+        manifest = real_world._parsed_manifest(
             _VERIFY_MOD, "[services.postgres]\ncommand = \"postgres\"\n"
         )
         self.assertEqual(
-            tier2._matching_service_names(_VERIFY_MOD, manifest, "postgres"),
+            real_world._matching_service_names(_VERIFY_MOD, manifest, "postgres"),
             ["postgres"],
         )
 
     def test_unconventional_name_with_kind_matching_command_matches(self):
         # The exact AI-468 shape: `[services.db]` running postgres, which
-        # tier2's old name-only regex reported as "not declared".
-        manifest = tier2._parsed_manifest(
+        # real_world's old name-only regex reported as "not declared".
+        manifest = real_world._parsed_manifest(
             _VERIFY_MOD, '[services.db]\ncommand = "postgres -D /data"\n'
         )
         self.assertEqual(
-            tier2._matching_service_names(_VERIFY_MOD, manifest, "postgres"),
+            real_world._matching_service_names(_VERIFY_MOD, manifest, "postgres"),
             ["db"],
         )
 
     def test_genuinely_absent_service_does_not_match(self):
-        manifest = tier2._parsed_manifest(
+        manifest = real_world._parsed_manifest(
             _VERIFY_MOD, "[services.redis]\ncommand = \"redis-server\"\n"
         )
         self.assertEqual(
-            tier2._matching_service_names(_VERIFY_MOD, manifest, "postgres"), []
+            real_world._matching_service_names(_VERIFY_MOD, manifest, "postgres"), []
         )
 
     def test_none_manifest_dict_returns_empty(self):
         self.assertEqual(
-            tier2._matching_service_names(_VERIFY_MOD, None, "postgres"), []
+            real_world._matching_service_names(_VERIFY_MOD, None, "postgres"), []
         )
 
     def test_none_verify_mod_returns_empty_without_raising(self):
-        self.assertEqual(tier2._parsed_manifest(None, "[services.postgres]\n"), None)
+        self.assertEqual(real_world._parsed_manifest(None, "[services.postgres]\n"), None)
         self.assertEqual(
-            tier2._matching_service_names(None, {"services": {}}, "postgres"), []
+            real_world._matching_service_names(None, {"services": {}}, "postgres"), []
         )
 
 
@@ -459,18 +459,18 @@ class TestServiceExpectation(unittest.TestCase):
 
     def test_bare_string_defaults_to_expect_wired(self):
         self.assertEqual(
-            tier2._service_expectation("postgres"), ("postgres", "expect-wired")
+            real_world._service_expectation("postgres"), ("postgres", "expect-wired")
         )
 
     def test_dict_with_explicit_disposition(self):
         self.assertEqual(
-            tier2._service_expectation({"name": "clickhouse", "disposition": "deferred-ok"}),
+            real_world._service_expectation({"name": "clickhouse", "disposition": "deferred-ok"}),
             ("clickhouse", "deferred-ok"),
         )
 
     def test_dict_without_disposition_defaults_to_expect_wired(self):
         self.assertEqual(
-            tier2._service_expectation({"name": "postgres"}),
+            real_world._service_expectation({"name": "postgres"}),
             ("postgres", "expect-wired"),
         )
 
@@ -482,24 +482,24 @@ class TestComposeWired(unittest.TestCase):
     "genuinely invokes docker-compose" means."""
 
     def test_manifest_that_wires_compose(self):
-        manifest = tier2._parsed_manifest(
+        manifest = real_world._parsed_manifest(
             _VERIFY_MOD,
             '[install]\n'
             'docker-compose.pkg-path = "docker-compose"\n'
             '[hook]\n'
             'on-activate = "docker-compose up -d clickhouse"\n',
         )
-        self.assertTrue(tier2._compose_wired(_VERIFY_MOD, manifest))
+        self.assertTrue(real_world._compose_wired(_VERIFY_MOD, manifest))
 
     def test_manifest_that_does_not_wire_compose(self):
-        manifest = tier2._parsed_manifest(_VERIFY_MOD, "[install]\n")
-        self.assertFalse(tier2._compose_wired(_VERIFY_MOD, manifest))
+        manifest = real_world._parsed_manifest(_VERIFY_MOD, "[install]\n")
+        self.assertFalse(real_world._compose_wired(_VERIFY_MOD, manifest))
 
     def test_none_manifest_dict_is_false_not_a_crash(self):
-        self.assertFalse(tier2._compose_wired(_VERIFY_MOD, None))
+        self.assertFalse(real_world._compose_wired(_VERIFY_MOD, None))
 
     def test_none_verify_mod_is_false_not_a_crash(self):
-        self.assertFalse(tier2._compose_wired(None, {"hook": {}}))
+        self.assertFalse(real_world._compose_wired(None, {"hook": {}}))
 
 
 class TestServiceDispositionResults(unittest.TestCase):
@@ -513,7 +513,7 @@ class TestServiceDispositionResults(unittest.TestCase):
     def test_wired_service_is_recorded_wired(self):
         entry = self._entry([{"name": "postgres", "disposition": "expect-wired"}])
         manifest = '[services.postgres]\ncommand = "postgres"\n'
-        results = tier2._service_disposition_results(entry, manifest, _VERIFY_MOD)
+        results = real_world._service_disposition_results(entry, manifest, _VERIFY_MOD)
         self.assertEqual(results, {"postgres": "wired"})
 
     def test_deferred_ok_with_mechanism_is_recorded_deferred(self):
@@ -524,13 +524,13 @@ class TestServiceDispositionResults(unittest.TestCase):
             '[hook]\n'
             'on-activate = "docker-compose up -d clickhouse"\n'
         )
-        results = tier2._service_disposition_results(entry, manifest, _VERIFY_MOD)
+        results = real_world._service_disposition_results(entry, manifest, _VERIFY_MOD)
         self.assertEqual(results, {"clickhouse": "deferred"})
 
     def test_deferred_ok_without_mechanism_is_recorded_missing(self):
         entry = self._entry([{"name": "clickhouse", "disposition": "deferred-ok"}])
         manifest = "[install]\n"
-        results = tier2._service_disposition_results(entry, manifest, _VERIFY_MOD)
+        results = real_world._service_disposition_results(entry, manifest, _VERIFY_MOD)
         self.assertEqual(results, {"clickhouse": "missing"})
 
     def test_expect_wired_with_compose_but_not_wired_is_recorded_missing(self):
@@ -543,12 +543,12 @@ class TestServiceDispositionResults(unittest.TestCase):
             '[hook]\n'
             'on-activate = "docker-compose up -d postgres"\n'
         )
-        results = tier2._service_disposition_results(entry, manifest, _VERIFY_MOD)
+        results = real_world._service_disposition_results(entry, manifest, _VERIFY_MOD)
         self.assertEqual(results, {"postgres": "missing"})
 
     def test_bare_string_entry_defaults_to_expect_wired(self):
         entry = self._entry(["redis"])
-        results = tier2._service_disposition_results(entry, "[install]\n", _VERIFY_MOD)
+        results = real_world._service_disposition_results(entry, "[install]\n", _VERIFY_MOD)
         self.assertEqual(results, {"redis": "missing"})
 
 
@@ -572,7 +572,7 @@ class TestStructuralChecks(unittest.TestCase):
             "[services.redis]\n"
             'command = "redis-server"\n'
         )
-        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+        checks = real_world._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
         self.assertTrue(checks["manifest_created"])
         self.assertTrue(checks["valid_toml"])
         self.assertTrue(checks["no_abs_paths"])
@@ -595,7 +595,7 @@ class TestStructuralChecks(unittest.TestCase):
             "[services.postgres]\n"
             'command = "postgres"\n'
         )
-        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+        checks = real_world._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
         self.assertTrue(checks["pins_ruby"])
         self.assertTrue(checks["has_service_postgres"])
         self.assertFalse(checks["has_service_redis"])
@@ -616,19 +616,19 @@ class TestStructuralChecks(unittest.TestCase):
             "[services.db]\n"
             'command = "postgres -D /data"\n'
         )
-        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+        checks = real_world._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
         self.assertTrue(checks["has_service_postgres"], checks)
 
     def test_genuinely_absent_service_fails_the_structural_check(self):
         manifest = "[services.redis]\ncommand = \"redis-server\"\n"
-        checks = tier2._structural_checks(_POSTGRES_ENTRY, manifest, verify_mod=_VERIFY_MOD)
+        checks = real_world._structural_checks(_POSTGRES_ENTRY, manifest, verify_mod=_VERIFY_MOD)
         self.assertFalse(checks["has_service_postgres"], checks)
 
     def test_no_verify_mod_fails_has_service_closed(self):
         # A skill-dir load failure must not silently pass a service check
         # it never actually evaluated.
         manifest = "[services.postgres]\ncommand = \"postgres\"\n"
-        checks = tier2._structural_checks(_POSTGRES_ENTRY, manifest, verify_mod=None)
+        checks = real_world._structural_checks(_POSTGRES_ENTRY, manifest, verify_mod=None)
         self.assertFalse(checks["has_service_postgres"], checks)
 
     def test_no_manifest_fails_everything(self):
@@ -637,7 +637,7 @@ class TestStructuralChecks(unittest.TestCase):
             "expected_runtimes": [{"name": "ruby", "pattern": r"ruby(_[0-9_]+)?"}],
             "expected_services": ["postgres"],
         }
-        checks = tier2._structural_checks(entry, None, verify_mod=_VERIFY_MOD)
+        checks = real_world._structural_checks(entry, None, verify_mod=_VERIFY_MOD)
         self.assertFalse(checks["manifest_created"])
         self.assertFalse(checks["valid_toml"])
         self.assertFalse(checks["no_abs_paths"])
@@ -650,7 +650,7 @@ class TestStructuralChecks(unittest.TestCase):
             "[vars]\n"
             'cache_dir = "/home/user/.cache"\n'
         )
-        checks = tier2._structural_checks(entry, manifest)
+        checks = real_world._structural_checks(entry, manifest)
         self.assertFalse(checks["no_abs_paths"])
 
     # --- disposition semantics (AI-470) ---------------------------------
@@ -661,7 +661,7 @@ class TestStructuralChecks(unittest.TestCase):
             "expected_services": [{"name": "clickhouse", "disposition": "deferred-ok"}],
         }
         manifest = '[services.clickhouse]\ncommand = "clickhouse-server"\n'
-        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+        checks = real_world._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
         self.assertTrue(checks["has_service_clickhouse"], checks)
 
     def test_deferred_ok_with_compose_mechanism_passes(self):
@@ -678,7 +678,7 @@ class TestStructuralChecks(unittest.TestCase):
             '[hook]\n'
             'on-activate = "docker-compose up -d clickhouse"\n'
         )
-        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+        checks = real_world._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
         self.assertTrue(checks["has_service_clickhouse"], checks)
 
     def test_expect_wired_with_only_compose_mechanism_fails(self):
@@ -694,7 +694,7 @@ class TestStructuralChecks(unittest.TestCase):
             '[hook]\n'
             'on-activate = "docker-compose up -d postgres"\n'
         )
-        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+        checks = real_world._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
         self.assertFalse(checks["has_service_postgres"], checks)
 
     def test_silently_dropped_service_fails_both_dispositions(self):
@@ -707,7 +707,7 @@ class TestStructuralChecks(unittest.TestCase):
                 "id": "x", "expected_runtimes": [],
                 "expected_services": [{"name": "redis", "disposition": disposition}],
             }
-            checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+            checks = real_world._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
             self.assertFalse(
                 checks["has_service_redis"],
                 f"disposition={disposition!r} must not pass a silently-dropped service",
@@ -724,22 +724,22 @@ class TestLoadRegistry(unittest.TestCase):
             f.write(json.dumps({"id": "b"}) + "\n")
             path = f.name
         try:
-            entries = tier2._load_registry(path)
+            entries = real_world._load_registry(path)
             self.assertEqual([e["id"] for e in entries], ["a", "b"])
         finally:
             Path(path).unlink()
 
 
 class TestRegistrySchema(unittest.TestCase):
-    """AI-470: every `expected_services` entry in the real tier2.jsonl must
+    """AI-470: every `expected_services` entry in the real real-world.jsonl must
     be a well-formed {"name", "disposition"} dict with a recognized
     disposition — and every fixture but posthog must be behavior-
     preserving (all expect-wired, the pre-AI-470 default)."""
 
     @classmethod
     def setUpClass(cls):
-        here = Path(tier2.__file__).resolve().parent
-        cls.entries = tier2._load_registry(here / "tier2.jsonl")
+        here = Path(real_world.__file__).resolve().parent
+        cls.entries = real_world._load_registry(here / "real-world.jsonl")
 
     def test_every_expected_services_entry_is_a_well_formed_dict(self):
         for entry in self.entries:
@@ -752,7 +752,7 @@ class TestRegistrySchema(unittest.TestCase):
                 self.assertIn("name", service, entry["id"])
                 self.assertIn("disposition", service, entry["id"])
                 self.assertIn(
-                    service["disposition"], tier2.KNOWN_DISPOSITIONS,
+                    service["disposition"], real_world.KNOWN_DISPOSITIONS,
                     f"{entry['id']}: unrecognized disposition "
                     f"{service['disposition']!r}",
                 )
@@ -800,7 +800,7 @@ class TestSummarize(unittest.TestCase):
 
     def test_reps_1_plain_entries(self):
         results = [_run(hard_pass=True, score=5)]
-        summary = tier2._summarize(results, "skill@branch")
+        summary = real_world._summarize(results, "skill@branch")
         self.assertEqual(summary["n_repos"], 1)
         self.assertEqual(summary["n"], 1)
         self.assertEqual(summary["hard_pass_rate"], 1.0)
@@ -817,7 +817,7 @@ class TestSummarize(unittest.TestCase):
                 "hard_pass_rate_across_reps": 1.0,
             }
         ]
-        summary = tier2._summarize(results, "skill@branch")
+        summary = real_world._summarize(results, "skill@branch")
         self.assertEqual(summary["n_repos"], 1)     # one repo
         self.assertEqual(summary["n"], 2)           # two scored runs, NOT zero
         self.assertEqual(summary["hard_pass_rate"], 1.0)
@@ -832,20 +832,20 @@ class TestSummarize(unittest.TestCase):
                 "runs": [_run(error="clone failed"), _run(hard_pass=True, score=3)],
             }
         ]
-        summary = tier2._summarize(results, "s")
+        summary = real_world._summarize(results, "s")
         self.assertEqual(summary["n_errors"], 1)
         self.assertEqual(summary["n"], 1)  # one scored run among the two
 
     def test_verify_fields_flow_through(self):
-        # AI-465: tier2 runs must feed _stats the same "verify" shape
+        # AI-465: real_world runs must feed _stats the same "verify" shape
         # run_floxify.py produces, or verify_checked/verify_clean/
-        # verify_hard_violation_rate silently stay zero for tier2 runs.
+        # verify_hard_violation_rate silently stay zero for real_world runs.
         results = [
             _run(hard_pass=True, score=5, verify={
                 "hard_count": 0, "advisory_count": 0, "catalog_checked": True,
             }),
         ]
-        summary = tier2._summarize(results, "skill@branch")
+        summary = real_world._summarize(results, "skill@branch")
         self.assertEqual(summary["verify_checked"], 1)
         self.assertEqual(summary["verify_clean"], 1)
         self.assertEqual(summary["verify_hard_violation_rate"], 0.0)
@@ -856,14 +856,14 @@ class TestSummarize(unittest.TestCase):
                 "hard_count": 2, "advisory_count": 0, "catalog_checked": True,
             }),
         ]
-        summary = tier2._summarize(results, "skill@branch")
+        summary = real_world._summarize(results, "skill@branch")
         self.assertEqual(summary["verify_checked"], 1)
         self.assertEqual(summary["verify_clean"], 0)
         self.assertEqual(summary["verify_hard_violation_rate"], 1.0)
 
     def test_no_verify_block_leaves_rate_none(self):
         results = [_run(hard_pass=True, score=5)]
-        summary = tier2._summarize(results, "skill@branch")
+        summary = real_world._summarize(results, "skill@branch")
         self.assertEqual(summary["verify_checked"], 0)
         self.assertIsNone(summary["verify_hard_violation_rate"])
 
@@ -874,13 +874,13 @@ class TestRegistryPatternDriftGuard(unittest.TestCase):
     edit silently stops matching real output (regex drift)."""
 
     def test_mastodon_patterns_match_real_manifest(self):
-        here = Path(tier2.__file__).resolve().parent
+        here = Path(real_world.__file__).resolve().parent
         entry = next(
-            e for e in tier2._load_registry(here / "tier2.jsonl")
+            e for e in real_world._load_registry(here / "real-world.jsonl")
             if e["id"] == "mastodon"
         )
-        manifest = (here / "testdata" / "mastodon-manifest.toml").read_text()
-        checks = tier2._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
+        manifest = (here / "samples" / "mastodon-manifest.toml").read_text()
+        checks = real_world._structural_checks(entry, manifest, verify_mod=_VERIFY_MOD)
         self.assertTrue(checks["pins_ruby_4_0"], checks)
         self.assertTrue(checks["pins_nodejs_24"], checks)
         self.assertTrue(checks["has_service_postgres"], checks)
@@ -900,24 +900,24 @@ class TestProbeCommandFor(unittest.TestCase):
     """
 
     def test_postgres_probe_is_bare_pg_isready(self):
-        cmd = tier2._probe_command_for("postgres")
+        cmd = real_world._probe_command_for("postgres")
         self.assertIn("pg_isready", cmd)
         self.assertNotIn("-h ", cmd)
         self.assertNotIn("-p ", cmd)
 
     def test_postgresql_alias_resolves(self):
-        self.assertIn("pg_isready", tier2._probe_command_for("postgresql"))
+        self.assertIn("pg_isready", real_world._probe_command_for("postgresql"))
 
     def test_redis_probe_expects_pong(self):
-        cmd = tier2._probe_command_for("redis")
+        cmd = real_world._probe_command_for("redis")
         self.assertIn("redis-cli", cmd)
         self.assertIn("ping", cmd.lower())
 
     def test_mariadb_probe(self):
-        self.assertIn("admin", tier2._probe_command_for("mariadb"))
+        self.assertIn("admin", real_world._probe_command_for("mariadb"))
 
     def test_unknown_kind_has_no_probe(self):
-        self.assertIsNone(tier2._probe_command_for("clickhouse"))
+        self.assertIsNone(real_world._probe_command_for("clickhouse"))
 
 
 class TestProbeServices(unittest.TestCase):
@@ -934,64 +934,64 @@ class TestProbeServices(unittest.TestCase):
     problem that must never be reported as a service failure).
     """
 
-    @patch("tier2.shutil.which", return_value=None)
+    @patch("real_world.shutil.which", return_value=None)
     def test_flox_absent_skips_rather_than_fails(self, _which):
-        res = tier2._probe_services("/tmp/x", ["postgres"])
+        res = real_world._probe_services("/tmp/x", ["postgres"])
         self.assertTrue(res["postgres"]["skipped"])
         self.assertIsNone(res["postgres"]["ok"])
 
-    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
-    @patch("tier2._run_flox")
+    @patch("real_world.shutil.which", return_value="/usr/bin/flox")
+    @patch("real_world._run_flox")
     def test_uses_activate_start_services_not_bare_services_start(
         self, mock_flox, _which
     ):
         mock_flox.return_value = (True, "__SERVICE_OK__")
-        tier2._probe_services("/tmp/x", ["postgres"])
+        real_world._probe_services("/tmp/x", ["postgres"])
         args = mock_flox.call_args_list[0].args[0]
         self.assertIn("activate", args)
         self.assertIn("--start-services", args)
 
-    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
-    @patch("tier2._run_flox")
+    @patch("real_world.shutil.which", return_value="/usr/bin/flox")
+    @patch("real_world._run_flox")
     def test_service_serving_is_ok(self, mock_flox, _which):
         mock_flox.return_value = (True, "__SERVICE_OK__")
-        res = tier2._probe_services("/tmp/x", ["postgres"])
+        res = real_world._probe_services("/tmp/x", ["postgres"])
         self.assertTrue(res["postgres"]["ok"], res)
         self.assertFalse(res["postgres"]["skipped"])
 
-    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
-    @patch("tier2._run_flox")
+    @patch("real_world.shutil.which", return_value="/usr/bin/flox")
+    @patch("real_world._run_flox")
     def test_service_never_comes_up_is_a_real_failure(self, mock_flox, _which):
         # THE case this ticket exists for: [services.*] present, activation ok,
         # but nothing ever answers on the advertised address.
         mock_flox.return_value = (False, "__SERVICE_DEAD__")
-        res = tier2._probe_services("/tmp/x", ["postgres"])
+        res = real_world._probe_services("/tmp/x", ["postgres"])
         self.assertFalse(res["postgres"]["ok"], res)
         self.assertFalse(res["postgres"]["skipped"], res)
 
-    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
-    @patch("tier2._run_flox")
+    @patch("real_world.shutil.which", return_value="/usr/bin/flox")
+    @patch("real_world._run_flox")
     def test_harness_error_is_skipped_not_a_service_failure(self, mock_flox, _which):
         # No sentinel in the output => flox itself errored (bad flag, env
         # broken, timeout). Reporting that as "your postgres is broken" would
         # be a lie — exactly the confusion AI-454 flags for activation.
         mock_flox.return_value = (False, "ERROR: unknown flag --start-services")
-        res = tier2._probe_services("/tmp/x", ["postgres"])
+        res = real_world._probe_services("/tmp/x", ["postgres"])
         self.assertTrue(res["postgres"]["skipped"], res)
         self.assertIsNone(res["postgres"]["ok"], res)
         self.assertIn("could not be probed", res["postgres"]["notes"])
 
-    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
-    @patch("tier2._run_flox")
+    @patch("real_world.shutil.which", return_value="/usr/bin/flox")
+    @patch("real_world._run_flox")
     def test_unprobeable_service_is_skipped_not_failed(self, mock_flox, _which):
         # clickhouse has no probe; absence of a probe must never read as failure.
         mock_flox.return_value = (True, "__SERVICE_OK__")
-        res = tier2._probe_services("/tmp/x", ["clickhouse"])
+        res = real_world._probe_services("/tmp/x", ["clickhouse"])
         self.assertTrue(res["clickhouse"]["skipped"])
         self.assertIsNone(res["clickhouse"]["ok"])
 
-    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
-    @patch("tier2._run_flox")
+    @patch("real_world.shutil.which", return_value="/usr/bin/flox")
+    @patch("real_world._run_flox")
     def test_undeclared_service_is_not_probed(self, mock_flox, _which):
         """A service the manifest never declared must not be probed at all.
 
@@ -1006,7 +1006,7 @@ class TestProbeServices(unittest.TestCase):
         service work". Probing an undeclared service answers neither.
         """
         manifest = '[install]\npg.pkg-path = "postgresql_16"\n[hook]\non-activate = "pg_ctl start"\n'
-        res = tier2._probe_services(
+        res = real_world._probe_services(
             "/tmp/x", ["postgres"], manifest_text=manifest, verify_mod=_VERIFY_MOD,
         )
         self.assertTrue(res["postgres"]["skipped"], res)
@@ -1014,19 +1014,19 @@ class TestProbeServices(unittest.TestCase):
         self.assertIn("no [services.*] entry matches", res["postgres"]["notes"])
         mock_flox.assert_not_called()
 
-    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
-    @patch("tier2._run_flox")
+    @patch("real_world.shutil.which", return_value="/usr/bin/flox")
+    @patch("real_world._run_flox")
     def test_declared_service_is_probed(self, mock_flox, _which):
         mock_flox.return_value = (True, "__SERVICE_OK__")
         manifest = '[services.postgres]\ncommand = "postgres"\n'
-        res = tier2._probe_services(
+        res = real_world._probe_services(
             "/tmp/x", ["postgres"], manifest_text=manifest, verify_mod=_VERIFY_MOD,
         )
         self.assertTrue(res["postgres"]["ok"], res)
         mock_flox.assert_called()
 
-    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
-    @patch("tier2._run_flox")
+    @patch("real_world.shutil.which", return_value="/usr/bin/flox")
+    @patch("real_world._run_flox")
     def test_unconventionally_named_service_resolves_as_probe_target(
         self, mock_flox, _which
     ):
@@ -1035,15 +1035,15 @@ class TestProbeServices(unittest.TestCase):
         # declared" and skipped, so it was never probed.
         mock_flox.return_value = (True, "__SERVICE_OK__")
         manifest = '[services.db]\ncommand = "postgres -D /data"\n'
-        res = tier2._probe_services(
+        res = real_world._probe_services(
             "/tmp/x", ["postgres"], manifest_text=manifest, verify_mod=_VERIFY_MOD,
         )
         self.assertTrue(res["postgres"]["ok"], res)
         self.assertFalse(res["postgres"]["skipped"], res)
         mock_flox.assert_called()
 
-    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
-    @patch("tier2._run_flox")
+    @patch("real_world.shutil.which", return_value="/usr/bin/flox")
+    @patch("real_world._run_flox")
     def test_multiple_matches_probes_first_and_notes_ambiguity(
         self, mock_flox, _which
     ):
@@ -1052,29 +1052,29 @@ class TestProbeServices(unittest.TestCase):
             '[services.postgres]\ncommand = "postgres"\n'
             '[services.pg-replica]\ncommand = "postgres --replica"\n'
         )
-        res = tier2._probe_services(
+        res = real_world._probe_services(
             "/tmp/x", ["postgres"], manifest_text=manifest, verify_mod=_VERIFY_MOD,
         )
         self.assertTrue(res["postgres"]["ok"], res)
         self.assertIn("multiple", res["postgres"]["notes"])
         self.assertIn("postgres", res["postgres"]["notes"])
 
-    @patch("tier2.shutil.which", return_value="/usr/bin/flox")
-    @patch("tier2._run_flox")
+    @patch("real_world.shutil.which", return_value="/usr/bin/flox")
+    @patch("real_world._run_flox")
     def test_probe_script_polls_for_readiness(self, mock_flox, _which):
         # Services start asynchronously — a single immediate probe would race.
         mock_flox.return_value = (True, "__SERVICE_OK__")
-        tier2._probe_services("/tmp/x", ["postgres"])
+        real_world._probe_services("/tmp/x", ["postgres"])
         script = mock_flox.call_args_list[0].args[0][-1]
         self.assertIn("pg_isready", script)
         self.assertIn("sleep", script)
 
 
 class TestProcessEntryVerifyLeg(unittest.TestCase):
-    """AI-465: tier2.py never ran the deterministic verify.py leg
-    run_floxify.py's Tier 1 harness runs (AI-461) — it trusted the
+    """AI-465: real_world.py never ran the deterministic verify.py leg
+    run_floxify.py's synthetic harness runs (AI-461) — it trusted the
     skill's self-report. `process_entry` must reuse `_run_verify` the
-    same way Tier 1's `process_task` does: re-scan the cloned checkout,
+    same way synthetic's `process_task` does: re-scan the cloned checkout,
     record a per-repo `verify` block, and feed the confirmed-catalog
     note to the judge.
 
@@ -1089,10 +1089,10 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
         entry.update(overrides)
         return entry
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_verify")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_verify")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_verify_leg_result_recorded_in_output(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
@@ -1108,7 +1108,7 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
         }
         mock_judge.return_value = {"score": 4, "correct": True, "issues": []}
 
-        result = tier2.process_entry(self._entry(), "/fake/skill/dir")
+        result = real_world.process_entry(self._entry(), "/fake/skill/dir")
 
         self.assertIn("verify", result)
         self.assertEqual(result["verify"]["hard_count"], 1)
@@ -1116,11 +1116,11 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
         self.assertFalse(result["verify"]["catalog_checked"])
         self.assertEqual(len(result["verify"]["violations"]), 2)
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_verify")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
-    @patch("tier2._check_activation", return_value=(True, False, ""))
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_verify")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
+    @patch("real_world._check_activation", return_value=(True, False, ""))
     def test_catalog_live_follows_activate_true(
         self, mock_check_act, mock_clone, mock_agent, mock_verify, mock_judge
     ):
@@ -1131,14 +1131,14 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
         }
         mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
 
-        tier2.process_entry(self._entry(), "/fake/skill/dir", activate=True)
+        real_world.process_entry(self._entry(), "/fake/skill/dir", activate=True)
 
         self.assertTrue(mock_verify.call_args.kwargs["check_catalog_live"])
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_verify")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_verify")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_catalog_live_follows_activate_false(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
@@ -1151,14 +1151,14 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
         }
         mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
 
-        tier2.process_entry(self._entry(), "/fake/skill/dir", activate=False)
+        real_world.process_entry(self._entry(), "/fake/skill/dir", activate=False)
 
         self.assertFalse(mock_verify.call_args.kwargs["check_catalog_live"])
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_verify")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_verify")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_verify_result_fed_to_judge(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
@@ -1168,18 +1168,18 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
         mock_verify.return_value = sentinel
         mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
 
-        tier2.process_entry(self._entry(), "/fake/skill/dir")
+        real_world.process_entry(self._entry(), "/fake/skill/dir")
 
         self.assertIs(mock_judge.call_args.kwargs["verify_result"], sentinel)
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_no_manifest_records_verify_as_skipped_not_error(
         self, mock_clone, mock_agent, mock_judge
     ):
         # Clone succeeds but the skill never wrote a manifest — _run_verify
-        # (not mocked here) must short-circuit to a skip, matching Tier 1's
+        # (not mocked here) must short-circuit to a skip, matching synthetic's
         # own no-manifest test in test_run_floxify.py.
         mock_clone.return_value = None
         mock_agent.return_value = ("agent output", None, {
@@ -1189,19 +1189,19 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
         })
         mock_judge.return_value = {"score": 0, "correct": False, "issues": []}
 
-        result = tier2.process_entry(self._entry(), str(tier2.DEFAULT_SKILL_DIR))
+        result = real_world.process_entry(self._entry(), str(real_world.DEFAULT_SKILL_DIR))
 
         self.assertEqual(result["verify"]["violations"], [])
         self.assertEqual(result["verify"]["hard_count"], 0)
         self.assertFalse(result["verify"]["catalog_checked"])
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_real_verify_leg_flags_non_literal_vars(
         self, mock_clone, mock_agent, mock_judge
     ):
-        # Integration: does NOT mock _run_verify — proves the tier2 wiring
+        # Integration: does NOT mock _run_verify — proves the real_world wiring
         # actually reaches the real detect.py/verify.py against the cloned
         # checkout, not just that a mock was called. check_catalog_live is
         # False (activate defaults off), so this runs with no network,
@@ -1211,7 +1211,7 @@ class TestProcessEntryVerifyLeg(unittest.TestCase):
         mock_agent.side_effect = _agent_writes_manifest(manifest)
         mock_judge.return_value = {"score": 3, "correct": False, "issues": []}
 
-        result = tier2.process_entry(self._entry(), str(tier2.DEFAULT_SKILL_DIR))
+        result = real_world.process_entry(self._entry(), str(real_world.DEFAULT_SKILL_DIR))
 
         self.assertNotIn("error", result["verify"])
         rules = {v["rule"] for v in result["verify"]["violations"]}
@@ -1235,10 +1235,10 @@ class TestProcessEntryServiceRuleAndManifestPersistence(unittest.TestCase):
         entry.update(overrides)
         return entry
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_verify")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_verify")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_unconventionally_named_service_passes_structural_check_end_to_end(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
@@ -1257,14 +1257,14 @@ class TestProcessEntryServiceRuleAndManifestPersistence(unittest.TestCase):
         }
         mock_judge.return_value = {"score": 4, "correct": True, "issues": []}
 
-        result = tier2.process_entry(self._entry(), str(tier2.DEFAULT_SKILL_DIR))
+        result = real_world.process_entry(self._entry(), str(real_world.DEFAULT_SKILL_DIR))
 
         self.assertTrue(result["hard_checks"]["has_service_postgres"], result)
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_verify")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_verify")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_genuinely_absent_service_fails_structural_check_end_to_end(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
@@ -1276,14 +1276,14 @@ class TestProcessEntryServiceRuleAndManifestPersistence(unittest.TestCase):
         }
         mock_judge.return_value = {"score": 1, "correct": False, "issues": []}
 
-        result = tier2.process_entry(self._entry(), str(tier2.DEFAULT_SKILL_DIR))
+        result = real_world.process_entry(self._entry(), str(real_world.DEFAULT_SKILL_DIR))
 
         self.assertFalse(result["hard_checks"]["has_service_postgres"], result)
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_verify")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_verify")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_full_manifest_persisted_in_result(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
@@ -1302,8 +1302,8 @@ class TestProcessEntryServiceRuleAndManifestPersistence(unittest.TestCase):
         }
         mock_judge.return_value = {"score": 3, "correct": True, "issues": []}
 
-        result = tier2.process_entry(
-            self._entry(expected_services=[]), str(tier2.DEFAULT_SKILL_DIR),
+        result = real_world.process_entry(
+            self._entry(expected_services=[]), str(real_world.DEFAULT_SKILL_DIR),
         )
 
         self.assertEqual(result["manifest"], manifest)
@@ -1344,10 +1344,10 @@ class TestProcessEntryUpstreamFloxStrip(unittest.TestCase):
             return None
         return _clone
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_verify")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_verify")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_upstream_flox_stripped_before_agent_invocation(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
@@ -1375,7 +1375,7 @@ class TestProcessEntryUpstreamFloxStrip(unittest.TestCase):
         }
         mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
 
-        result = tier2.process_entry(self._entry(), "/fake/skill/dir")
+        result = real_world.process_entry(self._entry(), "/fake/skill/dir")
 
         self.assertFalse(
             seen["flox_present_at_agent_call"],
@@ -1385,10 +1385,10 @@ class TestProcessEntryUpstreamFloxStrip(unittest.TestCase):
         self.assertEqual(result["upstream_manifest"], "[install]\nupstream = true\n")
         self.assertEqual(result["manifest"], "[install]\nfrom_skill = true\n")
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_verify")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_verify")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_upstream_flox_files_list_captured(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
@@ -1403,17 +1403,17 @@ class TestProcessEntryUpstreamFloxStrip(unittest.TestCase):
         }
         mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
 
-        result = tier2.process_entry(self._entry(), "/fake/skill/dir")
+        result = real_world.process_entry(self._entry(), "/fake/skill/dir")
 
         self.assertTrue(result["had_upstream_flox"])
         self.assertIn(".gitignore", result["upstream_flox_files"])
         self.assertIn("env/manifest.toml", result["upstream_flox_files"])
         self.assertIn("env/on-activate.sh", result["upstream_flox_files"])
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_verify")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_verify")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_no_upstream_flox_records_false_and_none(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
@@ -1426,16 +1426,16 @@ class TestProcessEntryUpstreamFloxStrip(unittest.TestCase):
         }
         mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
 
-        result = tier2.process_entry(self._entry(), "/fake/skill/dir")
+        result = real_world.process_entry(self._entry(), "/fake/skill/dir")
 
         self.assertFalse(result["had_upstream_flox"])
         self.assertIsNone(result["upstream_manifest"])
         self.assertEqual(result["upstream_flox_files"], [])
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_verify")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_verify")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_symlinked_upstream_flox_does_not_abort_the_run(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
@@ -1444,7 +1444,7 @@ class TestProcessEntryUpstreamFloxStrip(unittest.TestCase):
         # complete and return a normal per-rep result, not propagate an
         # exception up through main's pool.map and abort the whole batch
         # over one weird rep.
-        target = tempfile.mkdtemp(prefix="tier2-symlink-target-")
+        target = tempfile.mkdtemp(prefix="real_world-symlink-target-")
         self.addCleanup(shutil.rmtree, target, ignore_errors=True)
 
         def _clone(url, sha, dest, timeout=900):
@@ -1460,7 +1460,7 @@ class TestProcessEntryUpstreamFloxStrip(unittest.TestCase):
         }
         mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
 
-        result = tier2.process_entry(self._entry(), "/fake/skill/dir")
+        result = real_world.process_entry(self._entry(), "/fake/skill/dir")
 
         self.assertNotIn("error", result)
         self.assertTrue(result["had_upstream_flox"])
@@ -1468,16 +1468,16 @@ class TestProcessEntryUpstreamFloxStrip(unittest.TestCase):
         self.assertIn("symlink", result["upstream_flox_note"])
         self.assertEqual(result["manifest"], "[install]\nfrom_skill = true\n")
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_verify")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_verify")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_symlinked_upstream_manifest_yields_null_capture_with_note(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
         # PR #49 review I2, end-to-end: a symlinked manifest.toml inside
         # a real .flox/env/ must not be read through.
-        secret = tempfile.mkdtemp(prefix="tier2-symlink-secret-")
+        secret = tempfile.mkdtemp(prefix="real_world-symlink-secret-")
         self.addCleanup(shutil.rmtree, secret, ignore_errors=True)
         secret_file = Path(secret) / "secret.toml"
         secret_file.write_text("SENSITIVE\n")
@@ -1497,7 +1497,7 @@ class TestProcessEntryUpstreamFloxStrip(unittest.TestCase):
         }
         mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
 
-        result = tier2.process_entry(self._entry(), "/fake/skill/dir")
+        result = real_world.process_entry(self._entry(), "/fake/skill/dir")
 
         self.assertNotIn("error", result)
         self.assertTrue(result["had_upstream_flox"])
@@ -1534,10 +1534,10 @@ class TestProcessEntryServiceDisposition(unittest.TestCase):
             return None
         return _clone
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_verify")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_verify")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_deferred_ok_service_deferred_with_mechanism_passes_hard_check(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
@@ -1559,7 +1559,7 @@ class TestProcessEntryServiceDisposition(unittest.TestCase):
         }
         mock_judge.return_value = {"score": 5, "correct": True, "issues": []}
 
-        result = tier2.process_entry(self._entry(), str(tier2.DEFAULT_SKILL_DIR))
+        result = real_world.process_entry(self._entry(), str(real_world.DEFAULT_SKILL_DIR))
 
         self.assertTrue(result["hard_checks"]["has_service_postgres"], result)
         self.assertTrue(result["hard_checks"]["has_service_clickhouse"], result)
@@ -1568,10 +1568,10 @@ class TestProcessEntryServiceDisposition(unittest.TestCase):
             {"postgres": "wired", "clickhouse": "deferred"},
         )
 
-    @patch("tier2._judge_tier2")
-    @patch("tier2._run_verify")
-    @patch("tier2._run_claude_agent")
-    @patch("tier2._clone_at_sha")
+    @patch("real_world._judge_real_world")
+    @patch("real_world._run_verify")
+    @patch("real_world._run_claude_agent")
+    @patch("real_world._clone_at_sha")
     def test_silently_dropped_deferred_ok_service_fails_hard_check(
         self, mock_clone, mock_agent, mock_verify, mock_judge
     ):
@@ -1588,7 +1588,7 @@ class TestProcessEntryServiceDisposition(unittest.TestCase):
         }
         mock_judge.return_value = {"score": 2, "correct": False, "issues": []}
 
-        result = tier2.process_entry(self._entry(), str(tier2.DEFAULT_SKILL_DIR))
+        result = real_world.process_entry(self._entry(), str(real_world.DEFAULT_SKILL_DIR))
 
         self.assertTrue(result["hard_checks"]["has_service_postgres"], result)
         self.assertFalse(result["hard_checks"]["has_service_clickhouse"], result)
@@ -1600,8 +1600,8 @@ class TestProcessEntryServiceDisposition(unittest.TestCase):
 
 
 class TestJudgeTier2CatalogNote(unittest.TestCase):
-    """AI-465: the tier2 judge prompt must carry verify.py's confirmed
-    catalog resolution table, same as Tier 1's `_judge` (AI-451/AI-461) —
+    """AI-465: the real_world judge prompt must carry verify.py's confirmed
+    catalog resolution table, same as synthetic's `_judge` (AI-451/AI-461) —
     otherwise the judge grades catalog facts from memory again, just on
     real OSS repos instead of fixtures."""
 
@@ -1612,20 +1612,20 @@ class TestJudgeTier2CatalogNote(unittest.TestCase):
             "rubric": "",
         }
 
-    @patch("tier2._run_judge")
+    @patch("real_world._run_judge")
     def test_no_verify_result_tells_judge_not_to_assert_from_memory(
         self, mock_run_judge
     ):
         mock_run_judge.return_value = ('{"score": 3, "correct": true, "issues": []}', None, {"cost_usd": 0.0, "usage": {}, "duration_ms": 0, "num_turns": 0})
-        tier2._judge_tier2(self._entry(), "[install]\n", verify_result=None)
+        real_world._judge_real_world(self._entry(), "[install]\n", verify_result=None)
         prompt = mock_run_judge.call_args.args[0]
         self.assertIn("do not assert catalog facts from memory", prompt.lower())
 
-    @patch("tier2._run_judge")
+    @patch("real_world._run_judge")
     def test_clean_catalog_confirms_resolution_to_judge(self, mock_run_judge):
         mock_run_judge.return_value = ('{"score": 5, "correct": true, "issues": []}', None, {"cost_usd": 0.0, "usage": {}, "duration_ms": 0, "num_turns": 0})
         verify_result = {"catalog_checked": True, "violations": []}
-        tier2._judge_tier2(self._entry(), "[install]\n", verify_result=verify_result)
+        real_world._judge_real_world(self._entry(), "[install]\n", verify_result=verify_result)
         prompt = mock_run_judge.call_args.args[0]
         self.assertIn("confirmed to resolve", prompt.lower())
 

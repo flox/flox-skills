@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
-"""Golden-manifest lint for the Tier-3 stretch goldens (AI-431).
+"""Golden-manifest lint for the stretch-tier goldens (AI-431).
 
-Sibling of test_golden_lint.py, which lints the Tier-2 real-repo goldens
-under testdata/gold/. This one lints the Tier-3 known-hard / conversion-
-mode goldens under gold/ — the reference manifests the Tier-3 judge grades
+Sibling of test_real_world_golden_lint.py, which lints the real-repo
+goldens. This one lints the stretch-tier known-hard / conversion-mode
+goldens — the reference manifests the stretch judge grades
 produced output against — with the SAME verify.py checker and the SAME
-whole-manifest lock-resolution leg, so a Tier-3 gold with a hallucinated
+whole-manifest lock-resolution leg, so a stretch gold with a hallucinated
 pkg-path, a version/system that does not resolve, a non-literal [vars], a
 tree-mutating hook, or packages that cannot co-resolve together is caught
 deterministically, no `claude` and no agent run required.
 
-Only the goldens named in tier3.jsonl are linted here (not every file in
-gold/): the six original Tier-1 goldens predate this check and are out of
+Only the goldens named in stretch.jsonl are linted here (not every file in
+expected/): the six original synthetic goldens predate this check and are out of
 scope for AI-431 — adding them is a separate change, exactly as AI-456/457
-scoped the Tier-2 goldens.
+scoped the real-world goldens.
 
 It reuses `verify.verify` (manifest-only checks — [vars] literalness,
 hook-mutation, catalog resolution; the detect-cross-check invariants
 degrade to no-ops on the empty `{}` facts these vendored-repo-free goldens
-pass, same as test_golden_lint.py) and the lock-resolution leg
+pass, same as test_real_world_golden_lint.py) and the lock-resolution leg
 (`_attempt_lock` and its retry/transient-vs-resolution classification)
-from test_golden_lint.py rather than re-deriving them.
+from test_real_world_golden_lint.py rather than re-deriving them.
 
 Catalog + lock legs need `flox` + network. Same two-way discipline as
-test_golden_lint.py, sharing its FLOXIFY_GOLDEN_LINT_LIVE_CATALOG switch
+test_real_world_golden_lint.py, sharing its FLOXIFY_GOLDEN_LINT_LIVE_CATALOG switch
 so the CI flox-less step disables both consistently:
 
   - FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 forces no-network (catalog + lock
@@ -31,8 +31,8 @@ so the CI flox-less step disables both consistently:
   - unset/"1" runs them live when `flox` is on PATH.
 
 Run:
-    python3 -m unittest tests.test_tier3_golden_lint -v
-    FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_tier3_golden_lint -v
+    python3 -m unittest tests.test_stretch_golden_lint -v
+    FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_stretch_golden_lint -v
 """
 import json
 import os
@@ -42,9 +42,9 @@ from pathlib import Path
 
 from _skill_module_loader import load_module
 
-# Lock-resolution leg + its status constants, reused from the Tier-2 golden
-# lint (they operate on raw manifest text — nothing Tier-2-specific).
-from .test_golden_lint import (
+# Lock-resolution leg + its status constants, reused from the real-world golden
+# lint (they operate on raw manifest text — nothing real-world-specific).
+from .test_real_world_golden_lint import (
     FLOX_BIN,
     LOCK_OK,
     LOCK_RESOLUTION_ERROR,
@@ -54,52 +54,52 @@ from .test_golden_lint import (
 HERE = Path(__file__).resolve().parent
 SUITE = HERE.parent          # evals/floxify
 REPO_ROOT = SUITE.parent.parent
-GOLD_DIR = SUITE / "gold"
-TIER3_FILE = SUITE / "tier3.jsonl"
+EXPECTED_DIR = SUITE / "expected"
+STRETCH_FILE = SUITE / "stretch.jsonl"
 VERIFY = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
 
 # Unique sys.modules key — the loader's docstring warns that sharing a key
 # across test modules lets whichever load ran last steal the other's
-# @patch target. test_golden_lint.py uses "verify_under_test_golden_lint";
+# @patch target. test_real_world_golden_lint.py uses "verify_under_test_real_world_golden_lint";
 # this must differ.
-verify_mod = load_module(VERIFY, sys_modules_key="verify_under_test_tier3_golden_lint")
+verify_mod = load_module(VERIFY, sys_modules_key="verify_under_test_stretch_golden_lint")
 verify = verify_mod.verify
 
 LIVE_CATALOG = os.environ.get("FLOXIFY_GOLDEN_LINT_LIVE_CATALOG", "1") != "0"
 
 
-def _tier3_ids():
+def _stretch_ids():
     ids = [
         json.loads(line)["id"]
-        for line in TIER3_FILE.read_text().splitlines()
+        for line in STRETCH_FILE.read_text().splitlines()
         if line.strip()
     ]
     return sorted(ids)
 
 
-_TIER3_IDS = _tier3_ids()
+_STRETCH_IDS = _stretch_ids()
 # A path typo or an emptied registry must fail loudly at collection time,
 # not silently report "0 tests, all passed."
-assert _TIER3_IDS, f"no Tier-3 ids found in {TIER3_FILE} — check the path"
+assert _STRETCH_IDS, f"no stretch ids found in {STRETCH_FILE} — check the path"
 
 
-class TestTier3GoldenLint(unittest.TestCase):
-    """One lint + one lock test per Tier-3 golden, so a failure names the
+class TestStretchGoldenLint(unittest.TestCase):
+    """One lint + one lock test per stretch golden, so a failure names the
     exact fixture."""
 
     def _lint(self, fixture_id):
-        gold = GOLD_DIR / f"{fixture_id}.toml"
-        self.assertTrue(gold.is_file(), f"missing gold/{fixture_id}.toml")
+        gold = EXPECTED_DIR / f"{fixture_id}.toml"
+        self.assertTrue(gold.is_file(), f"missing expected/{fixture_id}.toml")
         manifest_text = gold.read_text(encoding="utf-8")
         # No detect facts for these goldens (the fixture repo is not passed
-        # here) — manifest-only checks only, same as test_golden_lint.py.
+        # here) — manifest-only checks only, same as test_real_world_golden_lint.py.
         result = verify({}, manifest_text, check_catalog_live=LIVE_CATALOG)
         hard = verify_mod.hard_violations(result)
         if hard:
             detail = "\n".join(f"  [{v['rule']}] {v['message']}" for v in hard)
             self.fail(
                 f"{fixture_id}.toml has {len(hard)} HARD violation(s) — a "
-                f"Tier-3 gold must be clean (unlike the Tier-2 goldens, "
+                f"stretch golden must be clean (unlike the real-world goldens, "
                 f"there is no KNOWN_VIOLATIONS allowlist here; fix the "
                 f"golden):\n{detail}"
             )
@@ -107,7 +107,7 @@ class TestTier3GoldenLint(unittest.TestCase):
     def _lock(self, fixture_id, live_catalog=None, flox_available=None):
         """Whole-manifest lock-resolution leg. `live_catalog`/
         `flox_available` are test-only overrides for the skip conditions
-        (default to the real env state), mirroring test_golden_lint.py."""
+        (default to the real env state), mirroring test_real_world_golden_lint.py."""
         live = LIVE_CATALOG if live_catalog is None else live_catalog
         if not live:
             self.skipTest(
@@ -120,7 +120,7 @@ class TestTier3GoldenLint(unittest.TestCase):
         if not available:
             self.skipTest("flox not on PATH — cannot attempt lock resolution")
 
-        manifest_text = (GOLD_DIR / f"{fixture_id}.toml").read_text(encoding="utf-8")
+        manifest_text = (EXPECTED_DIR / f"{fixture_id}.toml").read_text(encoding="utf-8")
         status, message, elapsed = _attempt_lock(manifest_text)
         print(f"  [lock] {fixture_id}: {status} in {elapsed:.2f}s", flush=True)
         if status == LOCK_OK:
@@ -144,8 +144,8 @@ class TestTier3GoldenLint(unittest.TestCase):
 
     def test_catalog_leg_ran_when_expected(self):
         """Distinguishes 'genuinely clean' from 'silently skipped' — the
-        same guard test_golden_lint.py carries."""
-        sample = (GOLD_DIR / f"{_TIER3_IDS[0]}.toml").read_text(encoding="utf-8")
+        same guard test_real_world_golden_lint.py carries."""
+        sample = (EXPECTED_DIR / f"{_STRETCH_IDS[0]}.toml").read_text(encoding="utf-8")
         result = verify({}, sample, check_catalog_live=LIVE_CATALOG)
         if LIVE_CATALOG:
             if shutil.which("flox"):
@@ -178,10 +178,10 @@ def _make_lock_test(fixture_id):
     return test
 
 
-for _fixture_id in _TIER3_IDS:
-    setattr(TestTier3GoldenLint, _make_lint_test(_fixture_id).__name__,
+for _fixture_id in _STRETCH_IDS:
+    setattr(TestStretchGoldenLint, _make_lint_test(_fixture_id).__name__,
             _make_lint_test(_fixture_id))
-    setattr(TestTier3GoldenLint, _make_lock_test(_fixture_id).__name__,
+    setattr(TestStretchGoldenLint, _make_lock_test(_fixture_id).__name__,
             _make_lock_test(_fixture_id))
 
 

@@ -4,7 +4,7 @@ _skill_module_loader.py's docstring for the full incident).
 
 This directly encodes the diagnostic that proved the bug: load the SAME
 source file twice under two different `sys_modules_key`s (exactly what
-test_verify.py and test_golden_lint.py do when both run in one
+test_verify.py and test_real_world_golden_lint.py do when both run in one
 interpreter, as the CI free-tests step does), then confirm
 `unittest.mock.patch` resolves each name to ITS OWN instance rather than
 whichever was registered last.

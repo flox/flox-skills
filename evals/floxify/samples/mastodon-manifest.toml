@@ -1,6 +1,6 @@
 # Representative capture of the manifest /floxify produced for the mastodon
-# fixture (repo mastodon/mastodon @ 52e9ec7814fc). Used by test_tier2.py as a
-# regex-drift guard: if a future edit to tier2.jsonl's runtime patterns or a
+# fixture (repo mastodon/mastodon @ 52e9ec7814fc). Used by tests/test_real_world.py as a
+# regex-drift guard: if a future edit to real-world.jsonl's runtime patterns or a
 # refactor of the structural-conformance checks stops matching real skill
 # output, the guard test fails. The install/vars sections are the actual
 # produced output; the [services.*] blocks reproduce the sections whose

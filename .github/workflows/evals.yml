@@ -31,15 +31,16 @@ name: skill-evals
 # workflow_dispatch can pick an arm (skills / baseline) and toggle the gate —
 # e.g. to measure the bare-model baseline without failing the run.
 #
-# The floxify jobs (floxify-evals = Tier 1, floxify-tier2 = Tier 2) are
-# SEPARATE from the per-PR skills gate. The /floxify evals are outcome-based:
+# The floxify jobs (floxify-evals = synthetic fixtures, floxify-real-world =
+# pinned real repositories) are SEPARATE from the per-PR skills gate. The /floxify evals are outcome-based:
 # they run the skill against fixture/real repos and need a live flox + catalog
 # + network, so they are too slow and too environment-dependent to gate every
 # PR. They run weekly, on manual dispatch (run_floxify=true), and — via the
 # `changes` job below — on pull requests that actually touch the floxify eval
 # sources or the skill (evals/floxify/** or flox-plugin/skills/**). They never
-# run on unrelated PRs, and they never gate: Tier 1 reports its own hard-check
-# gate only on schedule/dispatch, and Tier 2 is report-only in all modes.
+# run on unrelated PRs, and they never gate: the synthetic tier reports its own
+# hard-check gate only on schedule/dispatch, and the real-world tier is
+# report-only in all modes.
 #
 # golden-lint is DIFFERENT from those two: it spawns no `claude` (zero
 # Anthropic API spend, only `flox show` calls), so it does NOT need the
@@ -134,7 +135,7 @@ jobs:
           #      (~23k tokens of context are created/read regardless), so 54
           #      calls cost several dollars minimum, per PR, per push.
           #   2. Trust. The suite is under active repair and is currently wrong
-          #      in both directions: the Tier 2 judge fabricated a catalog
+          #      in both directions: the real-world judge fabricated a catalog
           #      defect in 4 of 8 runs (always against a CORRECT manifest), and
           #      3 of 8 golden references carry false claims. Paying Opus rates
           #      for a signal we know is unreliable buys nothing.
@@ -183,12 +184,13 @@ jobs:
           echo "::group::detect.py (analyzer extraction)"
           python3 tests/test_detect.py
           echo "::endgroup::"
-          echo "::group::harness logic (tier2 + detect_usage_eval)"
-          python3 -m unittest tests.test_tier2 tests.test_detect_usage_eval -v
+          echo "::group::harness logic (real_world + detect_usage_eval)"
+          python3 -m unittest tests.test_real_world tests.test_detect_usage_eval -v
           echo "::endgroup::"
           # verify.py (AI-461): the checker's own invariants, all mocked at
           # the `flox show` boundary (_run_show_command) — no catalog, no
-          # network, same discipline as the rest of this step. test_golden_lint
+          # network, same discipline as the rest of this step.
+          # test_real_world_golden_lint
           # also runs here for baseline sanity, with FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0
           # pinned EXPLICITLY so its no-network guarantee doesn't rest on
           # flox merely happening to be absent from this runner. Since AI-509
@@ -198,7 +200,7 @@ jobs:
           # and runs; its real, catalog-backed run (with real teeth against
           # catalog drift) is the golden-lint job below.
           echo "::group::verify.py (manifest checker)"
-          FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_verify tests.test_verify_usage_eval tests.test_golden_lint -v
+          FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_verify tests.test_verify_usage_eval tests.test_real_world_golden_lint -v
           echo "::endgroup::"
           echo "::group::run_floxify.py (harness deterministic-leg wiring)"
           python3 -m unittest tests.test_run_floxify -v
@@ -281,13 +283,13 @@ jobs:
 
   golden-lint:
     # Golden-manifest lint (verify.py, no claude — AI-456 item 2). Unlike
-    # floxify-evals/floxify-tier2 below, this spawns no `claude` agent and
+    # floxify-evals/floxify-real-world below, this spawns no `claude` agent and
     # costs zero Anthropic API spend (only `flox install` + `flox show`/
     # `flox list -c` calls, no closure realization), so it does NOT need
     # their dispatch-only cost gate — it runs per-PR via the `changes`
     # filter, exactly as this workflow's header comment describes, PLUS
     # on manual dispatch and (if the schedule trigger is restored)
-    # weekly. This is where KNOWN_VIOLATIONS (test_golden_lint.py) gets
+    # weekly. This is where KNOWN_VIOLATIONS (test_real_world_golden_lint.py) gets
     # real teeth against catalog drift; the free `evals` step above only
     # proves the allowlist machinery imports (no flox there by design).
     # Also where the whole-manifest lock-resolution leg (AI-479) gets its
@@ -305,7 +307,7 @@ jobs:
       - name: Install flox
         uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
 
-      - name: Golden-manifest lint (verify.py against testdata/gold/*.toml)
+      - name: Golden-manifest lint (verify.py against expected/*.toml)
         working-directory: evals/floxify
         env:
           FLOX_DISABLE_METRICS: "true"
@@ -313,7 +315,7 @@ jobs:
         run: |
           # Same checker as the free `evals` step, but WITH flox+network,
           # so the catalog leg (pkg-path/version/per-system resolution)
-          # actually runs against testdata/gold/*.toml instead of skipping
+          # actually runs against expected/*.toml instead of skipping
           # cleanly. KNOWN_VIOLATIONS is an explicit allowlist (AI-457
           # burns it down); a failure here means a genuinely NEW, unlisted
           # catalog defect. This single invocation also runs the
@@ -332,7 +334,7 @@ jobs:
           # `shell:` key. The nested `flox init` / `flox list -c` calls the
           # lint makes run against their own throwaway environments in temp
           # dirs, unaffected by that activation.
-          python3 -m unittest tests.test_golden_lint -v
+          python3 -m unittest tests.test_real_world_golden_lint -v
 
   skill-toml-lint:
     # Parse-check every fenced ```toml block the flox skill SHIPS (AI-494).
@@ -385,7 +387,7 @@ jobs:
           path: evals/flox/results/skill-toml-lint.json
 
   floxify-evals:
-    # Tier 1 outcome-based /floxify eval — runs the skill against synthetic
+    # Synthetic-fixture outcome-based /floxify eval — runs the skill against synthetic
     # fixture repos and verifies the manifest it produces (plus `flox
     # activate`). Needs a live flox + catalog, so it runs weekly, on manual
     # dispatch, and on PRs that touch the floxify eval sources or the skill
@@ -432,11 +434,11 @@ jobs:
             evals/floxify/results/
             !evals/floxify/results/streams/
 
-  floxify-tier2:
-    # Tier 2 outcome eval — runs /floxify against a real OSS repo cloned at a
+  floxify-real-world:
+    # Real-world outcome eval — runs /floxify against a real OSS repo cloned at a
     # pinned SHA and scores structural conformance (runtime pins + service
-    # wiring). Same trigger as Tier 1 (schedule / manual / floxify-touching
-    # PR). REPORT-ONLY: tier2.py has no --gate, so this job never fails the
+    # wiring). Same trigger as the synthetic tier (schedule / manual / floxify-touching
+    # PR). REPORT-ONLY: real_world.py has no --gate, so this job never fails the
     # build on eval outcome. Activation stays OFF for CI cost — the manifest's
     # hook commands (e.g. Ruby's bundler pin) are not validated here; a live
     # Ruby-activation run is a known follow-up (AI-431).
@@ -457,19 +459,19 @@ jobs:
 
       # Interpreter and `claude` from this repo's Flox environment (AI-509),
       # same as floxify-evals above. Secrets unchanged.
-      - name: Run /floxify Tier 2 eval (report-only, mastodon)
+      - name: Run /floxify real-world eval (report-only, mastodon)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.MANAGED_SKILLS_ANTHROPIC_API_KEY }}
           FLOX_DISABLE_METRICS: "true"
         shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
         run: |
-          python3 evals/floxify/tier2.py \
+          python3 evals/floxify/real_world.py \
             --only mastodon \
-            --out "results/tier2.json"
+            --out "results/real-world.json"
 
-      - name: Upload floxify Tier 2 eval results
+      - name: Upload floxify real-world eval results
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: floxify-tier2-results
-          path: evals/floxify/results/tier2.json
+          name: floxify-real-world-results
+          path: evals/floxify/results/real-world.json

@@ -83,7 +83,7 @@ the socket stays useful for everything else. When that applies, keep `-k
 depends on. Record the reason in a comment next to `[services.postgres]`,
 the same recorded-reason discipline as an exact version pin (see
 "Version-pinning discipline" above). Lemmy is the worked example
-(`evals/floxify/testdata/gold/lemmy.toml:84`): `exec postgres -D "$PGDATA"
+(`evals/floxify/expected/lemmy.toml:84`): `exec postgres -D "$PGDATA"
 -k "$PGSOCKET" -h 127.0.0.1 -p 5432` serves the socket AND loopback TCP
 together, because `LEMMY_DATABASE_URL` must stay byte-identical to the
 repo's own `postgres://lemmy:password@localhost:5432/lemmy` default —
@@ -123,9 +123,9 @@ env var the way `psql` reads `PGHOST`; an app with `REDIS_URL` unset still
 falls back to `redis://127.0.0.1:6379`, so disabling TCP breaks the common
 case instead of fixing a collision. Every Redis golden confirms this:
 mastodon, posthog, and sentry all keep `--port 6379` and add `--unixsocket`
-beside it (`evals/floxify/testdata/gold/mastodon.toml`, `posthog.toml`,
+beside it (`evals/floxify/expected/mastodon.toml`, `posthog.toml`,
 `sentry.toml`); firefly-iii keeps TCP with no socket at all
-(`evals/floxify/testdata/gold/firefly-iii.toml`) — zero goldens run
+(`evals/floxify/expected/firefly-iii.toml`) — zero goldens run
 socket-only. `--unixsocket` is there for the app that CAN use one — name
 the socket file after the project (`myapp-redis.sock`, not a generic
 `redis.sock`) so it doesn't collide with another floxified project's
