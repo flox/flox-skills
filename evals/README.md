@@ -90,10 +90,16 @@ This distinction decides what may gate a build.
   boundaries mocked, no `claude`).
 - `flox/skill_toml_lint.py --tier structural` — flox parses a snippet or it
   does not.
-- The floxify golden lints (`tests/test_real_world_golden_lint.py`,
-  `tests/test_stretch_golden_lint.py`) — deterministic given a fixed catalog.
-  Their catalog and lock-resolution legs read the *live* catalog, so a catalog
-  outage or a renamed package is a real but external source of change.
+- The floxify real-world golden lint (`tests/test_real_world_golden_lint.py`) —
+  deterministic given a fixed catalog. Its catalog and lock-resolution legs read
+  the *live* catalog, so a catalog outage or a renamed package is a real but
+  external source of change.
+
+`tests/test_stretch_golden_lint.py` and `tests/test_stretch.py` are the same
+kind of check but run in **no CI job** — the `golden-lint` job runs only
+`tests.test_real_world_golden_lint`, and neither stretch module appears in
+`.github/workflows/`. They are deterministic and worth running by hand; they
+gate nothing.
 
 **Probabilistic** — anything whose input is an agent run. These are reported as
 rates and trends, never gated:
@@ -112,10 +118,10 @@ rollup `hard_pass` / `hard_pass_rate`.
 
 ## What binds CI
 
-[`.github/workflows/evals.yml`](../.github/workflows/evals.yml) has five jobs.
-There is **no scheduled run** — every job fires on pull requests or on manual
-`workflow_dispatch`. A `changes` job computes path filters that decide which
-per-PR jobs run.
+[`.github/workflows/evals.yml`](../.github/workflows/evals.yml) has five eval
+jobs plus a `changes` job that computes the path filters deciding which per-PR
+jobs run. There is **no scheduled run** — every job fires on pull requests or on
+manual `workflow_dispatch`.
 
 | Job | Runs on | Needs network | Anthropic spend | Blocks the build? |
 |---|---|---|---|---|
@@ -158,10 +164,20 @@ jobs).
 
 The model is pinned to `claude-opus-4-8` for agent and judge in both suites
 (override with `--model`). Opus calls carry large cached-context reads, so even
-a short reply is not free — assume single dollars for a full `run.py` pass and
-more for a multi-rep `screen.py` batch. `screen.py` and `run.py` read each
-call's cost off the JSON envelope and roll it into the run summary; check
-`summary.cost` / `summary.total_cost_usd` after a batch.
+a short reply is not free. Do the arithmetic before a whole-registry run:
+
+| Command | Calls |
+|---|---|
+| `run.py` over `tasks/tasks.jsonl` | 29 tasks × 2 = **58** |
+| `screen.py --reps 5` over `tasks/screening.jsonl` | 46 candidates × 4 × 5 reps = **920** |
+| `run_floxify.py` over `synthetic.jsonl` | 7 fixtures × 2 = **14** |
+
+The screening figure is the expected invocation, not an edge case: `--reps` ≥ 5
+is *required* for any promote/discard decision (see [Screening](#screening-screenpy)),
+so scope with `--area` / `--only` unless you actually mean the whole registry.
+`screen.py` and `run.py` read each call's cost off the JSON envelope and roll it
+into the run summary; check `summary.cost` / `summary.total_cost_usd` after a
+batch.
 
 Credentials come from wherever the `claude` CLI already gets them — the Flox
 environment supplies the *binary*, not the login:
@@ -184,12 +200,25 @@ headless with the plugin loaded, then grades the answer two ways: deterministic
 checks over the answer text, and a separate `claude` judge call scoring 1–5
 against the task's rubric.
 
-Run its commands from `evals/flox/` — the harness modules import each other by
-bare name (`import run`), so the suite root has to be the working directory.
+Run its commands from `evals/flox/`:
 
 ```bash
 cd evals/flox
 ```
+
+The `cd` is required by the `python3 -m unittest tests.<module>` commands below:
+`-m` puts the *working directory* on `sys.path`, so both the `tests` package and
+the bare-name imports its modules do (`import run`, `import screen`) resolve
+only from the suite root. That is exactly where `evals.yml` sets
+`working-directory` — and only there.
+
+It is **not** required by the harness scripts themselves. Python puts the
+*script's* directory on `sys.path[0]`, not the cwd, so `python3 run.py`'s
+`import skill_toml_lint` resolves wherever you invoke it from, and every path
+inside `run.py`, `screen.py`, and `skill_toml_lint.py` is rooted at that
+module's own `HERE`. `evals.yml` runs `python3 evals/flox/run.py` from the repo
+root with no `working-directory`, and so does the `flox activate --` example
+above.
 
 ## Tasks
 
@@ -216,7 +245,7 @@ probabilistic, so trigger tasks are reported and never gated — including
 
 ```bash
 python3 run.py --mode skills                     # the skills arm, whole registry
-python3 run.py --mode baseline                   # the bare model, for comparison
+python3 run.py --mode baseline                   # the unassisted arm, for comparison
 python3 run.py --mode skills --only node-env     # one task
 python3 run.py --mode skills --gate              # exit non-zero on a binding failure
 python3 run.py --mode skills --concurrency 8     # parallel claude calls (default 6)
@@ -227,6 +256,17 @@ Output lands in `results/<mode>.json` (gitignored) with a per-task record and a
 summary: `hard_pass_rate`, `avg_judge_score`, `judge_correct_rate`, a `by_tier`
 breakdown, triggering rates, and `cost`. The run also prints a diff against the
 committed baseline of the same name under `baselines/`.
+
+**`--mode baseline` is not arm-isolated.** Setting-source isolation lives in
+`screen.py` only: `run.py`'s `SETTING_SOURCES` is `None` (screening-only) and
+`run.py` has no `--setting-sources` flag, so a `--mode baseline` run loads
+whatever `~/.claude/settings.json` enables. On a host where the Flox plugin is
+globally on — as it is on the dev and night-shift hosts — that arm is *not* a
+bare model and the discrimination signal collapses. Run it on a host with no
+globally-enabled Flox plugin, or use `screen.py`, whose `--setting-sources`
+(default `project,local`) drops `user` for every arm. The committed
+`baselines/baseline.json` carries no `setting_sources` key, so the host it was
+recorded on is not on the record.
 
 Unit tests, from the same directory:
 
@@ -446,20 +486,31 @@ kept on purpose, not ordinary run output.
 `baselines/` holds committed comparison points that runners read and never
 write:
 
-| File | What it is |
-|---|---|
-| `skills.json` | `run.py --mode skills` over the gated registry |
-| `baseline.json` | `run.py --mode baseline` — the bare-model arm |
-| `screen-opus.json`, `screen-sonnet.json`, `screen-haiku.json` | `screen.py` at n=5 per model |
+| File | What it is | Coverage |
+|---|---|---|
+| `skills.json` | `run.py --mode skills` over the gated registry | 27 of 29 tasks |
+| `baseline.json` | `run.py --mode baseline` — the unassisted arm, with the isolation caveat above | 27 of 29 tasks |
+| `screen-opus.json`, `screen-sonnet.json`, `screen-haiku.json` | `screen.py` at n=5 per model | 19 of 46 candidates |
 
-Refreshing one is a deliberate, reviewable act, never a side effect of a run:
+**These snapshots lag their registries.** Both `run.py` baselines were recorded
+against a 27-task registry that has since grown to 29, so every run opens its
+diff with phantom "new tasks" lines. Treat the *flips* as the signal, not the
+additions, until a refresh lands.
+
+Refreshing one is a deliberate, reviewable act, never a side effect of a run.
+`run.py` derives its comparison baseline from the **output filename** — `--out
+refresh.json` looks for `baselines/refresh.json`, finds nothing, and prints "No
+committed baseline for this arm" instead of a diff. So leave `--out` at its
+default (`<mode>.json`), which is already the name you intend to replace:
 
 ```bash
-python3 run.py --mode skills --out refresh.json
-cp results/refresh.json baselines/skills.json
+python3 run.py --mode skills                     # results/skills.json, diffed vs baselines/skills.json
+cp results/skills.json baselines/skills.json
 ```
 
-Commit the copy with the change that justifies it.
+Commit the copy with the change that justifies it. (`run_floxify.py` behaves
+differently — its `--baseline` defaults independently of `--out`, so the
+floxify recipe keeps its diff under any output name.)
 
 ## Policy: every skill change ships with an eval — written RED first
 
