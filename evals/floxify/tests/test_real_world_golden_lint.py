@@ -284,10 +284,14 @@ def _gold_ids():
     (testdata/gold/) and a glob meant exactly "the real-repo goldens";
     now every suite's reference manifests share expected/, so a glob
     would silently pull in the synthetic and stretch goldens, which are
-    deliberately out of scope here (they are linted, at their own
-    scope, by test_stretch_golden_lint.py). Naming the registry keeps
-    this lint's scope the same set it has always had. The sibling
-    stretch lint selects the same way.
+    deliberately out of scope here. The stretch goldens are linted at
+    their own scope by test_stretch_golden_lint.py; the six synthetic
+    goldens are currently linted by nothing, which was equally true
+    before they shared this directory (that module's own docstring
+    scopes them out: they "predate this check"). Naming the registry
+    keeps this lint's scope the same set it has always had — a glob
+    would have silently CHANGED it. The sibling stretch lint selects the
+    same way.
     """
     return sorted(
         json.loads(line)["id"]

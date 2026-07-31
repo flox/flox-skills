@@ -205,6 +205,14 @@ jobs:
           echo "::group::run_floxify.py (harness deterministic-leg wiring)"
           python3 -m unittest tests.test_run_floxify -v
           echo "::endgroup::"
+          # Registry invariants for the stretch tier, including the id
+          # disjointness that keeps synthetic/stretch/real-world from fighting
+          # over a shared fixtures/ + expected/ pair. Pure data reads, no
+          # subprocess and no catalog. It was not wired into any job before,
+          # so these guards were asserting into the void.
+          echo "::group::stretch registry invariants (test_stretch)"
+          python3 -m unittest tests.test_stretch -v
+          echo "::endgroup::"
 
       - name: Free deterministic unit tests -- eval harness (run.py, screen.py)
         working-directory: evals/flox
@@ -231,6 +239,14 @@ jobs:
           echo "::endgroup::"
           echo "::group::screen.py deterministic pieces (test_screen)"
           python3 -m unittest tests.test_screen -v
+          echo "::endgroup::"
+          # gen_screening_report.py: a report may only claim what was measured.
+          # Pins the intersection of the candidate registry with the ids
+          # actually present in --results, so an unmeasured candidate is never
+          # bucketed as "baseline already passes", and a run with zero
+          # measurements is an error rather than a plausible-looking report.
+          echo "::group::gen_screening_report.py deterministic pieces (test_gen_screening_report)"
+          python3 -m unittest tests.test_gen_screening_report -v
           echo "::endgroup::"
           # skill_toml_lint.py's own logic: fence extraction, skip markers, the
           # structural/catalog tier split, allowlist staleness. Mocked at the
@@ -307,7 +323,7 @@ jobs:
       - name: Install flox
         uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # main
 
-      - name: Golden-manifest lint (verify.py against expected/*.toml)
+      - name: Golden-manifest lint (verify.py against the real-world goldens in expected/)
         working-directory: evals/floxify
         env:
           FLOX_DISABLE_METRICS: "true"
@@ -315,8 +331,13 @@ jobs:
         run: |
           # Same checker as the free `evals` step, but WITH flox+network,
           # so the catalog leg (pkg-path/version/per-system resolution)
-          # actually runs against expected/*.toml instead of skipping
-          # cleanly. KNOWN_VIOLATIONS is an explicit allowlist (AI-457
+          # actually runs instead of skipping cleanly. Scope is the eight
+          # goldens named in real-world.jsonl, NOT every file in expected/:
+          # since AI-509 Ticket 3 that directory holds all three suites'
+          # reference manifests (20 .toml), and selection here is by
+          # registry. The stretch lint covers six more; the six synthetic
+          # goldens are linted by neither.
+          # KNOWN_VIOLATIONS is an explicit allowlist (AI-457
           # burns it down); a failure here means a genuinely NEW, unlisted
           # catalog defect. This single invocation also runs the
           # whole-manifest lock-resolution leg (AI-479, one

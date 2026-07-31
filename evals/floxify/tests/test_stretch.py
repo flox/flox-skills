@@ -60,13 +60,21 @@ _STRETCH = _load_stretch()
 # test_real_world_golden_lint.py's `assert _GOLD_IDS` uses).
 assert _STRETCH, f"no stretch entries found in {STRETCH_FILE} — check the path"
 
-# The synthetic registry, so we can assert the two namespaces don't collide —
-# both draw fixtures/ and expected/ from the same directories.
-_SYNTHETIC_IDS = {
-    json.loads(line)["id"]
-    for line in (SUITE / "synthetic.jsonl").read_text().splitlines()
-    if line.strip()
-}
+# The sibling registries, so we can assert the namespaces don't collide — all
+# three now draw fixtures/ and expected/ from the same directories. real-world
+# joined that shared namespace in AI-509 Ticket 3: its goldens used to live
+# alone in testdata/gold/, where colliding with them was structurally
+# impossible, so it is the registry this guard most recently did NOT cover.
+def _registry_ids(name):
+    return {
+        json.loads(line)["id"]
+        for line in (SUITE / name).read_text().splitlines()
+        if line.strip()
+    }
+
+
+_SYNTHETIC_IDS = _registry_ids("synthetic.jsonl")
+_REAL_WORLD_IDS = _registry_ids("real-world.jsonl")
 
 
 class TestStretchRegistry(unittest.TestCase):
@@ -85,6 +93,34 @@ class TestStretchRegistry(unittest.TestCase):
         the same fixture/gold pair and confuse the by-id regression diff."""
         clash = sorted({e["id"] for e in _STRETCH} & _SYNTHETIC_IDS)
         self.assertFalse(clash, f"stretch ids collide with synthetic.jsonl: {clash}")
+
+    def test_ids_do_not_collide_with_real_world(self):
+        """Same namespace, newly shared: since AI-509 Ticket 3 the real-world
+        goldens live in expected/ alongside these. A real-world entry named
+        `ruby` or `go-mod` would make real_world._golden_manifest read the
+        synthetic fixture's golden and grade a real OSS repo against it."""
+        clash = sorted({e["id"] for e in _STRETCH} & _REAL_WORLD_IDS)
+        self.assertFalse(clash, f"stretch ids collide with real-world.jsonl: {clash}")
+
+    def test_all_three_registries_are_pairwise_disjoint(self):
+        """The guard above is per-pair; this is the property they add up to.
+        synthetic ∩ real-world is covered by neither on its own."""
+        clash = sorted(_SYNTHETIC_IDS & _REAL_WORLD_IDS)
+        self.assertFalse(
+            clash, f"synthetic ids collide with real-world.jsonl: {clash}"
+        )
+
+    def test_every_golden_is_claimed_by_a_registry(self):
+        """The reverse direction, lost when selection moved from a per-directory
+        glob to registry lookup: a glob noticed an orphaned golden for free,
+        registry selection cannot. An unclaimed expected/*.toml is a golden no
+        runner grades and no lint checks — dead weight or a renamed id."""
+        stems = {p.stem for p in (SUITE / "expected").glob("*.toml")}
+        claimed = {e["id"] for e in _STRETCH} | _SYNTHETIC_IDS | _REAL_WORLD_IDS
+        orphans = sorted(stems - claimed)
+        self.assertFalse(
+            orphans, f"expected/*.toml claimed by no registry: {orphans}"
+        )
 
     def test_every_entry_is_stretch_tier(self):
         """The heart of 'report-only'. run_floxify.py's gate binds only
