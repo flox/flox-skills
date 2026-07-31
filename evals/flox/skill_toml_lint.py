@@ -121,7 +121,7 @@ SKIPPED = "skipped"
 # Escape hatch for snippets that are NOT fragments -- they are meant to be real
 # manifests and they genuinely do not parse -- when the fix is too large to land
 # alongside the change that caught them. Same discipline as
-# evals/floxify/tests/test_golden_lint.py's KNOWN_VIOLATIONS.
+# evals/floxify/tests/test_real_world_golden_lint.py's KNOWN_VIOLATIONS.
 #
 # It is EMPTY, and that is the intended steady state: the five snippets this
 # guard found on its first run (three `[hook]`-as-bare-shell CUDA examples, a
