@@ -1,5 +1,18 @@
 # Flox skills evals
 
+## Layout
+
+One directory per eval suite (AI-509 Ticket 2); each suite owns its runners,
+its `tests/` package, and its own data:
+
+| Suite | What it measures |
+|---|---|
+| [`flox/`](flox/) | The `flox` skill's written guidance and implicit triggering — `run.py`, `screen.py`, `skill_toml_lint.py`, `tasks/`, `tests/`, `results/`, `reports/` |
+| [`floxify/`](floxify/) | `/floxify` repo-conversion outcomes — `run_floxify.py`, `tier2.py`, `tests/`, `fixtures/`, `gold/`, `testdata/`, `results/` |
+
+The rest of this file documents the `flox` suite; run its commands from
+`evals/flox/`. `floxify/` has its own [README](floxify/README.md).
+
 A standalone eval suite for the Flox skill: tasks scored for correctness and
 quality, used to catch regressions and to measure whether the skill triggers on
 the right requests and supplies the right context. (It also gated the
@@ -68,13 +81,13 @@ How:
   (`must_not_match`) — good answers often show the anti-pattern as a labeled
   counter-example, which false-fires a negative check.
 - Screen it baseline-vs-skills to confirm the skill arm follows the
-  guidance; promote it into `tasks.jsonl` once it holds. See the
+  guidance; promote it into `tasks/tasks.jsonl` once it holds. See the
   Screening section below for `screen.py`, the rep policy, and
   check-design rules.
 
 ## What it does
 
-For every task in `tasks.jsonl`, runs `claude` headless with the Flox plugin
+For every task in `tasks/tasks.jsonl`, runs `claude` headless with the Flox plugin
 loaded and scores the answer two ways:
 
 - **Hard checks** — deterministic regex checks (no hallucinated install URL, no
@@ -115,7 +128,8 @@ because two machines shipped different `python3` is not a signal about the
 skill.
 
 `flox activate` finds the environment by searching upward, so it works from
-`evals/`, `evals/floxify/`, or the repo root; only the script path changes.
+`evals/flox/`, `evals/floxify/`, or the repo root; only the script path
+changes.
 Activation also supplies `claude` (the manifest installs `flox/claude-code`),
 so the harnesses' agent and judge calls use a pinned CLI rather than whatever
 happens to be on PATH.
@@ -126,9 +140,17 @@ happens to be on PATH.
 ## Run
 
 ```bash
+cd evals/flox                           # this suite's root
 python3 run.py --mode skills            # skills-only baseline
 python3 run.py --mode skills --only node-env   # single task
 python3 run.py --mode skills --gate     # exit non-zero if binding gates fail (CI)
+```
+
+Unit tests, from the same directory:
+
+```bash
+python3 -m unittest discover -s tests -t . -v   # the whole suite
+python3 -m unittest tests.test_run -v           # one module
 ```
 
 Results land in `results/<mode>.json` with a summary (hard-pass rate, avg judge
@@ -280,7 +302,7 @@ python3 skill_toml_lint.py --tier catalog      # + live catalog resolution (advi
 python3 skill_toml_lint.py --only services.md  # one document
 python3 skill_toml_lint.py --list              # extract only, no catalog
 python3 skill_toml_lint.py -v                  # print every block, not just failures
-python3 -m unittest test_skill_toml_lint       # the guard's own tests (no catalog)
+python3 -m unittest tests.test_skill_toml_lint # the guard's own tests (no catalog)
 ```
 
 Your own activation only supplies the interpreter; the `flox init` /
@@ -314,17 +336,19 @@ baseline), a **skill-gap** (both fail — the skill may be missing coverage), or
 **no-signal** (baseline already passes — too easy). Hard-checks are data-driven
 per candidate via `must_match` / `must_not_match` regex lists.
 
-`candidates-all.jsonl` is the default and the only candidate set this harness
-ships — it is a superset of the original `candidates.jsonl` (retired) with the
+`tasks/candidates-all.jsonl` is the default and the only candidate set this
+harness ships — it is a superset of the original `tasks/candidates.jsonl`
+(retired) with the
 same false-firing checks fixed under new ids
 (`trap-layer-vs-compose-fixed`, `trap-containerize-nopush-fixed`) plus the
 pass2/regression batches folded in. Pass `--candidates` to screen a specific
-historical batch (`candidates-pass2.jsonl`, `candidates-regression.jsonl`,
-`candidates-triggering.jsonl`, `candidates-new-features.jsonl`) instead.
+historical batch (`tasks/candidates-pass2.jsonl`,
+`tasks/candidates-regression.jsonl`, `tasks/candidates-triggering.jsonl`,
+`tasks/candidates-new-features.jsonl`) instead.
 
 ```bash
 python3 screen.py --reps 5                                    # default set, n=5
-python3 screen.py --candidates candidates-pass2.jsonl --reps 5   # one batch, n=5
+python3 screen.py --candidates tasks/candidates-pass2.jsonl --reps 5  # one batch, n=5
 python3 screen.py --only trap-vars-no-interpolation --reps 5
 python3 screen.py --plugin-dir /path/to/fixed-skill/flox-plugin  # test a skill edit
 ```
@@ -383,14 +407,14 @@ No separate weaker-model arm.
 - **Validate a new/edited check against a real known-good answer** (the
   `answer_excerpt` fields in `results/*.json`, or a fixture copied into a unit
   test) before trusting it — the check is a pure function of the answer text,
-  so this needs no model calls. `evals/test_screen.py` does this for every
+  so this needs no model calls. `evals/flox/tests/test_screen.py` does this for every
   check above.
 
 ### CI-gate policy — DECIDED (Bill, 2026-07-18)
 
 `screen.py` is not yet wired into `.github/workflows/evals.yml`; it remains
 a pre-promotion tool run manually or by an agent before a candidate is added
-to `tasks.jsonl` (which *is* gated, per Gate policy above). This decision
+to `tasks/tasks.jsonl` (which *is* gated, per Gate policy above). This decision
 governs the future stretch tier when one is created; no agent-eval CI tier
 exists or is being added now — agent evals stay out of CI, free
 deterministic tests only. The choice between reps-per-task gating and
@@ -419,7 +443,7 @@ The option analysis this decision was made from, kept as a rationale record:
 
 - **Option A: gate at `--reps` ≥ 3 per task.** Run screening at reduced `n=3`
   (cheaper than the documented `n=5` promotion bar) on every PR that touches
-  `candidates-all.jsonl` or a skill file, and fail if any `should`-tier
+  `tasks/candidates-all.jsonl` or a skill file, and fail if any `should`-tier
   candidate's `hard_pass_rate` drops under a threshold (e.g. < 2/3). Pro:
   catches a regression on the exact candidate that changed, fast. Con: n=3
   is below the harness's own documented reliability floor (n≥5), so the gate

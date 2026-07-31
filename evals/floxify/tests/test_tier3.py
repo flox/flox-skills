@@ -22,7 +22,7 @@ agentic outcome run is exercised by an actual `run_floxify.py
 --tasks tier3.jsonl` invocation, same as Tier 1/Tier 2's own skill runs.
 
 Run:
-    python3 -m unittest test_tier3 -v
+    python3 -m unittest tests.test_tier3 -v
 """
 import json
 import unittest
@@ -31,9 +31,11 @@ from pathlib import Path
 import run_floxify
 
 HERE = Path(__file__).resolve().parent
-TIER3_FILE = HERE / "tier3.jsonl"
-FIXTURES_DIR = HERE / "fixtures"
-GOLD_DIR = HERE / "gold"
+SUITE = HERE.parent          # evals/floxify
+REPO_ROOT = SUITE.parent.parent
+TIER3_FILE = SUITE / "tier3.jsonl"
+FIXTURES_DIR = SUITE / "fixtures"
+GOLD_DIR = SUITE / "gold"
 
 # TOML parser, same graceful fallback the runner uses.
 try:
@@ -61,7 +63,7 @@ assert _TIER3, f"no Tier-3 entries found in {TIER3_FILE} — check the path"
 # both draw fixtures/ and gold/ from the same directories.
 _TIER1_IDS = {
     json.loads(line)["id"]
-    for line in (HERE / "tasks.jsonl").read_text().splitlines()
+    for line in (SUITE / "tasks.jsonl").read_text().splitlines()
     if line.strip()
 }
 

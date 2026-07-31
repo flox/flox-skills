@@ -77,8 +77,10 @@ from unittest.mock import MagicMock, patch
 from _skill_module_loader import load_module
 
 HERE = Path(__file__).resolve().parent
-GOLD_DIR = HERE / "testdata" / "gold"
-VERIFY = HERE.parent.parent / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
+SUITE = HERE.parent          # evals/floxify
+REPO_ROOT = SUITE.parent.parent
+GOLD_DIR = SUITE / "testdata" / "gold"
+VERIFY = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
 
 # Unique sys.modules key — see _skill_module_loader.py's docstring for the
 # incident this avoids (test_verify.py loads the same verify.py under ITS
@@ -434,7 +436,7 @@ class TestLockResolutionLeg(unittest.TestCase):
     leg's skip/fail/pass plumbing. The live behavior (does a real golden
     actually lock) belongs to the flox-equipped run — see the dynamically
     generated test_<fixture>_locks_cleanly methods above, exercised by
-    `python3 -m unittest test_golden_lint -v` with `flox` on PATH."""
+    `python3 -m unittest tests.test_golden_lint -v` with `flox` on PATH."""
 
     def _instance(self):
         # Any bound TestGoldenLint instance works here -- we only need
@@ -443,8 +445,8 @@ class TestLockResolutionLeg(unittest.TestCase):
 
     # --- _attempt_lock: mocked subprocess boundary --------------------
 
-    @patch("test_golden_lint._run_flox_list_c")
-    @patch("test_golden_lint._run_flox_init")
+    @patch(f"{__name__}._run_flox_list_c")
+    @patch(f"{__name__}._run_flox_init")
     def test_attempt_lock_reports_success(self, mock_init, mock_list):
         mock_init.return_value = MagicMock(returncode=0, stdout="", stderr="")
         mock_list.return_value = MagicMock(
@@ -455,8 +457,8 @@ class TestLockResolutionLeg(unittest.TestCase):
         self.assertEqual(message, "")
         self.assertGreaterEqual(elapsed, 0.0)
 
-    @patch("test_golden_lint._run_flox_list_c")
-    @patch("test_golden_lint._run_flox_init")
+    @patch(f"{__name__}._run_flox_list_c")
+    @patch(f"{__name__}._run_flox_init")
     def test_attempt_lock_surfaces_resolver_failure_message(self, mock_init, mock_list):
         # RED-first "fires" fixture: the exact failure class AI-457/AI-478
         # found only by hand -- packages that resolve individually but
@@ -479,8 +481,8 @@ class TestLockResolutionLeg(unittest.TestCase):
         self.assertIn("constraints for group 'toplevel' are too tight", message)
         self.assertGreaterEqual(elapsed, 0.0)
 
-    @patch("test_golden_lint._run_flox_list_c")
-    @patch("test_golden_lint._run_flox_init")
+    @patch(f"{__name__}._run_flox_list_c")
+    @patch(f"{__name__}._run_flox_init")
     def test_attempt_lock_classifies_catalog_error_as_transient_and_retries(
         self, mock_init, mock_list
     ):
@@ -506,8 +508,8 @@ class TestLockResolutionLeg(unittest.TestCase):
         self.assertEqual(mock_list.call_count, 2, "transient failure must retry once")
         self.assertGreaterEqual(elapsed, 0.0)
 
-    @patch("test_golden_lint._run_flox_list_c")
-    @patch("test_golden_lint._run_flox_init")
+    @patch(f"{__name__}._run_flox_list_c")
+    @patch(f"{__name__}._run_flox_init")
     def test_attempt_lock_retry_recovers_from_transient_error(
         self, mock_init, mock_list
     ):
@@ -524,7 +526,7 @@ class TestLockResolutionLeg(unittest.TestCase):
         self.assertEqual(message, "")
         self.assertEqual(mock_list.call_count, 2)
 
-    @patch("test_golden_lint._run_flox_init")
+    @patch(f"{__name__}._run_flox_init")
     def test_attempt_lock_handles_init_failure_gracefully(self, mock_init):
         mock_init.return_value = MagicMock(returncode=1, stdout="", stderr="disk full")
         status, message, elapsed = _attempt_lock("[install]\n")
@@ -532,7 +534,7 @@ class TestLockResolutionLeg(unittest.TestCase):
         self.assertIn("disk full", message)
         self.assertEqual(elapsed, 0.0)
 
-    @patch("test_golden_lint._run_flox_init")
+    @patch(f"{__name__}._run_flox_init")
     def test_attempt_lock_handles_init_timeout(self, mock_init):
         # PR #56 review M1: _run_flox_init's own timeout must degrade to
         # a reported lock failure, not propagate uncaught and crash the
@@ -544,8 +546,8 @@ class TestLockResolutionLeg(unittest.TestCase):
         self.assertIn("timed out", message)
         self.assertEqual(elapsed, 0.0)
 
-    @patch("test_golden_lint._run_flox_list_c")
-    @patch("test_golden_lint._run_flox_init")
+    @patch(f"{__name__}._run_flox_list_c")
+    @patch(f"{__name__}._run_flox_init")
     def test_attempt_lock_handles_list_timeout(self, mock_init, mock_list):
         mock_init.return_value = MagicMock(returncode=0, stdout="", stderr="")
         mock_list.side_effect = subprocess.TimeoutExpired(cmd="flox list -c", timeout=60)
@@ -571,7 +573,7 @@ class TestLockResolutionLeg(unittest.TestCase):
 
     # --- TestGoldenLint._lock: fail/pass, mocked _attempt_lock ---------
 
-    @patch("test_golden_lint._attempt_lock")
+    @patch(f"{__name__}._attempt_lock")
     def test_lock_fails_and_surfaces_resolver_message_when_resolution_fails(
         self, mock_attempt
     ):
@@ -588,7 +590,7 @@ class TestLockResolutionLeg(unittest.TestCase):
         self.assertIn("REAL finding", message)
         self.assertIn("do NOT allowlist", message)
 
-    @patch("test_golden_lint._attempt_lock")
+    @patch(f"{__name__}._attempt_lock")
     def test_lock_fails_with_transient_framing_when_catalog_errors_persist(
         self, mock_attempt
     ):
@@ -610,7 +612,7 @@ class TestLockResolutionLeg(unittest.TestCase):
         self.assertNotIn("REAL finding", message)
         self.assertNotIn("do NOT allowlist", message)
 
-    @patch("test_golden_lint._attempt_lock")
+    @patch(f"{__name__}._attempt_lock")
     def test_lock_passes_cleanly_when_resolution_succeeds(self, mock_attempt):
         mock_attempt.return_value = (LOCK_OK, "", 0.5)
         instance = self._instance()
