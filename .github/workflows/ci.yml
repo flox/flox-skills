@@ -8,6 +8,12 @@ name: "CI"
 #   - Pushes to main (and a dispatch with publish=true) PUBLISH to
 #     `flox/skills-flox` for every system.
 #
+# The `Summary` job is a REQUIRED status check on main (with `evals` from
+# evals.yml). Required checks constrain the trigger, not just the job graph:
+# this workflow must start on every pull_request so that context reports,
+# and path gating happens in the `changes` job instead. See the note on the
+# pull_request trigger below.
+#
 # Cross-system builds run on ubuntu runners via remote builders reached
 # over Tailscale, with the private R2 cache configured through
 # flox/configure-nix-action — exactly as flox-ai builds its four systems.
@@ -22,6 +28,11 @@ on:
         description: "Publish skills-flox to the flox catalog"
         type: boolean
         default: false
+  # Push KEEPS its path filter: a main push with none of these paths touched
+  # has nothing to publish, and the Publish step below fires on every push
+  # event, so the trigger filter is what stops a pointless `flox publish`.
+  # Nothing gates pushes to main on a status check, so skipping the whole
+  # workflow here costs nothing.
   push:
     branches:
       - main
@@ -29,11 +40,16 @@ on:
       - "flox-plugin/**"
       - ".flox/**"
       - ".github/workflows/ci.yml"
+  # Pull requests are DELIBERATELY unfiltered. `Summary` below is a required
+  # status check on main, and a required context that is skipped at the
+  # TRIGGER level is not "skipped" to branch protection — the workflow never
+  # runs, so the context is never reported at all, and the PR sits at
+  # "Expected — Waiting for status to be reported" forever. That is not the
+  # same as a job being conditionally skipped, which DOES report. A path
+  # filter here therefore wedges every PR that does not touch these paths.
+  # Path gating moved to the `changes` job below, exactly as evals.yml does
+  # it for its own required `evals` context.
   pull_request:
-    paths:
-      - "flox-plugin/**"
-      - ".flox/**"
-      - ".github/workflows/ci.yml"
 
 concurrency:
   group: "ci-${{ github.ref }}"
@@ -43,10 +59,53 @@ env:
   FLOX_DISABLE_METRICS: "true"
 
 jobs:
+  changes:
+    # The path filter that USED to live on the pull_request trigger. As a job
+    # it runs on every event with no job-level `if`, so it never propagates a
+    # skip to what `needs:` it; on push/workflow_dispatch the filter step is
+    # skipped and the output is empty, which is fine because those event
+    # branches of build-and-publish's `if` don't consult it. Same shape and
+    # same pinned action as evals.yml's `changes` job.
+    #
+    # The filter list is the old trigger list, unchanged, ci.yml included:
+    # moving WHERE the paths are evaluated should not quietly change WHICH
+    # paths build. Keeping this file in it means a PR editing the workflow
+    # still exercises the real four-system build rather than trusting a
+    # review of the YAML.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      build: ${{ steps.filter.outputs.build }}
+    steps:
+      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            build:
+              - 'flox-plugin/**'
+              - '.flox/**'
+              - '.github/workflows/ci.yml'
+
   build-and-publish:
     name: "Build and Publish (${{ matrix.system }})"
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    needs: ["changes"]
+    # Gated at the JOB level rather than around the `Build package` step: a
+    # step-level `if` would still spin up four runners to do a fetch-depth-0
+    # checkout, a Tailscale handshake and a full Nix/R2 configure before
+    # deciding there is nothing to build. Skipping the job is what evals.yml's
+    # floxify/golden-lint jobs do with the same `needs.changes.outputs` value,
+    # and it is what the `skipped == pass` branch in Summary below was already
+    # written for. Non-PR events short-circuit before consulting the filter,
+    # whose output is empty there.
+    if: >-
+      ${{ github.event_name != 'pull_request'
+        || needs.changes.outputs.build == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -104,19 +163,36 @@ jobs:
   # pass/fail. always() so it reports even when a leg fails; it then
   # fails itself if any leg did, so branch protection can gate on this
   # one context instead of four shifting matrix names.
+  #
+  # `changes` is in needs: alongside build-and-publish so this job can tell
+  # the two reasons build-and-publish reports "skipped" apart. always() only
+  # promises Summary runs once its needs SETTLE, and build-and-publish
+  # already needs changes, so the ordering was safe transitively — but
+  # without the direct edge, needs.changes.result is not in scope here and a
+  # crashed path filter would skip the build and be read as "nothing to
+  # build", i.e. a green required check on an unbuilt PR.
   summary:
     name: "Summary"
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: ["build-and-publish"]
+    needs: ["changes", "build-and-publish"]
     if: always()
     steps:
       - name: "Check build/publish result"
         env:
+          CHANGES: ${{ needs.changes.result }}
           RESULT: ${{ needs.build-and-publish.result }}
         run: |
           set -euo pipefail
+          echo "changes: $CHANGES"
           echo "build-and-publish: $RESULT"
+          # A skipped build is only good news if the thing that decided to
+          # skip it actually ran. `changes` carries no job-level `if`, so on
+          # every event a healthy run reports success.
+          if [ "$CHANGES" != "success" ]; then
+            echo "Path filter did not succeed; a skipped build proves nothing."
+            exit 1
+          fi
           # skipped == no matching paths changed; treat as pass.
           if [ "$RESULT" = "success" ] || [ "$RESULT" = "skipped" ]; then
             echo "All systems OK."
