@@ -50,7 +50,7 @@ opt out with an explicit marker, either of:
 Prefer the comment form: it keeps ```toml syntax highlighting and forces you to
 write down *why*. Never add a marker to silence a real parse error -- fix the
 snippet, or allowlist it in KNOWN_PARSE_FAILURES below. See evals/README.md
-("Skill TOML snippet guard").
+("Manifest-snippet check").
 
 Usage:
     python3 skill_toml_lint.py                          # structural tier
@@ -422,7 +422,7 @@ def _print_report(results, summary, verbose):
         print(
             "\nA snippet in the flox skill does not parse. Fix the snippet -- or, if it is\n"
             "deliberately partial, mark it: add `# eval: skip <reason>` inside the block\n"
-            "(see evals/README.md, 'Skill TOML snippet guard')."
+            "(see evals/README.md, 'Manifest-snippet check')."
         )
 
 
