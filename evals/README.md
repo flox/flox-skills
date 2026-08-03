@@ -68,13 +68,28 @@ name tells you what kind of thing is inside it.
 | `fixtures/` | Input repositories the skill is pointed at | yes |
 | `expected/` | Reference manifests a produced manifest is graded against — expected *properties*, not byte-exact output | yes |
 | `samples/` | Captured inputs (agent stream transcripts, a real run's manifest) that tests parse | yes |
-| `baselines/` | Committed comparison measurements. Runners **read** these and never write them | yes |
+| `baselines/` | Committed comparison measurements. Nothing here writes them by default; what reads them varies (see below) | yes |
 | `reports/` | Selected human-readable analyses worth keeping | yes |
-| `results/` | Generated run output. Every `--out` / `--json` lands here | **no — gitignored** |
+| `results/` | Generated run output. A runner's `--out` / `--json` lands here | **no — gitignored** |
 
-The `baselines/` ↔ `results/` split is load-bearing: `--out` writes under
-`results/` and `--baseline` reads under `baselines/`, so a local run can never
-overwrite the snapshot it is being diffed against.
+The `baselines/` ↔ `results/` split is load-bearing: by default `--out` writes
+under `results/` and `--baseline` reads under `baselines/`, so an ordinary local
+run does not overwrite the snapshot it is being diffed against. Neither
+directory is enforced by a path resolver, though — `--out` is taken at its word,
+so `--out baselines/...` from inside a suite directory *will* overwrite a
+committed baseline. Refreshing one is a deliberate copy (`cp
+results/refresh.json baselines/synthetic.json`), not a flag.
+
+Not every baseline has an automatic reader, and the table above should not be
+read as promising one. `run.py` diffs against `flox/baselines/skills.json` and
+`baseline.json`, and `run_floxify.py --baseline` against
+`floxify/baselines/synthetic.json` — those three are wired up. The three
+`flox/baselines/screen-*.json` are the committed measurements the screening
+report is generated from, which is a documented command
+(`gen_screening_report.py --results baselines/screen-*.json`) rather than
+something a runner does on its own. `floxify/baselines/real-world.json` has no
+reader at all: `real_world.py` has no `--baseline` flag and no regression diff,
+so it is a snapshot a human compares by hand.
 
 `floxify/` keeps its three registries (`synthetic.jsonl`, `stretch.jsonl`,
 `real-world.jsonl`) at the suite root rather than under `tasks/`; each runner's
@@ -168,8 +183,8 @@ a short reply is not free. Do the arithmetic before a whole-registry run:
 
 | Command | Calls |
 |---|---|
-| `run.py` over `tasks/tasks.jsonl` | 29 tasks × 2 = **58** |
-| `screen.py --reps 5` over `tasks/screening.jsonl` | 46 candidates × 4 × 5 reps = **920** |
+| `run.py` over `tasks/tasks.jsonl` | 31 tasks × 2 = **62** |
+| `screen.py --reps 5` over `tasks/screening.jsonl` | 51 candidates × 4 × 5 reps = **1020** |
 | `run_floxify.py` over `synthetic.jsonl` | 7 fixtures × 2 = **14** |
 
 The screening figure is the expected invocation, not an edge case: `--reps` ≥ 5
@@ -296,8 +311,91 @@ it never inspected — an answer whose prose says `schema-version = "1.12.0"`
 while its only manifest keeps `version = 1` passes a text search and hands the
 user a file flox refuses to load.
 
+Each hard-check is wrapped, so a check that raises fails that check rather than
+the run. A pathological answer — a 600-component dotted key parses fine and then
+hits the recursion limit in the parsed walk — would otherwise escape mid-run and
+kill the process before results were written, losing every paid call already
+made.
+
 The check functions are in [`run.py`](flox/run.py) (`CHECKS`); their tests are in
 [`tests/test_run.py`](flox/tests/test_run.py).
+
+### `no_hardcoded_secret`
+
+SKILL.md's "Configuration & Secrets" rule is emphatic — *never* store secrets in
+the manifest; use environment variables, `~/.config/<env_name>/`, or an existing
+credentials file. `no_hardcoded_secret` is the check that holds an answer to it,
+ported from [flox/flox-agentic#18](https://github.com/flox/flox-agentic/pull/18)
+(@imkarrer) onto this suite's fence extraction and `tomllib` parsing. Two tasks
+bind it: `env-secrets-api-key` (functional, `should`, so it binds the gate) and
+`indirect-secrets-no-commit` (a trigger test).
+
+A secret-**named** key (`*SECRET*`, `*TOKEN*`, `*PASSWORD*`, `*PASSPHRASE*`,
+`*CREDENTIAL*`, `*API_KEY*`, `*ACCESS_KEY*`, `*PRIVATE_KEY*`, …) assigned a
+value that *holds* a credential is a leak. So is a connection URL with an inline
+credential — `DATABASE_URL = "postgres://user:hunter2@localhost/db"` — under
+**any** key name, because `DATABASE_URL`, `DSN` and `WEBHOOK_URL` are not
+secret-named and never will be, and that is the form a model writes unprompted
+on a prompt asking for "a database password and an API token".
+
+What a value *is* decides this, not what it starts with. A value that names,
+points at, or stands in for a secret passes wherever the reference sits inside
+it: an env reference or command substitution anywhere (`Bearer $TOKEN`,
+`sk-${SUFFIX}`, `$(pass show api)`), a placeholder, a path
+(`~/.config/<env>/secrets`, `./.secrets/token`, `secrets/token`, `.env`), an
+external secret-store reference (`op://vault/item/field`), an env-var name
+(`API_KEY_ENV = "MY_APP_KEY"`), or a command
+(`PASSWORD_COMMAND = "pass show api"`). Every one of those is what a *good*
+answer to `env-secrets-api-key` contains, and each was a false positive while the
+allowance was anchored at the first token.
+
+Every fenced block is scanned two ways and either finding a leak fails the check,
+because neither view alone is enough:
+
+| view | reaches |
+|---|---|
+| text (regex over the raw block) | blocks that aren't valid TOML (the parsed view drops those wholesale), and an assignment inside a `[hook] on-activate = '''…'''` shell body — still the committed manifest, but one opaque string to a parser |
+| parsed (`tomllib` dict) | values with no single-line form for a regex to capture — a multi-line array, and any multi-line container |
+
+That table is the committed corpus split per leg, not a guess: 3 cases are
+text-only, 1 is parsed-only, and 34 are caught by both. Nested tables and dotted
+keys are reached by *both* legs (`SECRET_ASSIGN`'s line anchor spans them), so
+they are not an argument for the second view; the multi-line shapes are.
+
+This is the one check that scans both views, and the reason is the mirror image
+of the parse-the-manifest rule above. `no_abs_paths` also scans block text
+(`ABS_PATH` over the joined raw bodies), and `has_install_section` /
+`mentions_containerize` grep the whole answer without extracting a block at all.
+Scanning both views here is not asserting that a manifest is *correct* — it is
+asserting that a manifest *leaks nothing*. A block `tomllib` refuses is dropped
+from the parsed view entirely, and a secret pasted into a `[hook]` shell body is
+one opaque string to a parser; both would pass vacuously. Same fenced blocks,
+same scope — the union is the point.
+
+Blind spots, by construction. Name-based detection cannot see a secret under a
+non-secret-named key (except the URL form above) or an unquoted value;
+shape-based classification reads a value that *begins* with a placeholder token,
+one that contains whitespace, and one shaped like an env-var name as references.
+A secret-named *table* with innocently-named leaves (`[vars.secrets]` plus
+`db = "…"`) is not inspected either — deliberately, because `[install]` keys are
+package names and propagating the parent name down would redden
+`vault-token.pkg-path = "vault"`. And the seam between the two views is a
+multi-line value inside a block `tomllib` rejects, which neither leg reaches. All
+of those are pinned by
+`tests/test_run.py::TestNoHardcodedSecret::test_known_limitations_are_pinned`,
+so a change in either direction shows up as a failing test to review rather than
+as silence.
+
+Two accepted policy calls, so neither is a surprise later. **Any** real literal
+in **any** fenced manifest in the answer is a leak, including one shown as an
+anti-pattern under a `# BAD — never commit this` comment before the fix is
+shown: the check has no notion of narrative order, and
+`test_one_leaking_block_fails_the_whole_answer` cements that on purpose — an
+answer that pastes a real key is a leak wherever it sits. And "binds the gate"
+is conditional in the way [What binds CI](#what-binds-ci) describes:
+`env-secrets-api-key` is `should`-tier and non-trigger, so it binds `--gate`
+**when the paid arm runs**, which is `workflow_dispatch` with
+`run_paid_evals=true` only. Nothing here is enforced per-PR.
 
 ## Manifest-snippet check (`skill_toml_lint.py`)
 
@@ -483,19 +581,21 @@ kept on purpose, not ordinary run output.
 
 ## Baselines
 
-`baselines/` holds committed comparison points that runners read and never
-write:
+`baselines/` holds committed comparison points that no run writes by default:
 
-| File | What it is | Coverage |
-|---|---|---|
-| `skills.json` | `run.py --mode skills` over the gated registry | 27 of 29 tasks |
-| `baseline.json` | `run.py --mode baseline` — the unassisted arm, with the isolation caveat above | 27 of 29 tasks |
-| `screen-opus.json`, `screen-sonnet.json`, `screen-haiku.json` | `screen.py` at n=5 per model | 19 of 46 candidates |
+| File | What it is | Coverage | Read by |
+|---|---|---|---|
+| `skills.json` | `run.py --mode skills` over the gated registry | 27 of 31 tasks | `run.py`'s regression diff |
+| `baseline.json` | `run.py --mode baseline` — the unassisted arm, with the isolation caveat above | 27 of 31 tasks | `run.py`'s regression diff |
+| `screen-opus.json`, `screen-sonnet.json`, `screen-haiku.json` | `screen.py` at n=5 per model | 19 of 51 candidates | `gen_screening_report.py --results`, by hand |
 
 **These snapshots lag their registries.** Both `run.py` baselines were recorded
-against a 27-task registry that has since grown to 29, so every run opens its
+against a 27-task registry that has since grown to 31, so every run opens its
 diff with phantom "new tasks" lines. Treat the *flips* as the signal, not the
-additions, until a refresh lands.
+additions, until a refresh lands. The screening snapshots cover a subset too —
+`gen_screening_report.py` names the unmeasured candidates under "Not screened"
+rather than bucketing them, and errors rather than writing a report when no
+`--results` file exists at all.
 
 Refreshing one is a deliberate, reviewable act, never a side effect of a run.
 `run.py` derives its comparison baseline from the **output filename** — `--out
