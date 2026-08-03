@@ -218,8 +218,11 @@ group. It does not run the two stretch modules — see [CI](#ci).
 Results land in `results/` as JSON with a per-entry record and a summary
 (hard-pass rate, avg judge score, activation counts, `verify_checked` /
 `verify_clean` / `verify_hard_violation_rate`). `results/` is **gitignored**;
-committed comparison points live in `baselines/`, which the runners read and
-never write.
+committed comparison points live in `baselines/`, which no run writes by
+default — `synthetic.json` is read by `run_floxify.py --baseline`, and
+`real-world.json` is read by nothing (`real_world.py` has no `--baseline` flag).
+Neither path is enforced, so an explicit `--out baselines/...` will still
+overwrite a committed file; refreshing one is the deliberate copy below.
 
 Raw per-rep agent streams persist under
 `results/streams/<out-basename>/<id>__<arm>__rep<N>__agent.jsonl`, keyed to the
@@ -301,7 +304,7 @@ to mean anything yet.
 | `expected/<id>.toml` | Reference manifest for the judge. **Not universal**: `script-started-postgres` has none, and `run_floxify.py` silently substitutes the literal string `"(no gold available)"` into the judge prompt, so that fixture is graded against a placeholder and its judge score is not comparable to the other six |
 | `expected/<id>-notes.md` | Provenance for a real-world reference: every pin traced to its source file, plus the `flox show` / `flox search` log that confirmed it |
 | `samples/` | Captured agent stream transcripts and one real run's manifest, parsed by tests. See [`samples/README.md`](samples/README.md) for how each was captured |
-| `baselines/` | `synthetic.json`, `real-world.json` — read, never written by a run |
+| `baselines/` | `synthetic.json` (read by `--baseline`), `real-world.json` (read by nothing) — not written by a default run |
 | `results/` | Generated output, **gitignored** |
 | `tests/` | Deterministic unit tests |
 
