@@ -1,0 +1,276 @@
+---
+name: catalog-resolution-debug
+description: >-
+  Debug Flox catalog package resolution. Use when user
+  says "package not resolving", "wrong version installed",
+  "old build", "resolution issue", "why is flox picking
+  the wrong package", "candidate pages", "base page",
+  "build page", "constraints too tight", or any question
+  about why a specific package version is or isn't being
+  selected by the resolver. Also use when investigating
+  publish issues where new publishes don't appear in
+  resolution, or when adding a package to an existing
+  environment causes a resolution failure.
+---
+
+# Catalog Resolution Debugging
+
+Debug why the Flox catalog resolver picks (or skips)
+specific package builds, and why adding packages to an
+existing environment can fail with constraint errors.
+
+## Gather Context from the User
+
+Before making any API calls, ask the user:
+
+1. **What is the Flox environment?** Get the path to the
+   manifest. This could be:
+   - A path to a directory containing
+     `.flox/env/manifest.toml`
+   - The current directory (check for
+     `.flox/env/manifest.toml`)
+   - No environment (debugging a standalone package)
+
+2. **What package group are they debugging?** Packages in
+   a Flox manifest can belong to different `pkg-group`s.
+   All packages in a group must resolve to the same base
+   page. Ask which group is the problem. The default
+   group name is `"default"` (packages without an
+   explicit `pkg-group`).
+
+3. **What packages do they want to add?** The user may
+   be trying to add one or more packages that are causing
+   resolution to fail. Get the attr_path for each.
+
+## Parse the Manifest
+
+Read the `manifest.toml` from the environment. Extract
+all packages in the target package group:
+
+```toml
+# Example manifest entries:
+[install]
+gh.pkg-path = "gh"                        # default group
+python3.pkg-path = "python3"              # default group
+claude-code.pkg-path = "flox-ai/claude-code"
+claude-code.pkg-group = "claude-code"     # separate group
+nodejs_22.pkg-path = "nodejs_22"
+nodejs_22.version = "22.14.0"
+nodejs_22.pkg-group = "nodejs"            # separate group
+```
+
+For each package in the target group, build a
+PackageDescriptor:
+- `install_id`: the TOML key (e.g., `gh`, `python3`)
+- `attr_path`: the `pkg-path` value
+- `systems`: detect from user's platform (`uname -m`
+  + `uname -s` -> e.g., `x86_64-linux`)
+- `version`: the `version` value if present, null
+  otherwise
+- Skip packages with a `flake` attribute — those are
+  not resolved through the catalog
+
+Then append the user's new packages as additional
+descriptors in the same group.
+
+## Core Concepts
+
+### Two Kinds of Page
+
+Every resolved package sits at the intersection of two
+axes:
+
+- **Base page** — the nixpkgs revision the package was
+  built against. This is the `page` number in the API
+  response. Higher = newer nixpkgs.
+- **Build page** — the source repository revision. This
+  is `rev_count` / `rev` / `rev_date` in the response.
+  Higher rev_count = newer source.
+
+**The resolver picks the highest base page where ALL
+packages in the group can be satisfied.** A newer build
+(high rev_count) on an old base page can drag the entire
+group down — or make resolution impossible if no single
+base page has all packages.
+
+### Why This Causes Confusion
+
+**Scenario 1: New publish not picked up.**
+A user publishes a new version. The publish succeeds. But
+`flox install` still picks the old build because the new
+build was evaluated against an old nixpkgs pin (low base
+page), while an older build on a newer base page wins.
+
+**Scenario 2: Adding a package breaks the group.**
+User has an environment with packages A, B, C all
+resolving on base page 950000. They try to add package D,
+which only exists on base page 780000. No single base
+page has all four packages, so resolution fails with
+`constraints_too_tight`.
+
+## Authentication
+
+```bash
+TOKEN=$(flox auth token)
+```
+
+Use as `Authorization: Bearer $TOKEN` header on all
+catalog API calls.
+
+## Diagnostic Flow
+
+### Step 1: Resolve with Candidate Pages
+
+Call the resolve endpoint with the full set of packages
+(existing + new) requesting candidate pages:
+
+```bash
+curl -s -X POST \
+  "https://api.flox.dev/catalog/api/v1/catalog/resolve\
+?candidate_pages=10" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "items": [{
+      "name": "<GROUP_NAME>",
+      "descriptors": [
+        {
+          "install_id": "<ID>",
+          "attr_path": "<PATH>",
+          "systems": ["<SYSTEM>"],
+          "version": "<VERSION_OR_NULL>"
+        }
+      ]
+    }]
+  }'
+```
+
+**Parameters:**
+- `name`: The package group name (usually `"default"`)
+- `descriptors`: One entry per package in the group
+  (existing from manifest + new from user)
+- `systems`: Detect from user's platform
+- `candidate_pages=10`: Start with 10; increase if
+  needed to see more history
+
+### Step 2: Build the Diagnostic Table
+
+From the response, extract the selected page and all
+candidate pages. For each page, show each package's
+status. Present a table:
+
+| Base page | Package | Version | Build rev | Build date | Messages |
+|-----------|---------|---------|-----------|------------|----------|
+
+Sort by base page descending (highest first = winner).
+
+Mark the selected page. For candidate pages, show any
+messages explaining why they weren't selected or why
+specific packages couldn't be satisfied on that page.
+
+### Step 3: Analyze the Gap
+
+Check for these patterns:
+
+**No common base page (constraints_too_tight):**
+If the resolver returns an error or the selected page
+is missing some packages, the packages in the group
+don't share a common base page. Identify which package
+is the outlier — it only exists on base pages where
+other packages don't, or vice versa. This is the most
+common issue when adding a new package to an existing
+environment.
+
+**Stale base page on newest build:**
+If the newest build (highest rev_count) has a lower base
+page than older builds, the source repo's nixpkgs input
+is pinned to an old revision. The fix is to update the
+nixpkgs flake input in the source repo and republish.
+
+**Messages explain rejection:**
+If candidate pages have messages, report them. Common
+message types:
+- `constraints_too_tight` — version/license/etc.
+  constraints exclude the page
+- `missing_builds` — package exists but not for the
+  requested system
+- `broken` / `insecure` / `unfree` — package metadata
+  flags exclude it
+- `version_not_found` — version constraint doesn't match
+- `attr_path_not_found` — package doesn't exist on
+  that page
+- `attr_path_not_found.systems_not_on_same_page` —
+  package exists but not for all requested systems on
+  this page
+- `attr_path_not_found.not_found_for_all_systems` —
+  package not available for some requested systems
+
+**No messages, just page ordering:**
+If all candidate pages have empty messages and the only
+difference is base page number, the issue is purely
+which nixpkgs base the builds landed on.
+
+### Step 4: Check Individual Package Builds
+
+To see all known builds of a specific package across
+all pages:
+
+```bash
+curl -s \
+  "https://api.flox.dev/catalog/api/v1/catalog/\
+packages/<ATTR_PATH>?page=0&pageSize=50" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+This shows `total_count` and individual builds. Use this
+to answer: "What base pages does this package exist on?"
+Compare against the base pages available for other
+packages in the group.
+
+### Step 5: Isolate the Constraint
+
+If resolution fails with multiple packages, try
+resolving subsets to isolate which package combination
+causes the failure:
+
+1. Resolve just the existing packages (without the new
+   ones) — this should succeed and shows the current
+   base page
+2. Resolve just the new package alone — shows what base
+   pages it's available on
+3. Compare: if there's no overlap in base pages, that
+   explains the failure
+
+## Presenting Results
+
+Always present findings as:
+
+1. **What resolved** (or failed): The selected page with
+   package details, or the error
+2. **Candidate table**: All candidates sorted by base
+   page descending, with per-package status
+3. **Diagnosis**: Why the selected page won, or why
+   resolution failed — identify the specific package(s)
+   causing the constraint
+4. **Action items**: What the user should do:
+   - Update nixpkgs input in source repo and republish
+   - Adjust version constraints
+   - Move a package to a separate pkg-group
+   - Check system coverage
+   - Wait for the catalog to index a newer build
+
+## Multiple Packages / Package Groups
+
+When debugging resolution with multiple packages in the
+same group, remember that all packages in a group must
+resolve to the **same base page**. A single package
+pinned to an old base page can drag the entire group
+down. Check each package's candidate pages independently
+to find the constraint.
+
+## Re-running After Changes
+
+After the user publishes a new build or updates their
+nixpkgs pin, re-run the resolve call to verify the fix.
+Compare the new results to the previous diagnostic table
+to confirm the base page moved as expected.
