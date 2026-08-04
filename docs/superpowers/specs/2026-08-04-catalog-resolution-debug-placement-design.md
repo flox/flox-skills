@@ -36,6 +36,24 @@ all check out. **The concepts are right; the reproduction is not.**
 Nothing in the shipped `flox` or `floxify` skills covers base page vs build
 page or what to do when resolution fails, so the content is additive.
 
+### Why it belongs in this repo at all
+
+The two repos split by audience, not by value tier. `flox-internal-skills` holds
+tools for *working at Flox* — CI builder health, dependabot triage, AWS cost
+spikes, Linear migration, sprint demos, and four marketing/design skills.
+`flox-skills` is a shipped product artifact teaching people to *use Flox*.
+
+`catalog-resolution-debug` is the only skill in the internal repo about the
+product, and the failures it explains ("my publish isn't picked up", "adding a
+package broke my environment") are user complaints — AI-409 is an inbound report
+of exactly this scenario. Moving it is correcting a filing error, not promoting
+an internal tool.
+
+The real cost of the move is that publishing makes it a support surface we
+commit to keeping correct as the catalog evolves. That is offset by the API
+already being public and documented, and by the skill landing under eval
+coverage it has none of today.
+
 ### Why it needs fixing before it ships
 
 `d82cbc3` (2026-04-06) has a **single parent** — not a merge commit. Every other
@@ -80,20 +98,49 @@ The concept section survives intact. It is the part that is right.
 ## 3. Placement: standalone skill
 
 `flox-plugin/skills/catalog-resolution-debug/SKILL.md`, own frontmatter carrying
-the existing trigger list. The `flox` skill is untouched.
+the existing trigger list. `flox/SKILL.md` and `floxify/` are untouched.
 
-**The reference option is the more expensive one, not the cheaper one.** It
-requires widening the `flox` frontmatter with debug vocabulary — that
-description contains no troubleshooting words today, so without widening it the
-reference would rarely be reached. But `flox/SKILL.md` is under eval gate, so
-perturbing it makes "prove you didn't regress existing triggering" part of the
-job, and it re-inflates a file AI-488 just spent a cycle culling.
+### Primary reason: it is a procedure, not knowledge
 
-The standalone touches nothing with existing eval coverage. `floxify` is already
-the precedent for one skill per job, and this is a third distinct job: reactive
-fault diagnosis, not environment authoring. Its trigger vocabulary ("package not
-resolving", "wrong version installed", "old build", "constraints too tight")
-overlaps neither shipped skill.
+The repo has two skills, and the line between them is what kind of thing they
+are:
+
+| | `floxify` | `flox/references/` |
+|---|---|---|
+| Structure | `## Phase 0` → `## Phase 4` | Topical: "Running Services", "Core Commands" |
+| Metadata | `argument-hint: "[github-url \| local-path]"` | none |
+| Output | Produces an artifact and a report | Produces an answer |
+| Use | You **run** it | You **consult** it |
+
+`catalog-resolution-debug` is the first kind. Its headings are *Gather Context
+from the User → Parse the Manifest → Core Concepts → Diagnostic Flow (Step 1–5)
+→ Presenting Results*: input-gathering, ordered steps, a report format, invoked
+against an environment path. Structurally it is `floxify`, not `services.md`.
+
+AI-504 words the question the same way — "as a reference… or as its own separate
+skill **to be triggered and invoked**."
+
+Caveat: one precedent is thin, and the line is not perfectly crisp (`publish.md`
+and `builds.md` under `flox/references/` do contain step sequences). If the
+team's intent is "everything Flox-related lives inside the `flox` skill," then
+`floxify` is the anomaly rather than the precedent and this should be bundled.
+Worth confirming with Bill, who wrote both AI-94 and this ticket.
+
+### Secondary reason: the reference option is the more expensive one
+
+A reference is only opened if the `flox` skill fires first, and that skill's
+description covers creating and managing environments with no troubleshooting
+vocabulary at all. Making the reference reachable means widening that
+description — but `flox/SKILL.md` is eval-gated (`evals.yml` path-filters on
+`flox-plugin/skills/flox/**`), so "prove you didn't regress existing triggering"
+becomes part of the job, and it re-inflates a file AI-488 just spent a cycle
+culling. The standalone touches nothing with existing coverage.
+
+### Reversible either way
+
+Converting standalone → reference later is a file move plus a routing line. The
+content fixes in §2 are the durable value and are identical under either
+placement, so this decision is not worth delaying them for.
 
 **No packaging work.** Verified: `[build.skills-flox]` does
 `cp -R flox-plugin/.` and `.flox/nix/flox-agent-layout.sh` globs `"$skillsrc"/*/`,
