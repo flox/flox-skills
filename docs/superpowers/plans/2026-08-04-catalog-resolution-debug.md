@@ -253,7 +253,15 @@ Expected: `res-multi-system` and `res-unfree-group` **FAIL** the skills arm. Spe
 
 `res-stale-publish` and `res-add-breaks-group` should PASS: they test the concept section, which is already correct.
 
-**If the two failures do not appear for those reasons, stop.** The eval is not measuring what it claims, and the fixes in Tasks 3 and 4 would be unverifiable.
+**If the two failures do not appear for those reasons, stop.** The eval is not measuring what it claims, and the fixes in Tasks 4 and 5 would be unverifiable.
+
+> **Outcome (2026-08-04):** this gate tripped, and the run was worth more than
+> the prediction. All four candidates failed, at $1.28. The skill triggers
+> correctly — the answers carry "nixpkgs base page", "Query the Flox catalog
+> API", "build a diagnostic table" — and then obeys its own opening instruction
+> to ask the user three questions, so the measured answer is a questionnaire
+> with no analysis in it. A fifth defect, masking the other two. Task 3 was
+> added to fix it, with `results/red-resolution.json` as its RED evidence.
 
 - [ ] **Step 5: Record the RED evidence**
 
@@ -297,7 +305,159 @@ Refs: AI-504"
 
 ---
 
-### Task 3: Fix defect 1 — take `systems` from the manifest
+### Task 3: Fix defect 5 — read the environment, don't interrogate the user
+
+**Added mid-execution.** Task 2's RED run showed all four candidates failing, but not for the predicted reasons. The skill triggers correctly, then obeys its own opening instruction — *"Before making any API calls, ask the user"* — and emits a three-question questionnaire instead of a diagnosis. There is no analysis for any hard check to match, so this defect masks the other two and must be fixed before they can be measured. `results/red-resolution.json` from Task 2 is this task's RED evidence.
+
+It is also a real usability defect: an agent sitting in the user's repo should read `.flox/env/manifest.toml` rather than interrogate them about its contents.
+
+**Files:**
+- Modify: `flox-plugin/skills/catalog-resolution-debug/SKILL.md` (the "Gather Context from the User" section)
+
+**Interfaces:**
+- Consumes: candidate ids `res-stale-publish` and `res-add-breaks-group` from Task 2. These two exercise the concept section, which is already correct, so they should go green on this fix alone.
+- Produces: nothing later tasks depend on.
+
+- [ ] **Step 1: Replace the whole "Gather Context from the User" section**
+
+Find the section that begins with this heading and runs to just before `## Parse the Manifest`:
+
+```
+## Gather Context from the User
+
+Before making any API calls, ask the user:
+```
+
+Replace the **entire section**, heading included, with:
+
+```
+## Establish Context
+
+Work it out yourself first. Ask only for what you cannot
+determine, and never open with a questionnaire.
+
+1. **Find the environment.** Look for
+   `.flox/env/manifest.toml` in the current directory,
+   then in any directory the user named. If there is no
+   manifest anywhere, you are debugging a standalone
+   package — say so and carry on.
+
+2. **Identify the package group.** Read it from the
+   manifest: packages with no explicit `pkg-group` are in
+   `"default"`. If the manifest declares more than one
+   group, take the one containing the package the user is
+   complaining about and say which you picked. Every
+   package in a group must resolve to the same base page,
+   so the group scopes the whole diagnosis.
+
+3. **Identify the packages involved.** Take the installed
+   set from the manifest. Only a package the user is
+   *adding* may need asking, and only if their message
+   did not already name it.
+
+Produce the diagnosis from what you can read, and state
+the assumptions you made. A user corrects a wrong
+assumption faster than they answer three questions.
+```
+
+- [ ] **Step 2: Verify the interrogation instruction is gone**
+
+```bash
+cd /Users/alantorres/Projects/flox-skills
+! grep -n "ask the user" flox-plugin/skills/catalog-resolution-debug/SKILL.md && echo "no interrogation opener: OK"
+grep -n "^## Establish Context" flox-plugin/skills/catalog-resolution-debug/SKILL.md
+grep -c "Gather Context from the User" flox-plugin/skills/catalog-resolution-debug/SKILL.md
+```
+
+Expected: `no interrogation opener: OK`, the `## Establish Context` heading found, and a count of `0` for the old heading.
+
+- [ ] **Step 3: Confirm the rest of the skill is untouched**
+
+```bash
+diff <(sed -n '/^## Parse the Manifest/,$p' ~/Projects/flox-internal-skills/skills/catalog-resolution-debug/SKILL.md) \
+     <(sed -n '/^## Parse the Manifest/,$p' flox-plugin/skills/catalog-resolution-debug/SKILL.md) \
+  && echo "everything from 'Parse the Manifest' onward is still verbatim: OK"
+```
+
+Expected: `OK`. This task changes exactly one section; the defects Tasks 4 and 5 fix must still be present and unfixed.
+
+- [ ] **Step 4: Re-run the full resolution area**
+
+Running all four (rather than only the two controls) costs the same order of money and tells us whether the remaining two now fail for their *predicted* reasons — which is the gate Task 2 could not reach.
+
+```bash
+cd evals/flox
+flox activate -- python3 screen.py --area resolution \
+  --model claude-haiku-4-5-20251001 \
+  --reps 5 \
+  --out results/red2-resolution.json
+
+flox activate -- python3 -c "
+import json
+d=json.load(open('results/red2-resolution.json'))
+for r in d['results']:
+    print(r['id'], '| skills hard rate:', r['skills'].get('hard_pass_rate'), '| pass:', r['skills'].get('hard_pass'), '|', r['classification'])
+print('cost \$', d['summary'].get('total_cost_usd'))
+"
+```
+
+Expected:
+- `res-stale-publish` — **PASSES** the skills arm.
+- `res-add-breaks-group` — **PASSES** the skills arm.
+- `res-multi-system` — still fails, and now demonstrably on `must_not_match: uname` (the skill still tells the agent to derive systems from `uname`).
+- `res-unfree-group` — still fails, and now demonstrably on `must_match: allow_unfree`.
+
+- [ ] **Step 5: Confirm the two remaining failures are for the predicted reasons**
+
+Print the stored answer excerpts and check them by eye:
+
+```bash
+cd evals/flox
+flox activate -- python3 -c "
+import json, re
+d=json.load(open('results/red2-resolution.json'))
+for r in d['results']:
+    if r['id'] in ('res-multi-system','res-unfree-group'):
+        ex = r['skills'].get('answer_excerpt') or ''
+        print('='*60); print(r['id'])
+        print('  contains uname       :', bool(re.search(r'(?i)uname', ex)))
+        print('  contains allow_unfree:', 'allow_unfree' in ex)
+        print(ex[:900])
+"
+```
+
+Expected: `res-multi-system`'s excerpt mentions `uname`, and `res-unfree-group`'s does not mention `allow_unfree`. If instead both now produce a real diagnosis and still fail on something unrelated, report **DONE_WITH_CONCERNS** with the excerpts — do not edit the prompts to force the expected failure.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd /Users/alantorres/Projects/flox-skills
+git add flox-plugin/skills/catalog-resolution-debug/SKILL.md
+git commit -m "fix(skills): establish context by reading, not by interrogating
+
+The skill opened with 'Before making any API calls, ask the user' and
+three questions. Measured effect: the answer under evaluation is a
+questionnaire rather than a diagnosis -- all four eval candidates
+scored 0-1/5 on their hard checks with nothing to match against, and
+one answer asked the user to run \`uname -m && uname -s\` by hand.
+
+An agent sitting in the user's repo should read
+.flox/env/manifest.toml, not interrogate them about its contents. It
+now works out the environment, the pkg-group and the installed set
+itself, asks only for what is genuinely absent, and states its
+assumptions.
+
+Found by the Task 2 RED run, which this fix turns green for the two
+candidates exercising the concept section. Everything from 'Parse the
+Manifest' onward is still the verbatim port; the systems and allow_*
+defects remain, unfixed and now measurable.
+
+Refs: AI-504"
+```
+
+---
+
+### Task 4: Fix defect 1 — take `systems` from the manifest
 
 **Files:**
 - Modify: `flox-plugin/skills/catalog-resolution-debug/SKILL.md` (the "Parse the Manifest" section)
@@ -409,7 +569,7 @@ Refs: AI-504"
 
 ---
 
-### Task 4: Fix defect 2 — carry the `allow_*` fields
+### Task 5: Fix defect 2 — carry the `allow_*` fields
 
 **Files:**
 - Modify: `flox-plugin/skills/catalog-resolution-debug/SKILL.md` (the "Parse the Manifest" section)
@@ -422,7 +582,7 @@ Verified against flox 1.14.0: `[options].allow` accepts exactly `unfree`, `broke
 
 - [ ] **Step 1: Add the options-mapping block**
 
-Insert immediately after the warning block added in Task 3, Step 2 (leave a blank line between):
+Insert immediately after the warning block added in Task 4, Step 2 (leave a blank line between):
 
 ```
 Then apply the environment's `[options]` to **every**
@@ -507,7 +667,7 @@ Refs: AI-504"
 
 ---
 
-### Task 5: Complete the message taxonomy and add token hygiene
+### Task 6: Complete the message taxonomy and add token hygiene
 
 The two cheap fixes. Grouped because neither has a dedicated eval prompt and both are transcription from sources already verified: the live `MessageType` enum, and this repo's existing secret-handling posture.
 
@@ -652,7 +812,7 @@ Refs: AI-504"
 
 ---
 
-### Task 6: User-facing documentation
+### Task 7: User-facing documentation
 
 Everything a user needs to know the skill exists and how to reach it. Three files, one commit, because they describe one change and a reviewer would accept or reject them together.
 
@@ -783,7 +943,7 @@ Refs: AI-504"
 
 ---
 
-### Task 7: File the sequenced follow-ups
+### Task 8: File the sequenced follow-ups
 
 The spec's §7 exclusions become real tickets, or they are lost.
 
