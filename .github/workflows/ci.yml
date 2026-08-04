@@ -133,7 +133,7 @@ jobs:
         uses: flox/install-flox-action@3b80351ae97bbe063f264dc88fbd505507054963 # v2.5.3
 
       - name: "Configure Nix"
-        uses: flox/configure-nix-action@1ee58d63463cb1870ab73d9df0acfd9d8ba671f8 # main
+        uses: flox/configure-nix-action@28a4eb7f63bf54c91670b4a698f0a9ebfb95384f # main
         with:
           github-access-token: ${{ secrets.MANAGED_FLOXBOT_GITHUB_ACCESS_TOKEN_REPO_SCOPE }}
           substituter: ${{ vars.MANAGED_CACHE_PRIVATE_R2_BUCKET }}
