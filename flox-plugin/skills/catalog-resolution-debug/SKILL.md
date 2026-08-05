@@ -194,7 +194,7 @@ curl -s -X POST \
         {
           "install_id": "<ID>",
           "attr_path": "<PATH>",
-          "systems": ["<SYSTEM>"],
+          "systems": ["<SYSTEM_1>", "<SYSTEM_2>", "..."],
           "version": "<VERSION_OR_NULL>"
         }
       ]
@@ -209,7 +209,10 @@ curl -s -X POST \
   (existing from manifest + new from user)
 - `systems`: the environment's declared systems, exactly
   as built in "Parse the Manifest" above — never the
-  local platform
+  local platform. List every one of them. A request
+  carrying a single system is the commonest way to get a
+  clean result for an environment that is genuinely
+  broken.
 - `candidate_pages=10`: Start with 10; increase if
   needed to see more history
 
