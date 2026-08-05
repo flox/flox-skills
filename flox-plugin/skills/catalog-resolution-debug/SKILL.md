@@ -19,6 +19,15 @@ Debug why the Flox catalog resolver picks (or skips)
 specific package builds, and why adding packages to an
 existing environment can fail with constraint errors.
 
+**Resolution failures are page problems, not
+version-conflict problems.** The reflex is to read
+`constraints_too_tight` as two packages wanting
+incompatible versions of a shared dependency. That is
+almost never what it means here: it means no single base
+page carries every package in the group. Do the page
+analysis first, and fall back to version-conflict
+reasoning only once the pages rule it out.
+
 ## Establish Context
 
 Work it out yourself first. Ask only for what you cannot
@@ -68,12 +77,27 @@ For each package in the target group, build a
 PackageDescriptor:
 - `install_id`: the TOML key (e.g., `gh`, `python3`)
 - `attr_path`: the `pkg-path` value
-- `systems`: detect from user's platform (`uname -m`
-  + `uname -s` -> e.g., `x86_64-linux`)
+- `systems`: the environment's declared systems, **not**
+  the local platform. Read `[options] systems` from the
+  manifest. If a package carries its own `.systems`, use
+  that list for that descriptor instead. If `[options]
+  systems` is absent the environment targets **all four**
+  (`aarch64-darwin`, `aarch64-linux`, `x86_64-darwin`,
+  `x86_64-linux`) — confirm against `manifest.lock`,
+  where every locked package records its `system`.
 - `version`: the `version` value if present, null
   otherwise
 - Skip packages with a `flake` attribute — those are
   not resolved through the catalog
+
+**Never narrow `systems` to your own machine.** Two of
+the message types below —
+`attr_path_not_found.systems_not_on_same_page` and
+`attr_path_not_found.not_found_for_all_systems` — are
+multi-system failures by definition. A single-system
+reproduction resolves cleanly against the very failure
+you were asked to debug, and you will report "works
+fine" on a broken environment.
 
 Then append the user's new packages as additional
 descriptors in the same group.
