@@ -457,16 +457,43 @@ Refs: AI-504"
 
 ---
 
-### Task 4: Fix defect 1 — take `systems` from the manifest
+### Task 4: Fix defect 1 (`systems`) and defect 6 (the page-vs-version framing)
 
 **Files:**
-- Modify: `flox-plugin/skills/catalog-resolution-debug/SKILL.md` (the "Parse the Manifest" section)
+- Modify: `flox-plugin/skills/catalog-resolution-debug/SKILL.md` (the intro, and the "Parse the Manifest" section)
 
 **Interfaces:**
-- Consumes: candidate id `res-multi-system` from Task 2.
+- Consumes: candidate ids `res-multi-system` and `res-add-breaks-group` from Task 2.
 - Produces: nothing later tasks depend on.
 
-Verified against flox 1.14.0: when `[options] systems` is absent the environment locks for **all four** systems (`aarch64-darwin`, `aarch64-linux`, `x86_64-darwin`, `x86_64-linux`), so the default case is precisely the case the ported skill gets wrong.
+Two independent changes, verified by one run.
+
+**Defect 1** — verified against flox 1.14.0: when `[options] systems` is absent the environment locks for **all four** systems (`aarch64-darwin`, `aarch64-linux`, `x86_64-darwin`, `x86_64-linux`), so the default case is precisely the case the ported skill gets wrong.
+
+**Defect 6** — found by Task 3b's run. `res-add-breaks-group` scored 2/5, and the captured answer explains `constraints_too_tight` as *"the fifth package's dependencies (or version constraints) conflict with what the existing four packages require"* — the generic dependency-conflict story, which is the documented **baseline** failure mode for that candidate. The skill states the base-page rule but does not displace the model's default mental model. One framing paragraph, placed where it is read first, is the fix.
+
+- [ ] **Step 0: Add the framing paragraph**
+
+Find the intro paragraph directly under the `# Catalog Resolution Debugging` heading:
+
+```
+Debug why the Flox catalog resolver picks (or skips)
+specific package builds, and why adding packages to an
+existing environment can fail with constraint errors.
+```
+
+Insert immediately after it (blank line between):
+
+```
+**Resolution failures are page problems, not
+version-conflict problems.** The reflex is to read
+`constraints_too_tight` as two packages wanting
+incompatible versions of a shared dependency. That is
+almost never what it means here: it means no single base
+page carries every package in the group. Do the page
+analysis first, and fall back to version-conflict
+reasoning only once the pages rule it out.
+```
 
 - [ ] **Step 1: Replace the `systems` bullet**
 
@@ -521,28 +548,43 @@ cd /Users/alantorres/Projects/flox-skills
 
 Expected: `no uname: OK`.
 
-- [ ] **Step 4: Re-run just this candidate to verify GREEN**
+- [ ] **Step 4: Re-run the whole area to verify both changes**
+
+Two changes, one run. `--area` rather than `--only` because Step 0 targets a different candidate than Steps 1–2.
 
 ```bash
 cd evals/flox
-flox activate -- python3 screen.py --only res-multi-system \
+flox activate -- python3 screen.py --area resolution \
   --model claude-haiku-4-5-20251001 \
   --reps 5 \
-  --out results/green-multi-system.json
-```
+  --out results/green4-resolution.json
 
-Expected: the skills arm now passes. Confirm:
-
-```bash
-python3 -c "
+flox activate -- python3 -c "
 import json
-d=json.load(open('results/green-multi-system.json'))
-r=d['results'][0]
-print(r['id'], '| skills hard_pass:', r['skills'].get('hard_pass'), '| class:', r['classification'])
-assert r['skills'].get('hard_pass'), 'STILL RED -- do not commit'
-print('GREEN')
+d=json.load(open('results/green4-resolution.json'))
+got={}
+for r in d['results']:
+    got[r['id']] = r['skills'].get('hard_pass')
+    print(f\"{r['id']:24} skills {r['skills'].get('hard_pass_rate')}  pass={r['skills'].get('hard_pass')}  {r['classification']}\")
+print('cost \$', d['summary'].get('total_cost_usd'))
+want = {'res-stale-publish': True, 'res-add-breaks-group': True,
+        'res-multi-system': True, 'res-unfree-group': False}
+bad = {k: (got.get(k), v) for k, v in want.items() if got.get(k) is not v}
+assert not bad, f'GATE FAILED (got, want): {bad}'
+print('GATE MET')
 "
 ```
+
+Expected gate:
+
+| Candidate | Expected | Why |
+|---|---|---|
+| `res-stale-publish` | PASS | already 5/5 at Task 3b; must not regress |
+| `res-add-breaks-group` | PASS | Step 0's framing paragraph |
+| `res-multi-system` | PASS | Steps 1–2's `systems` fix |
+| `res-unfree-group` | **FAIL** | `allow_*` is Task 5's fix — it must still be red |
+
+A `res-unfree-group` that flips to PASS here is a problem, not a bonus: it would mean something in this task leaked into Task 5's RED. Report it rather than proceeding.
 
 - [ ] **Step 5: Commit**
 
