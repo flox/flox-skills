@@ -68,7 +68,7 @@ all packages in the target package group:
 [install]
 gh.pkg-path = "gh"                        # default group
 python3.pkg-path = "python3"              # default group
-claude-code.pkg-path = "flox-ai/claude-code"
+claude-code.pkg-path = "flox/claude-code"
 claude-code.pkg-group = "claude-code"     # separate group
 nodejs_22.pkg-path = "nodejs_22"
 nodejs_22.version = "22.14.0"
