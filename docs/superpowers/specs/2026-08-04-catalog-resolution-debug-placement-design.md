@@ -164,14 +164,14 @@ Recorded so they are not relitigated:
   discordant pairs). The 2–3 eval prompts we owe regardless will show whether
   the standalone triggers.
 - **Worked example** — a captured resolve response and the candidate table it
-  produces. Real value; needs a live capture. Follow-up.
+  produces. Real value; needs a live capture. Follow-up: **AI-530**.
 - **CLI-first ladder** — teach "read what `flox install` printed, then
   `flox show`, then the API." The skill opens with `curl` today. Genuine
-  improvement, judgment-call polish. Follow-up.
+  improvement, judgment-call polish. Follow-up: **AI-530**.
 - **The `flox-internal-skills` copy.** Separate ticket with a hard sequencing
   dependency: flox-skills must land publicly first, and only then can the
   internal repo point at it. Bundling would couple two repos' merge order to one
-  ticket.
+  ticket. Follow-up: **AI-529**, blocked by AI-504.
 - **AI-127 as precedent.** The cancelled "move `catalog-db-inspect` out" ticket
   looks like a direct precedent for leaving this internal, but does not
   transfer: that skill needed a driver-provisioned snapshot connection string to
