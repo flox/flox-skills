@@ -119,6 +119,33 @@ KNOWN_VIOLATIONS = {
     # `catalog-systems-mismatch` rule, so any other golden, any other
     # package, or any other rule on this same package still fails loudly.
     ("lemmy", "catalog-systems-mismatch", "gcc"): "AI-457",
+    # Same class as the lemmy entry above -- live-catalog drift, not a
+    # regression in any change that trips it -- but with one difference
+    # worth stating, because it changes who owns the fix. `nodejs_22`'s
+    # Latest is now 22.23.2, which has no x86_64-darwin build (confirmed
+    # live 2026-08-05), and supabase.toml declares NO `[options]` block at
+    # all: the x86_64-darwin in this violation comes from verify.py's
+    # ALL_SYSTEMS default, not from anything the golden wrote. So the
+    # message's "but options.systems declares it" is the DEFAULT talking.
+    #
+    # The golden is not defective and must not be narrowed to "fix" this.
+    # test_supabase_locks_cleanly passes: the real resolver co-resolves the
+    # whole toplevel group on one catalog page and picks nodejs_22@22.21.1,
+    # which does build on all four systems (verified 2026-08-05 by locking
+    # this exact manifest and reading manifest.lock). The per-package check
+    # here assumes an unpinned entry resolves to Latest; the group's actual
+    # resolution is free to land on an older page, and here it does. Adding
+    # `[options].systems` (or a `nodejs_22.systems`) would drop a platform
+    # the environment genuinely supports, and would declare systems where
+    # the house rule is to leave them at the default.
+    #
+    # Expected resolution is therefore NOT a content change: either flox's
+    # default resolve set stops including x86_64-darwin (in flight -- the
+    # catalog is visibly shedding those builds: nodejs_22, pnpm_10 and deno
+    # have all lost theirs at Latest), or verify.py stops equating
+    # "unpinned" with "Latest's Systems: line". Tagged AI-457 to match this
+    # allowlist's convention and keep the burn-down in one place.
+    ("supabase", "catalog-systems-mismatch", "nodejs_22"): "AI-457",
 }
 
 

@@ -313,11 +313,23 @@ well-structured manifest that differs in layout, comments, or hook style can
 still score 5/5. They are hand-curated and per-package verified: every
 `pkg-path` and version confirmed via `flox show` / `flox search`, and the whole
 manifest lock-tested so the group actually co-resolves — **except where
-`KNOWN_VIOLATIONS` records an open defect**. One is open right now:
-`(lemmy, catalog-systems-mismatch, gcc)`, tagged AI-457, because the catalog's
-current `gcc` has no `x86_64-darwin` build while `lemmy.toml` declares all four
-systems. An allowlisted reference is still fed to the LLM judge, so a defective
-golden can move an advisory score.
+`KNOWN_VIOLATIONS` records an open finding**. Two are open right now, both
+tagged AI-457 and both the same shape: the catalog dropped an `x86_64-darwin`
+build at Latest under a golden nobody touched.
+
+- `(lemmy, catalog-systems-mismatch, gcc)` — the catalog's current `gcc` has no
+  `x86_64-darwin` build while `lemmy.toml` declares all four systems
+  explicitly.
+- `(supabase, catalog-systems-mismatch, nodejs_22)` — `nodejs_22`'s Latest
+  dropped its `x86_64-darwin` build. `supabase.toml` declares no `[options]`
+  block at all, so the platform in that violation is `verify.py`'s own
+  all-systems default. The golden still locks cleanly: the resolver co-resolves
+  the group on a page carrying `nodejs_22@22.21.1`, which builds everywhere, so
+  this one is the per-package check's "unpinned means Latest" premise showing,
+  not a defect to narrow the golden around.
+
+An allowlisted reference is still fed to the LLM judge, so a defective golden
+can move an advisory score.
 
 Verified is also not the same as functionally tested — no real repo is checked
 out, so no native gem or wheel ever compiles, and hook commands that touch
