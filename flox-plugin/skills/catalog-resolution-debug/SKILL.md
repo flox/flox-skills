@@ -167,6 +167,11 @@ TOKEN=$(flox auth token)
 Use as `Authorization: Bearer $TOKEN` header on all
 catalog API calls.
 
+**Keep the token in the variable.** Never echo it, never
+paste it into a command you show the user, and never let
+it reach the diagnostic table or the final report. Refer
+to it only as `$TOKEN`.
+
 ## Diagnostic Flow
 
 ### Step 1: Resolve with Candidate Pages
@@ -246,14 +251,32 @@ message types:
   requested system
 - `broken` / `insecure` / `unfree` — package metadata
   flags exclude it
+- `unacceptable_licenses` — the package's license is not
+  in `allowed_licenses`
 - `version_not_found` — version constraint doesn't match
+- `change_in_version_format` — the version string's
+  format changed between builds
 - `attr_path_not_found` — package doesn't exist on
   that page
+- `attr_path_not_found.not_in_catalog` — the attr_path is
+  not in this catalog at all
 - `attr_path_not_found.systems_not_on_same_page` —
   package exists but not for all requested systems on
   this page
 - `attr_path_not_found.not_found_for_all_systems` —
   package not available for some requested systems
+- `resolution_logic` / `general` — resolver commentary
+  rather than a specific exclusion
+
+Every message carries a **level** — `trace`, `info`,
+`warning` or `error`. Read it before reporting: a
+`trace`/`info` message is the resolver narrating its
+work, not a reason resolution failed. Only `error` (and
+usually `warning`) belongs in the diagnosis.
+
+Pages also carry `complete`. An incomplete page has not
+been fully scraped, so its absence of a package is not
+evidence the package is missing.
 
 **No messages, just page ordering:**
 If all candidate pages have empty messages and the only
