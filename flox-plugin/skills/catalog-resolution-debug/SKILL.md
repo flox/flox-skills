@@ -19,28 +19,33 @@ Debug why the Flox catalog resolver picks (or skips)
 specific package builds, and why adding packages to an
 existing environment can fail with constraint errors.
 
-## Gather Context from the User
+## Establish Context
 
-Before making any API calls, ask the user:
+Work it out yourself first. Ask only for what you cannot
+determine, and never open with a questionnaire.
 
-1. **What is the Flox environment?** Get the path to the
-   manifest. This could be:
-   - A path to a directory containing
-     `.flox/env/manifest.toml`
-   - The current directory (check for
-     `.flox/env/manifest.toml`)
-   - No environment (debugging a standalone package)
+1. **Find the environment.** Look for
+   `.flox/env/manifest.toml` in the current directory,
+   then in any directory the user named. If there is no
+   manifest anywhere, you are debugging a standalone
+   package — say so and carry on.
 
-2. **What package group are they debugging?** Packages in
-   a Flox manifest can belong to different `pkg-group`s.
-   All packages in a group must resolve to the same base
-   page. Ask which group is the problem. The default
-   group name is `"default"` (packages without an
-   explicit `pkg-group`).
+2. **Identify the package group.** Read it from the
+   manifest: packages with no explicit `pkg-group` are in
+   `"default"`. If the manifest declares more than one
+   group, take the one containing the package the user is
+   complaining about and say which you picked. Every
+   package in a group must resolve to the same base page,
+   so the group scopes the whole diagnosis.
 
-3. **What packages do they want to add?** The user may
-   be trying to add one or more packages that are causing
-   resolution to fail. Get the attr_path for each.
+3. **Identify the packages involved.** Take the installed
+   set from the manifest. Only a package the user is
+   *adding* may need asking, and only if their message
+   did not already name it.
+
+Produce the diagnosis from what you can read, and state
+the assumptions you made. A user corrects a wrong
+assumption faster than they answer three questions.
 
 ## Parse the Manifest
 
