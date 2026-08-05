@@ -120,6 +120,27 @@ How:
   Screening section below for `screen.py`, the rep policy, and
   check-design rules.
 
+### Two more lessons, from adding a diagnostic skill
+
+1. **Diagnostic skills need their context supplied in the prompt.** This
+   suite's prompts were written for manifest-authoring tasks, where the prompt
+   is the whole world. A skill that diagnoses a broken environment needs that
+   environment handed to it — a manifest, the error, and the specific thing
+   being changed — because the harness runs the agent from `evals/flox` with
+   no `.flox` directory anywhere near it. Given a scenario it cannot inspect,
+   a well-behaved skill correctly asks the user for the missing information,
+   and an answer that asks a question scores zero on every check. Three of
+   four candidates in this ticket failed this way before it was diagnosed;
+   the fix is a self-contained prompt, not a weaker skill.
+2. **A hard check must not be satisfiable from its own prompt.** Once prompts
+   carry manifests and errors, a `must_match` pattern can be satisfied by the
+   model quoting the prompt back, and the candidate then measures nothing.
+   Run every `must_match` against its own `prompt` and require no match. A
+   check for `allow_unfree` is safe against a prompt containing
+   `allow.unfree` — the model has to perform the translation — but a check
+   for `(?i)resolve` is NOT safe against a prompt containing the word
+   "resolver".
+
 ## What it does
 
 For every task in `tasks/tasks.jsonl`, runs `claude` headless with the Flox plugin
