@@ -99,6 +99,27 @@ reproduction resolves cleanly against the very failure
 you were asked to debug, and you will report "works
 fine" on a broken environment.
 
+Then apply the environment's `[options]` to **every**
+descriptor in the group. These change what resolves, so a
+reproduction that omits them is not a reproduction:
+
+| Manifest `[options]` | Descriptor field |
+|---|---|
+| `allow.unfree = true` | `allow_unfree: true` |
+| `allow.broken = true` | `allow_broken: true` |
+| `allow.licenses = ["MIT", …]` | `allowed_licenses: ["MIT", …]` |
+
+Those three are the only keys `[options].allow` accepts.
+The API also accepts `allow_insecure`,
+`allow_pre_releases` and `allow_missing_builds` on a
+descriptor, but no manifest key sets them — leave them at
+their defaults when reproducing an environment.
+
+The `unfree`, `insecure` and `broken` message types below
+are exactly what these flags gate, and `allow.licenses`
+produces `unacceptable_licenses`. Drop them and a failing
+install becomes a clean reproduction.
+
 Then append the user's new packages as additional
 descriptors in the same group.
 
