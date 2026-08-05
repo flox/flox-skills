@@ -11,7 +11,8 @@ Works with **Claude Code**, **Codex**, and any agent that supports the
 
 ## What's inside
 
-Two skills covering the Flox lifecycle, from a blank directory to a published build:
+Three skills covering the Flox lifecycle, from a blank directory to a published
+build — and diagnosing it when the catalog doesn't give you the build you expected:
 
 - **`flox`** — Create and manage reproducible Flox environments. Installs
   packages and pins toolchains (Python, Node, Go, Rust, and more), sets up
@@ -35,6 +36,12 @@ Two skills covering the Flox lifecycle, from a blank directory to a published bu
     devservices topologies back to their own orchestrator.
   - **Re-runs safely** — on a repo that already uses Flox, it audits for gaps
     instead of overwriting your manifest.
+- **`catalog-resolution-debug`** — Work out why the catalog gave you the build it
+  did. Reach for it when a package won't resolve, when `flox install` keeps
+  picking an old build after you published a new one, or when adding one package
+  makes a working environment fail with "constraints too tight". It explains what
+  the resolver is actually choosing between and walks the diagnosis to a specific
+  cause and a fix.
 
 Each skill keeps a lean core and loads detailed reference material only when your
 task calls for it — so the agent stays fast and focused.
@@ -105,6 +112,9 @@ ask — there's nothing to invoke by hand. For example:
   environment and wires the service.
 - *"Get this repo running with Flox"* → the **floxify** skill inspects the repo and
   writes a manifest you can `flox activate`.
+- *"I published a new version but flox install still gives me the old build"* → the
+  **catalog-resolution-debug** skill works out which build the resolver picked and
+  why.
 
 ## Learn more
 

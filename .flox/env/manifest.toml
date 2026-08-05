@@ -33,7 +33,7 @@ python311.pkg-group = "python"
 # matching the floxenvs skills-* packages.
 [build.skills-flox]
 version = "1.0.0"
-description = "Flox skills (flox, floxify) packaged for Claude Code, Codex, Pi, and OpenCode"
+description = "Flox skills (flox, floxify, catalog-resolution-debug) packaged for Claude Code, Codex, Pi, and OpenCode"
 # content-only package: keep toplevel installs (flox-ai) out of the closure
 runtime-packages = []
 command = '''
