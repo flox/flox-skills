@@ -41,7 +41,9 @@ determine, and never open with a questionnaire.
 
 2. **Identify the package group.** Read it from the
    manifest: packages with no explicit `pkg-group` are in
-   `"default"`. If the manifest declares more than one
+   the implicit group, which Flox calls `toplevel` — its
+   error messages say `constraints for group 'toplevel'
+   are too tight`. If the manifest declares more than one
    group, take the one containing the package the user is
    complaining about and say which you picked. Every
    package in a group must resolve to the same base page,
@@ -201,10 +203,13 @@ curl -s -X POST \
 ```
 
 **Parameters:**
-- `name`: The package group name (usually `"default"`)
+- `name`: The package group name. For packages with no
+  explicit `pkg-group` this is `toplevel`.
 - `descriptors`: One entry per package in the group
   (existing from manifest + new from user)
-- `systems`: Detect from user's platform
+- `systems`: the environment's declared systems, exactly
+  as built in "Parse the Manifest" above — never the
+  local platform
 - `candidate_pages=10`: Start with 10; increase if
   needed to see more history
 
