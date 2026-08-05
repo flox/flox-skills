@@ -19,14 +19,25 @@ Debug why the Flox catalog resolver picks (or skips)
 specific package builds, and why adding packages to an
 existing environment can fail with constraint errors.
 
-**Resolution failures are page problems, not
+**Resolution failures are usually page problems, not
 version-conflict problems.** The reflex is to read
 `constraints_too_tight` as two packages wanting
 incompatible versions of a shared dependency. That is
-almost never what it means here: it means no single base
-page carries every package in the group. Do the page
-analysis first, and fall back to version-conflict
-reasoning only once the pages rule it out.
+almost never what it means here — `constraints_too_tight`
+is the generic group-level failure and names no cause by
+itself. The cause is one of three things:
+
+- **Page coverage** — no single base page carries every
+  package in the group. The most common.
+- **Metadata and licence exclusions** — `allow.unfree`,
+  `allow.broken` or `allow.licenses` ruled a package out
+  on every page.
+- **Version conflicts** — a genuine clash between version
+  constraints. The least common; reach for it last.
+
+Do the page analysis first, check the `[options]`
+exclusions second, and fall back to version-conflict
+reasoning only once both rule it out.
 
 ## Establish Context
 
@@ -99,7 +110,10 @@ the message types below —
 multi-system failures by definition. A single-system
 reproduction resolves cleanly against the very failure
 you were asked to debug, and you will report "works
-fine" on a broken environment.
+fine" on a broken environment. This is about the fidelity
+of the request, not about how to read the response — see
+Step 2 before treating any `attr_path_not_found` as
+evidence.
 
 Then apply the environment's `[options]` to **every**
 descriptor in the group. These change what resolves, so a
@@ -108,19 +122,40 @@ reproduction that omits them is not a reproduction:
 | Manifest `[options]` | Descriptor field |
 |---|---|
 | `allow.unfree = true` | `allow_unfree: true` |
+| `allow.unfree = false` | `allow_unfree: false` |
 | `allow.broken = true` | `allow_broken: true` |
+| `allow.broken = false` | `allow_broken: false` |
 | `allow.licenses = ["MIT", …]` | `allowed_licenses: ["MIT", …]` |
 
-Those three are the only keys `[options].allow` accepts.
-The API also accepts `allow_insecure`,
-`allow_pre_releases` and `allow_missing_builds` on a
-descriptor, but no manifest key sets them — leave them at
-their defaults when reproducing an environment.
+Send the false rows too. **`allow_unfree` defaults to
+`true` in the API, so omitting it is not neutral** — it
+silently grants what the manifest denied. Verified with
+one descriptor twice: field omitted resolves cleanly on
+page 1017464; `allow_unfree: false` returns `page: null`
+with an `error`-level `unfree` message. Skip that row and
+a genuinely failing install becomes a clean reproduction.
 
-The `unfree`, `insecure` and `broken` message types below
-are exactly what these flags gate, and `allow.licenses`
-produces `unacceptable_licenses`. Drop them and a failing
-install becomes a clean reproduction.
+`allow_broken` defaults to `false` and `allowed_licenses`
+defaults to unset (no restriction), so those two are safe
+to leave out when the manifest does not set them.
+`allow_unfree` is the only inverted default.
+
+`unfree`, `broken` and `licenses` are the only keys
+`[options].allow` accepts. The API also accepts
+`allow_insecure`, `allow_pre_releases` and
+`allow_missing_builds` on a descriptor, but no manifest
+key sets them — leave them at their defaults when
+reproducing an environment.
+
+The `unfree` and `broken` message types below are exactly
+what those two boolean flags gate (`insecure` is the same
+shape, gated by `allow_insecure`, which no manifest key
+sets). `allow.licenses` behaves differently: a package
+excluded by `allowed_licenses` is reported at `trace` as
+`resolution_logic` — e.g. `TRACE (hello): The license
+GPL-3.0-or-later is not in the allowed licenses:
+['MIT'].` — and **not** as an `unacceptable_licenses`
+message. See Step 3 for why that matters.
 
 Then append the user's new packages as additional
 descriptors in the same group.
@@ -222,10 +257,25 @@ From the response, extract the selected page and all
 candidate pages. For each page, show each package's
 status. Present a table:
 
-| Base page | Package | Version | Build rev | Build date | Messages |
-|-----------|---------|---------|-----------|------------|----------|
+| Base page | Complete | Package | Version | Build rev | Build date | Messages |
+|-----------|----------|---------|---------|-----------|------------|----------|
 
 Sort by base page descending (highest first = winner).
+
+Fill `Complete` from each page's `complete` field, and
+read it before you read that page's messages. **On a page
+with `complete: false`, an `attr_path_not_found` — or any
+of its subtypes — is not evidence the package is
+missing.** The page has simply not been fully scraped
+yet.
+
+Incomplete candidate pages are the normal case, not an
+anomaly. A healthy `python3` + `jq` environment across
+all four systems returned 10/10 candidate pages
+`complete: false`, each carrying two `error`-level
+`attr_path_not_found` messages, while the selected page
+(1027867, `complete: true`) resolved cleanly. Do not
+promote rows like those into the diagnosis.
 
 Mark the selected page. For candidate pages, show any
 messages explaining why they weren't selected or why
@@ -244,6 +294,11 @@ other packages don't, or vice versa. This is the most
 common issue when adding a new package to an existing
 environment.
 
+Confirm it before concluding it. A licence or metadata
+exclusion produces the same generic
+`constraints_too_tight`, so read the `resolution_logic`
+lines first — see the level rule below.
+
 **Stale base page on newest build:**
 If the newest build (highest rev_count) has a lower base
 page than older builds, the source repo's nixpkgs input
@@ -253,14 +308,20 @@ nixpkgs flake input in the source repo and republish.
 **Messages explain rejection:**
 If candidate pages have messages, report them. Common
 message types:
-- `constraints_too_tight` — version/license/etc.
-  constraints exclude the page
+- `constraints_too_tight` — the generic group-level
+  failure ("Resolution constraints are too tight."). It
+  says the group could not be resolved and nothing more;
+  by itself it names no cause
 - `missing_builds` — package exists but not for the
   requested system
 - `broken` / `insecure` / `unfree` — package metadata
   flags exclude it
-- `unacceptable_licenses` — the package's license is not
-  in `allowed_licenses`
+- `unacceptable_licenses` — a real value in the API's
+  `MessageType` enum, but do not wait for it: a licence
+  restriction is reported as `resolution_logic` in
+  practice, not as this type. A probe that failed purely
+  on `allowed_licenses` produced zero of these across the
+  whole response
 - `version_not_found` — version constraint doesn't match
 - `change_in_version_format` — the version string's
   format changed between builds
@@ -273,18 +334,58 @@ message types:
   this page
 - `attr_path_not_found.not_found_for_all_systems` —
   package not available for some requested systems
-- `resolution_logic` / `general` — resolver commentary
-  rather than a specific exclusion
+- `resolution_logic` — the per-package reason a candidate
+  page rejected a package, e.g. the licence it carries
+  versus the licences you allowed. **This is usually
+  where the real cause lives**, despite arriving at
+  `trace` level
+- `general` — resolver commentary rather than a specific
+  exclusion
 
 Every message carries a **level** — `trace`, `info`,
-`warning` or `error`. Read it before reporting: a
-`trace`/`info` message is the resolver narrating its
-work, not a reason resolution failed. Only `error` (and
-usually `warning`) belongs in the diagnosis.
+`warning` or `error`. **Use level to rank, never to
+discard.** The catalog reports the *specific* per-package
+exclusion reason at `trace` level, typed
+`resolution_logic`, while the only `error` is frequently
+the generic `constraints_too_tight`. When the sole
+error-level message is a generic `constraints_too_tight`,
+the diagnosis is in the `trace` lines — read them.
 
-Pages also carry `complete`. An incomplete page has not
-been fully scraped, so its absence of a package is not
-evidence the package is missing.
+Measured against the live API. A group failing purely on
+a licence restriction (`allowed_licenses: ["MIT"]`,
+package `hello`, GPL-3.0-or-later, all four systems,
+`candidate_pages=10`) returned:
+
+```
+('trace', 'resolution_logic')       33
+('error', 'constraints_too_tight')   1
+('error', 'attr_path_not_found')    10
+unacceptable_licenses present?    False
+```
+
+The 33 `trace` lines were the *only* messages naming the
+cause — a representative one reads `TRACE (hello): The
+license GPL-3.0-or-later is not in the allowed licenses:
+['MIT'].` The single `constraints_too_tight` was generic,
+and all ten `attr_path_not_found` errors were red
+herrings sitting on incomplete pages. Filter that
+response down to `error` level and you are left with one
+generic failure plus ten "not found for some systems"
+rows — you would confidently diagnose a system-coverage
+problem for what is a licence restriction.
+
+Keep this tally here when editing this section. It is the
+evidence against re-simplifying the rule back into a
+level filter.
+
+Pages also carry `complete`, as recorded in the Step 2
+table. On a page with `complete: false`, error-level
+`attr_path_not_found` messages are expected and carry no
+diagnostic weight — the page has not been fully scraped,
+so its absence of a package is not evidence the package
+is missing. Both probes above bear this out: 10/10
+incomplete candidate pages on a healthy environment, 0/10
+complete on the licence probe.
 
 **No messages, just page ordering:**
 If all candidate pages have empty messages and the only
