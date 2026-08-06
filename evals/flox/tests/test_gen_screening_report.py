@@ -2,7 +2,7 @@
 
 The generator merges N per-model `screen-<model>.json` measurement files
 against a candidate registry. The registry is the set a run was DRAWN FROM,
-not the set that was screened -- `tasks/screening.jsonl` holds 46 entries and
+not the set that was screened -- `tasks/screening.jsonl` holds 50 entries and
 the committed report covers the 19 that were actually run.
 
 The bug these tests pin: rows were built from the registry rather than from the
@@ -12,7 +12,7 @@ result on any model satisfies that vacuously, so it was published under
 "No-signal -- baseline already passes" -- an observation nobody made. With
 `results/` gitignored, the documented `--results results/screen-*.json` matches
 nothing on a fresh checkout, `load()` skipped the missing files by design, and
-the command wrote a report claiming all 46 candidates screened and passing,
+the command wrote a report claiming all 50 candidates screened and passing,
 from zero measurements, at exit 0.
 
 Two rules follow, and both are asserted below: an unmeasured candidate is never
@@ -208,7 +208,7 @@ class TestPartialRunsStillReport(unittest.TestCase):
 
 
 class TestProvenanceIsGeneratedFromTheRun(unittest.TestCase):
-    """The 19-of-46 caveat used to be prose typed into SCREENING-REPORT.md, so
+    """The 19-of-50 caveat used to be prose typed into SCREENING-REPORT.md, so
     regenerating the report deleted the only record that the screened set was a
     subset of the registry. It is derived now, and these assert it against the
     committed measurements -- i.e. the real report, not a fixture."""
@@ -233,7 +233,7 @@ class TestProvenanceIsGeneratedFromTheRun(unittest.TestCase):
         cls._tmp.cleanup()
 
     def test_names_the_screened_subset_against_the_registry_total(self):
-        self.assertIn("Screened **19 of the 46** entries", self.OUT)
+        self.assertIn("Screened **19 of the 50** entries", self.OUT)
 
     def test_names_the_delta_the_reproduce_recipe_adds(self):
         # The recipe's `--area freshness --area triggering` selects 20, one more
@@ -257,7 +257,7 @@ class TestProvenanceIsGeneratedFromTheRun(unittest.TestCase):
     def test_unscreened_registry_entries_are_named_in_the_report(self):
         line = next(l for l in self.OUT.splitlines()
                     if l.startswith("- **Not screened"))
-        self.assertIn("(27)", line)
+        self.assertIn("(31)", line)
         self.assertIn("trap-hook-return-not-exit", line)
 
     def test_no_signal_bucket_is_the_six_measured_ones(self):
