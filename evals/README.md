@@ -120,7 +120,7 @@ How:
   Screening section below for `screen.py`, the rep policy, and
   check-design rules.
 
-### Two more lessons, from adding a diagnostic skill
+### Three more lessons, from adding a diagnostic skill
 
 1. **Diagnostic skills need their context supplied in the prompt.** This
    suite's prompts were written for manifest-authoring tasks, where the prompt
@@ -140,6 +140,33 @@ How:
    `allow.unfree` — the model has to perform the translation — but a check
    for `(?i)resolve` is NOT safe against a prompt containing the word
    "resolver".
+3. **A skill assembled from independently-correct changes still needs one
+   adversarial pass against live data before it ships.** "Every change was
+   reviewed" does not imply "the procedure is correct." One commit sent the
+   environment's `allow` options into the catalog resolve request, changing
+   the response's shape; a later commit, by a different author, added a
+   triage rule that only `error`-level messages belong in a diagnosis, since
+   `trace`/`info` is just the resolver narrating its work. Both were correct
+   alone and passed their own diff review — together they told the agent to
+   discard the only messages that name the cause. Against the live API, a
+   group failing on a licence restriction returns 33 ×
+   `(trace, resolution_logic)` carrying the actual reason, one generic
+   `(error, constraints_too_tight)` that names nothing, and 10 ×
+   `(error, attr_path_not_found)` scrape artefacts — the written procedure
+   diagnoses a system-coverage problem for a licence restriction. A
+   whole-branch review of the finished file, probing the live API, caught
+   it; none of the diff reviews over the two commits did.
+
+   **Beware fixing it with a rule generalised from one measurement.** The fix
+   wave's own rule — discard `attr_path_not_found` on `complete: false`
+   pages — held against one probe, but `complete: false` is near-universal;
+   the real discriminator is message text: `"...not found for some systems,
+   valid systems are (…)"` is usually a scrape artefact, `"The attr_path 'X'
+   is not found."` is genuine absence, naming the outlier package. That rule
+   discarded 40 of the latter in a real failure. Read a multi-fix skill end
+   to end and probe the live API for the shapes it claims — one healthy
+   case, one failing case — before merging: a rule discriminating on a
+   single response is often firing on every response.
 
 ## What it does
 
