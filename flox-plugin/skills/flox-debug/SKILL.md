@@ -1,23 +1,23 @@
 ---
-name: catalog-resolution-debug
+name: flox-debug
 description: >-
-  Debug Flox catalog package resolution. Use when user
-  says "package not resolving", "wrong version installed",
-  "old build", "resolution issue", "why is flox picking
-  the wrong package", "candidate pages", "base page",
-  "build page", "constraints too tight", or any question
-  about why a specific package version is or isn't being
-  selected by the resolver. Also use when investigating
-  publish issues where new publishes don't appear in
-  resolution, or when adding a package to an existing
-  environment causes a resolution failure.
+  Use when a Flox environment does not resolve the packages
+  you expect. Symptoms: `flox install` or `flox upgrade`
+  gives a different version than `flox show` lists as
+  available; a newly published package does not show up;
+  adding one package makes a working environment fail with
+  "constraints for group 'toplevel' are too tight"; a
+  package resolves on one machine but not on another
+  platform or in CI.
 ---
 
-# Catalog Resolution Debugging
+# Flox Debugging
 
-Debug why the Flox catalog resolver picks (or skips)
-specific package builds, and why adding packages to an
-existing environment can fail with constraint errors.
+Debug a Flox environment when it doesn't behave as
+expected. Its current coverage is catalog resolution: why
+the resolver picks (or skips) specific package builds, and
+why adding packages to an existing environment can fail
+with constraint errors.
 
 **Resolution failures are usually page problems, not
 version-conflict problems.** The reflex is to read

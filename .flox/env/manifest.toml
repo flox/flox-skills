@@ -26,14 +26,14 @@ coreutils.pkg-path = "coreutils"
 python311.pkg-path = "python311"
 python311.pkg-group = "python"
 
-# Packages the flox plugin (skills: flox, floxify, catalog-resolution-debug) for all agents.
+# Packages the flox plugin (skills: flox, floxify, flox-debug) for all agents.
 # Stages the plugin under share/claude-code/plugins/flox, then
 # flox_agent_layout rewrites it into the per-agent launch layout
 # share/flox/{claude,codex,pi,opencode}/flox and drops the staging,
 # matching the floxenvs skills-* packages.
 [build.skills-flox]
 version = "1.0.0"
-description = "Flox skills (flox, floxify, catalog-resolution-debug) packaged for Claude Code, Codex, Pi, and OpenCode"
+description = "Flox skills (flox, floxify, flox-debug) packaged for Claude Code, Codex, Pi, and OpenCode"
 # content-only package: keep toplevel installs (flox-ai) out of the closure
 runtime-packages = []
 command = '''
