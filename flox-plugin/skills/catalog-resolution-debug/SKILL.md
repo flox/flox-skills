@@ -263,54 +263,120 @@ status. Present a table:
 Sort by base page descending (highest first = winner).
 
 Fill `Complete` from each page's `complete` field.
-Candidate pages are almost always `complete: false` —
-every probe run for this skill, healthy and failing
-alike, returned 0/10 complete. Treat it as context, not
-as a filter: it says the page may be partly scraped, and
-nothing about which of its messages matter.
+**`complete` is a property of your request, not of the
+page.** It is `true` when every descriptor you sent
+resolved on that page for every system you asked for.
+The same page flips with the request: 1027867 is
+`complete: true` for `hello` alone and `false` once
+`flox/claude-code` joins the group; 1017464 is `true`
+for `flox/claude-code` alone and `false` for that same
+descriptor with `allow_unfree: false`.
 
-**Split `attr_path_not_found` by its message text, not by
-the page's `complete` flag.** Both readings arrive at
-`error` level, with the same type, on the same incomplete
-pages:
+It therefore restates the page's own `messages` array.
+Across 12 probes and 126 candidate pages the
+correspondence was exact, with no exceptions: 39
+complete pages carried zero messages, 87 incomplete
+pages carried at least one, and every selected page was
+complete. The resolver picks the highest page where it
+is `true` — which is the "highest base page satisfying
+every package" rule, restated per page.
 
-- `The package 'X' is not found for some systems, valid
-  systems are (…)` — usually a scrape artefact. Confirm
-  before promoting it: resolve `X` alone across the same
-  systems, and if that comes back clean the page was
-  merely incomplete. Verified twice for `hello` — a
-  healthy `python3` + `jq` group returned 10/10
-  incomplete pages each carrying two of these while the
-  selected page resolved cleanly, and `hello` alone on
-  all four systems resolves on page 1027867.
-- `The attr_path 'X' is not found.` — genuine absence on
-  that page. **Keep it.** On a `constraints_too_tight`
-  failure this is the per-page evidence that names the
-  outlier package, and it is often the only evidence
-  that does. Measured: a `hello` + `flox/claude-code`
-  group that failed with a generic
-  `constraints_too_tight` carried 40 of these naming
-  `flox/claude-code`, alongside 10 of the "some systems"
-  artefacts above.
+So the column is worth showing, but it is **not** a
+freshness or health signal, and `complete: false` is
+never grounds for discarding a page's messages — those
+messages are the reason it is `false`.
 
-When the text is ambiguous, Step 4 settles it.
+**Candidate-page messages say why each page was not
+selected. They are not, by themselves, the diagnosis.**
+They arrive at `error` level on successful resolves too:
+`hello` + `flox/claude-code` resolves cleanly on page
+1017464 while carrying 50 error-level messages across
+its ten candidate pages. Read them for what *differs*
+from a run that succeeds, never as a verdict on their
+own. The verdict comes from three places:
+
+- `page` — null means the group failed.
+- the group-level `messages` array on the item, beside
+  `page` and `candidate_pages` rather than inside a
+  page. Empty on all five successful probes run for this
+  skill; on all five failing ones it carried at least
+  one `error` plus three `trace` `resolution_logic`
+  "Stage 1/2/3" lines.
+- Step 5 — resolving subsets to find which constraint
+  actually moves the outcome.
+
+**Read `attr_path_not_found` by `context.valid_systems`,
+not by the page's `complete` flag.** Both readings arrive
+at `error` level with the same type:
+
+- `valid_systems` empty (`""`) — the attr_path is absent
+  from that page entirely. The text mirrors it: `The
+  attr_path 'X' is not found.`
+- `valid_systems` populated (e.g.
+  `"aarch64-darwin,aarch64-linux,x86_64-linux"`) — the
+  package is on the page, but not built for every system
+  you asked for. Text: `The package 'X' is not found for
+  some systems, valid systems are (…)`.
+
+The field is the rule; the text is there so raw output
+stays readable by eye. Neither reading is by itself a
+failure — the *successful* `hello` + `flox/claude-code`
+resolve carries 40 of the first kind and 10 of the
+second.
+
+**Worked example — identical messages on success and on
+failure.** All four systems, `candidate_pages=10`:
+
+```
+hello + flox/claude-code       -> page 1017464, SUCCEEDS
+  group messages:     none
+  candidate messages: 40 attr_path_not_found naming
+                      flox/claude-code (valid_systems
+                      ""), 10 naming hello (populated)
+
+hello@2.10 + flox/claude-code  -> page null, FAILS
+  group messages:     error constraints_too_tight,
+                      3 trace resolution_logic
+  candidate messages: the same 50, plus 30
+                      version_not_found ("Version 2.12.3
+                      does not satisfy the requested
+                      version 2.10.")
+```
+
+The 40 messages naming `flox/claude-code` are identical
+on the run that succeeds and the run that fails, so they
+cannot be evidence for the failure. Diagnose from them
+and you name `flox/claude-code` as the outlier and tell
+the user to move it to its own group — the wrong package
+and the wrong fix. What actually changed is the pin:
+`hello@2.10` resolves alone on page **348581**, while
+`flox/claude-code` sits between 935279 and 1017464, so
+no base page carries both.
+
+Do not promote `version_not_found` to a failure signal
+either — `hello@2.10` *alone* succeeds on 348581 while
+carrying those same 30. It is a difference between the
+two runs, not a cause. Step 5 is what turns a difference
+into a cause.
 
 Mark the selected page. For candidate pages, show any
 messages explaining why they weren't selected or why
 specific packages couldn't be satisfied on that page.
+
+Step 4 narrows the question; Step 5 settles it.
 
 ### Step 3: Analyze the Gap
 
 Check for these patterns:
 
 **No common base page (constraints_too_tight):**
-If the resolver returns an error or the selected page
-is missing some packages, the packages in the group
-don't share a common base page. Identify which package
-is the outlier — it only exists on base pages where
-other packages don't, or vice versa. This is the most
-common issue when adding a new package to an existing
-environment.
+If `page` comes back null, the packages in the group may
+not share a common base page. Identify the outlier by
+resolving subsets — Step 5 — not from the candidate-page
+messages, which name packages on successful resolves too.
+The outlier is the package whose own page range sits
+clear of everyone else's. This is the most common issue
+when adding a new package to an existing environment.
 
 Confirm it before concluding it. A licence or metadata
 exclusion produces the same generic
@@ -344,8 +410,9 @@ message types:
 - `change_in_version_format` — the version string's
   format changed between builds
 - `attr_path_not_found` — package doesn't exist on that
-  page, but read the message text before believing it:
-  the two readings split as Step 2 sets out
+  page, but read `context.valid_systems` before
+  believing it: the two readings split as Step 2 sets
+  out, and both turn up on successful resolves
 - `attr_path_not_found.not_in_catalog` — the attr_path is
   not in this catalog at all
 - `attr_path_not_found.systems_not_on_same_page` —
@@ -385,31 +452,35 @@ unacceptable_licenses present?    False
 The 33 `trace` lines were the *only* messages naming the
 cause — a representative one reads `TRACE (hello): The
 license GPL-3.0-or-later is not in the allowed licenses:
-['MIT'].` The single `constraints_too_tight` was generic,
-and all ten `attr_path_not_found` errors were of the "not
-found for some systems" kind — red herrings by the Step 2
-text test, not merely because their pages were
-incomplete. Filter that
-response down to `error` level and you are left with one
-generic failure plus ten "not found for some systems"
-rows — you would confidently diagnose a system-coverage
-problem for what is a licence restriction.
+['MIT'].` Three of them sit at group level and 30 on the
+candidate pages, so this is the case where candidate-page
+messages *do* carry the cause: a clean `hello` resolve
+carries zero `resolution_logic` lines, which is exactly
+the "what differs from a run that succeeds" test Step 2
+asks for. The single `constraints_too_tight` was generic,
+and all ten `attr_path_not_found` errors carried a
+populated `context.valid_systems` — the "not found for
+some systems" kind, red herrings by the Step 2 field
+test. Filter that response down to `error` level and you
+are left with one generic failure plus ten "not found
+for some systems" rows — you would confidently diagnose
+a system-coverage problem for what is a licence
+restriction.
 
 Keep this tally here when editing this section. It is the
 evidence against re-simplifying the rule back into a
 level filter.
 
 Pages also carry `complete`, as recorded in the Step 2
-table, and it is almost always `false` — every probe run
-for this skill returned 0/10 complete candidate pages, on
-healthy and failing groups alike. So it cannot separate
-signal from noise, and must not be used as a filter.
-Split `attr_path_not_found` by message text exactly as
-Step 2 sets out: "not found for some systems" is usually
-a scrape artefact, worth confirming by resolving that
-package alone; `The attr_path 'X' is not found.` is
-genuine page-scoped absence, and is the evidence that
-names the outlier package above. Keep the second.
+table. It restates that page's own `messages` array for
+the request you sent, so it is never independent
+evidence, and `complete: false` is never a reason to
+discard a page's messages. Read `attr_path_not_found` by
+`context.valid_systems` exactly as Step 2 sets out — and
+remember what Step 2 measured about both readings: they
+turn up on successful resolves too, so neither one names
+the outlier by itself. To name the outlier, resolve
+subsets — Step 5.
 
 **No messages, just page ordering:**
 If all candidate pages have empty messages and the only
@@ -429,29 +500,42 @@ packages/<ATTR_PATH>?page=0&pageSize=50" \
 
 This shows `total_count` and individual builds, each
 carrying `system`, `version` and `rev_count` — but **no
-base page**. So use it to settle a different question:
+base page**. So use it to answer a narrower question:
 "is this attr_path in the catalog at all, and for which
 systems?" A 404 means it is not in the catalog; builds
 covering your systems mean any per-page absence is
-page-scoped, not a missing package. That is the
-tiebreaker Steps 2 and 3 send you here for.
+page-scoped, not a missing package. That is all Steps 2
+and 3 send you here for — Step 4 narrows, Step 5
+settles.
 
 To find which base page a package actually lands on,
 resolve it alone — Step 5.
 
 ### Step 5: Isolate the Constraint
 
-If resolution fails with multiple packages, try
-resolving subsets to isolate which package combination
-causes the failure:
+Resolve subsets to find which constraint actually moves
+the outcome. This is the step that settles a diagnosis;
+everything earlier only proposes one.
 
-1. Resolve just the existing packages (without the new
-   ones) — this should succeed and shows the current
-   base page
-2. Resolve just the new package alone — shows what base
-   pages it's available on
-3. Compare: if there's no overlap in base pages, that
-   explains the failure
+1. Resolve just the existing packages, without the new
+   ones. If that already fails, the new package is not
+   the cause. If it succeeds, note the page it lands on
+   — an absurdly old page for the existing set is itself
+   the finding, and names the constraint dragging the
+   group down. In the Step 2 example, `hello@2.10` alone
+   resolves on page 348581.
+2. Resolve just the new package alone — this shows the
+   base pages it is available on. `flox/claude-code`
+   alone resolves on 1017464, with candidate pages
+   running down to 935279.
+3. Compare. No overlap between the two page ranges
+   explains the failure, and the package on the far
+   older range is the one to fix — relax its version
+   pin, republish it against a newer nixpkgs, or move it
+   to its own group.
+4. If both subsets resolve on overlapping pages, page
+   coverage is not the cause. Go back to the `[options]`
+   exclusions and the `resolution_logic` traces.
 
 ## Presenting Results
 
