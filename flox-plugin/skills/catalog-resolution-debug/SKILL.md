@@ -262,20 +262,38 @@ status. Present a table:
 
 Sort by base page descending (highest first = winner).
 
-Fill `Complete` from each page's `complete` field, and
-read it before you read that page's messages. **On a page
-with `complete: false`, an `attr_path_not_found` — or any
-of its subtypes — is not evidence the package is
-missing.** The page has simply not been fully scraped
-yet.
+Fill `Complete` from each page's `complete` field.
+Candidate pages are almost always `complete: false` —
+every probe run for this skill, healthy and failing
+alike, returned 0/10 complete. Treat it as context, not
+as a filter: it says the page may be partly scraped, and
+nothing about which of its messages matter.
 
-Incomplete candidate pages are the normal case, not an
-anomaly. A healthy `python3` + `jq` environment across
-all four systems returned 10/10 candidate pages
-`complete: false`, each carrying two `error`-level
-`attr_path_not_found` messages, while the selected page
-(1027867, `complete: true`) resolved cleanly. Do not
-promote rows like those into the diagnosis.
+**Split `attr_path_not_found` by its message text, not by
+the page's `complete` flag.** Both readings arrive at
+`error` level, with the same type, on the same incomplete
+pages:
+
+- `The package 'X' is not found for some systems, valid
+  systems are (…)` — usually a scrape artefact. Confirm
+  before promoting it: resolve `X` alone across the same
+  systems, and if that comes back clean the page was
+  merely incomplete. Verified twice for `hello` — a
+  healthy `python3` + `jq` group returned 10/10
+  incomplete pages each carrying two of these while the
+  selected page resolved cleanly, and `hello` alone on
+  all four systems resolves on page 1027867.
+- `The attr_path 'X' is not found.` — genuine absence on
+  that page. **Keep it.** On a `constraints_too_tight`
+  failure this is the per-page evidence that names the
+  outlier package, and it is often the only evidence
+  that does. Measured: a `hello` + `flox/claude-code`
+  group that failed with a generic
+  `constraints_too_tight` carried 40 of these naming
+  `flox/claude-code`, alongside 10 of the "some systems"
+  artefacts above.
+
+When the text is ambiguous, Step 4 settles it.
 
 Mark the selected page. For candidate pages, show any
 messages explaining why they weren't selected or why
@@ -325,8 +343,9 @@ message types:
 - `version_not_found` — version constraint doesn't match
 - `change_in_version_format` — the version string's
   format changed between builds
-- `attr_path_not_found` — package doesn't exist on
-  that page
+- `attr_path_not_found` — package doesn't exist on that
+  page, but read the message text before believing it:
+  the two readings split as Step 2 sets out
 - `attr_path_not_found.not_in_catalog` — the attr_path is
   not in this catalog at all
 - `attr_path_not_found.systems_not_on_same_page` —
@@ -367,8 +386,10 @@ The 33 `trace` lines were the *only* messages naming the
 cause — a representative one reads `TRACE (hello): The
 license GPL-3.0-or-later is not in the allowed licenses:
 ['MIT'].` The single `constraints_too_tight` was generic,
-and all ten `attr_path_not_found` errors were red
-herrings sitting on incomplete pages. Filter that
+and all ten `attr_path_not_found` errors were of the "not
+found for some systems" kind — red herrings by the Step 2
+text test, not merely because their pages were
+incomplete. Filter that
 response down to `error` level and you are left with one
 generic failure plus ten "not found for some systems"
 rows — you would confidently diagnose a system-coverage
@@ -379,13 +400,16 @@ evidence against re-simplifying the rule back into a
 level filter.
 
 Pages also carry `complete`, as recorded in the Step 2
-table. On a page with `complete: false`, error-level
-`attr_path_not_found` messages are expected and carry no
-diagnostic weight — the page has not been fully scraped,
-so its absence of a package is not evidence the package
-is missing. Both probes above bear this out: 10/10
-incomplete candidate pages on a healthy environment, 0/10
-complete on the licence probe.
+table, and it is almost always `false` — every probe run
+for this skill returned 0/10 complete candidate pages, on
+healthy and failing groups alike. So it cannot separate
+signal from noise, and must not be used as a filter.
+Split `attr_path_not_found` by message text exactly as
+Step 2 sets out: "not found for some systems" is usually
+a scrape artefact, worth confirming by resolving that
+package alone; `The attr_path 'X' is not found.` is
+genuine page-scoped absence, and is the evidence that
+names the outlier package above. Keep the second.
 
 **No messages, just page ordering:**
 If all candidate pages have empty messages and the only
@@ -394,8 +418,7 @@ which nixpkgs base the builds landed on.
 
 ### Step 4: Check Individual Package Builds
 
-To see all known builds of a specific package across
-all pages:
+To see all known builds of a specific package:
 
 ```bash
 curl -s \
@@ -404,10 +427,17 @@ packages/<ATTR_PATH>?page=0&pageSize=50" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-This shows `total_count` and individual builds. Use this
-to answer: "What base pages does this package exist on?"
-Compare against the base pages available for other
-packages in the group.
+This shows `total_count` and individual builds, each
+carrying `system`, `version` and `rev_count` — but **no
+base page**. So use it to settle a different question:
+"is this attr_path in the catalog at all, and for which
+systems?" A 404 means it is not in the catalog; builds
+covering your systems mean any per-page absence is
+page-scoped, not a missing package. That is the
+tiebreaker Steps 2 and 3 send you here for.
+
+To find which base page a package actually lands on,
+resolve it alone — Step 5.
 
 ### Step 5: Isolate the Constraint
 
