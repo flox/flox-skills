@@ -72,7 +72,11 @@ a skill PR without one. Two rules:
 2. **Prefer the cheap tier.** A synthetic fixture or prompt eval is the inner loop
    (seconds); the real-world OSS runs are *confirmation* (a clone + a full agentic
    pass + realization). Reserve the expensive tier for proving the fix holds on
-   real repos and for non-regression.
+   real repos and for non-regression. Within the `flox` screening suite itself,
+   the same split applies at a finer grain: `screen.py --only <candidate-id>`
+   (one candidate, ~$0.30 at `--reps 5` on Haiku) is the inner loop for *why*
+   something fails; `screen.py --area <area>` (~$1.50 at the same settings) is
+   for confirming nothing else moved, not for diagnosis.
 
 **Fixes to existing guidance are in scope**, not just new features. AI-449 is
 why: the guidance that reasoned best is the guidance that broke real repos.
