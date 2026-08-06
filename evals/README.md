@@ -134,7 +134,7 @@ How:
    no `.flox` directory anywhere near it. Given a scenario it cannot inspect,
    a well-behaved skill correctly asks the user for the missing information,
    and an answer that asks a question scores zero on every check. Three of
-   four candidates in this ticket failed this way before it was diagnosed;
+   four candidates failed this way before it was diagnosed;
    the fix is a self-contained prompt, not a weaker skill.
 2. **A hard check must not be satisfiable from its own prompt.** Once prompts
    carry manifests and errors, a `must_match` pattern can be satisfied by the
@@ -161,8 +161,8 @@ How:
    whole-branch review of the finished file, probing the live API, caught
    it; none of the diff reviews over the two commits did.
 
-   **Beware fixing it with a rule generalised from one measurement.** The fix
-   wave's own rule — discard `attr_path_not_found` on `complete: false`
+   **Beware fixing it with a rule generalised from one measurement.** The first
+   fix attempted — discard `attr_path_not_found` on `complete: false`
    pages — held against one probe, but `complete: false` is near-universal;
    the real discriminator is message text: `"...not found for some systems,
    valid systems are (…)"` is usually a scrape artefact, `"The attr_path 'X'
