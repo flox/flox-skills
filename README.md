@@ -113,8 +113,8 @@ ask — there's nothing to invoke by hand. For example:
   environment and wires the service.
 - *"Get this repo running with Flox"* → the **floxify** skill inspects the repo and
   writes a manifest you can `flox activate`.
-- *"I published a new version but flox install still gives me the old build"* → the
-  **flox-debug** skill works out which build the resolver picked and why.
+- *"`flox show` says a newer version is available, but installing gives me an older
+  one"* → the **flox-debug** skill works out which build the resolver picked and why.
 
 ## Learn more
 
