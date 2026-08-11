@@ -1,7 +1,7 @@
 {
   "name": "flox",
   "description": "Flox development environment and deployment plugin. Includes expert guidance for package management, services, builds and package distribution, containerization, environment composition and layering.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": {
     "name": "Flox"
   }

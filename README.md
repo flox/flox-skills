@@ -3,15 +3,17 @@
 This repository provides skills that teach AI coding agents how to use 
 [Flox](https://flox.dev) properly. Install this plugin and your agent gains a 
 Flox specialist: it builds reproducible, portable development environments, 
-onboards existing repos to Flox, and wires up services, builds, containers, 
-and package publishing by applying Flox best practices for you.
+onboards existing repos to Flox, wires up services, builds, containers, 
+and package publishing, and diagnoses why the catalog resolver won't give
+you the build you expected — applying Flox best practices throughout.
 
 Works with **Claude Code**, **Codex**, and any agent that supports the
 [skills.sh](https://skills.sh) standard.
 
 ## What's inside
 
-Two skills covering the Flox lifecycle, from a blank directory to a published build:
+Three skills covering the Flox lifecycle, from a blank directory to a published
+build — and diagnosing it when the catalog doesn't give you the build you expected:
 
 - **`flox`** — Create and manage reproducible Flox environments. Installs
   packages and pins toolchains (Python, Node, Go, Rust, and more), sets up
@@ -35,6 +37,12 @@ Two skills covering the Flox lifecycle, from a blank directory to a published bu
     devservices topologies back to their own orchestrator.
   - **Re-runs safely** — on a repo that already uses Flox, it audits for gaps
     instead of overwriting your manifest.
+- **`flox-debug`** — Debug a Flox environment when it doesn't behave as
+  expected. Today that means catalog resolution: reach for it when a package
+  won't resolve, when `flox install` keeps picking an old build after you
+  published a new one, or when adding one package makes a working environment
+  fail with "constraints too tight". It explains what the resolver is actually
+  choosing between and walks the diagnosis to a specific cause and a fix.
 
 Each skill keeps a lean core and loads detailed reference material only when your
 task calls for it — so the agent stays fast and focused.
@@ -105,6 +113,8 @@ ask — there's nothing to invoke by hand. For example:
   environment and wires the service.
 - *"Get this repo running with Flox"* → the **floxify** skill inspects the repo and
   writes a manifest you can `flox activate`.
+- *"`flox show` says a newer version is available, but installing gives me an older
+  one"* → the **flox-debug** skill works out which build the resolver picked and why.
 
 ## Learn more
 

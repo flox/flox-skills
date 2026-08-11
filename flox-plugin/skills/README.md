@@ -29,6 +29,12 @@ platform-specific difference is intentional.
   workflows.
 - `floxify`: Convert an existing repository to a verified working Flox
   environment, with detection and verification scripts in `scripts/`.
+- `flox-debug`: Debug a Flox environment when it doesn't behave as expected.
+  Currently covers catalog resolution — why a given build was selected, why a
+  new publish isn't picked up, and why adding a package can make a working
+  `pkg-group` unsatisfiable. A procedure rather than reference material: it
+  gathers the environment's packages, reproduces the resolve call, and
+  reports a cause.
 
 ## Maintenance Notes
 

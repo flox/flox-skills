@@ -72,7 +72,11 @@ a skill PR without one. Two rules:
 2. **Prefer the cheap tier.** A synthetic fixture or prompt eval is the inner loop
    (seconds); the real-world OSS runs are *confirmation* (a clone + a full agentic
    pass + realization). Reserve the expensive tier for proving the fix holds on
-   real repos and for non-regression.
+   real repos and for non-regression. Within the `flox` screening suite itself,
+   the same split applies at a finer grain: `screen.py --only <candidate-id>`
+   (one candidate, ~$0.30 at `--reps 5` on Haiku) is the inner loop for *why*
+   something fails; `screen.py --area <area>` (~$1.50 at the same settings) is
+   for confirming nothing else moved, not for diagnosis.
 
 **Fixes to existing guidance are in scope**, not just new features. AI-449 is
 why: the guidance that reasoned best is the guidance that broke real repos.
@@ -119,6 +123,54 @@ How:
   guidance; promote it into `tasks/tasks.jsonl` once it holds. See the
   Screening section below for `screen.py`, the rep policy, and
   check-design rules.
+
+### Three more lessons, from adding a diagnostic skill
+
+1. **Diagnostic skills need their context supplied in the prompt.** This
+   suite's prompts were written for manifest-authoring tasks, where the prompt
+   is the whole world. A skill that diagnoses a broken environment needs that
+   environment handed to it — a manifest, the error, and the specific thing
+   being changed — because the harness runs the agent from `evals/flox` with
+   no `.flox` directory anywhere near it. Given a scenario it cannot inspect,
+   a well-behaved skill correctly asks the user for the missing information,
+   and an answer that asks a question scores zero on every check. Three of
+   four candidates failed this way before it was diagnosed;
+   the fix is a self-contained prompt, not a weaker skill.
+2. **A hard check must not be satisfiable from its own prompt.** Once prompts
+   carry manifests and errors, a `must_match` pattern can be satisfied by the
+   model quoting the prompt back, and the candidate then measures nothing.
+   Run every `must_match` against its own `prompt` and require no match. A
+   check for `allow_unfree` is safe against a prompt containing
+   `allow.unfree` — the model has to perform the translation — but a check
+   for `(?i)resolve` is NOT safe against a prompt containing the word
+   "resolver".
+3. **A skill assembled from independently-correct changes still needs one
+   adversarial pass against live data before it ships.** "Every change was
+   reviewed" does not imply "the procedure is correct." One commit sent the
+   environment's `allow` options into the catalog resolve request, changing
+   the response's shape; a later commit, by a different author, added a
+   triage rule that only `error`-level messages belong in a diagnosis, since
+   `trace`/`info` is just the resolver narrating its work. Both were correct
+   alone and passed their own diff review — together they told the agent to
+   discard the only messages that name the cause. Against the live API, a
+   group failing on a licence restriction returns 33 ×
+   `(trace, resolution_logic)` carrying the actual reason, one generic
+   `(error, constraints_too_tight)` that names nothing, and 10 ×
+   `(error, attr_path_not_found)` scrape artefacts — the written procedure
+   diagnoses a system-coverage problem for a licence restriction. A
+   whole-branch review of the finished file, probing the live API, caught
+   it; none of the diff reviews over the two commits did.
+
+   **Beware fixing it with a rule generalised from one measurement.** The first
+   fix attempted — discard `attr_path_not_found` on `complete: false`
+   pages — held against one probe, but `complete: false` is near-universal;
+   the real discriminator is message text: `"...not found for some systems,
+   valid systems are (…)"` is usually a scrape artefact, `"The attr_path 'X'
+   is not found."` is genuine absence, naming the outlier package. That rule
+   discarded 40 of the latter in a real failure. Read a multi-fix skill end
+   to end and probe the live API for the shapes it claims — one healthy
+   case, one failing case — before merging: a rule discriminating on a
+   single response is often firing on every response.
 
 ## What it does
 
