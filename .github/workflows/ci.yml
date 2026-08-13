@@ -28,6 +28,16 @@ on:
         description: "Publish skills-flox to the flox catalog"
         type: boolean
         default: false
+      audit_threshold:
+        # All quality linters (skill-tools, skill-validator, claudelint)
+        # run cleanly — NO_UPDATE_NOTIFIER=1 (root env [vars]) strips
+        # claudelint's banner, and the audit is pointed at the SKILL.md
+        # dir. Set > 0 to turn the report into a gate. Same knob as
+        # flox-internal-skills.
+        description: "Fail the audit if a skill scores below N (-1 = report-only)."
+        required: false
+        default: "-1"
+        type: string
   # Push KEEPS its path filter: a main push with none of these paths touched
   # has nothing to publish, and the Publish step below fires on every push
   # event, so the trigger filter is what stops a pointless `flox publish`.
@@ -159,6 +169,49 @@ jobs:
         env:
           FLOX_FLOXHUB_TOKEN: ${{ secrets.MANAGED_FLOX_FLOXHUB_TOKEN }}
 
+      # Ported from flox-internal-skills (PR #11), adapted for this repo's
+      # one-package/many-skills layout: skills-flox holds three skills, so
+      # the audit loops every SKILL.md dir in the one build output and
+      # emits one metrics-<skill>.json per skill.
+      - name: "Audit skills"
+        if: ${{ matrix.system == 'x86_64-linux' }}
+        env:
+          # -1 on push/PR (no dispatch input); dispatch may pass a real
+          # floor to turn the report into a gate.
+          AUDIT_THRESHOLD: ${{ inputs.audit_threshold || '-1' }}
+        run: |
+          set -euo pipefail
+          # The Build step is skipped on publish runs, so materialize the
+          # build output here (cached: instant when Build already ran).
+          flox build skills-flox --system x86_64-linux
+          # Audit each dir that directly holds a SKILL.md
+          # (share/flox/claude/flox/skills/<name>), not the plugin dir —
+          # skill-tools/skill-validator look for SKILL.md at the path
+          # they are given.
+          found=0
+          while IFS= read -r f; do
+            found=1
+            dir="$(dirname "$f")"
+            name="$(basename "$dir")"
+            flox activate -- \
+              flox-ai audit --json --findings --kind skill \
+              --threshold "$AUDIT_THRESHOLD" \
+              "$dir" | tee "metrics-$name.json"
+          done < <(find "result-skills-flox/share/flox/claude" \
+            -name SKILL.md | sort)
+          if [ "$found" -eq 0 ]; then
+            echo "::error::no SKILL.md found in build output"
+            exit 1
+          fi
+
+      - name: "Upload audit metrics"
+        if: ${{ always() && matrix.system == 'x86_64-linux' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: "metrics-skills-flox"
+          path: "metrics-*.json"
+          if-no-files-found: "warn"
+
   # Single required status: collapses the per-system matrix into one
   # pass/fail. always() so it reports even when a leg fails; it then
   # fails itself if any leg did, so branch protection can gate on this
@@ -200,6 +253,95 @@ jobs:
           fi
           echo "One or more systems failed."
           exit 1
+
+  # Comment a combined audit report on the PR — one sticky comment
+  # (score table + per-skill findings in <details>), updated in place on
+  # subsequent pushes. Ported from flox-internal-skills. Runs even when
+  # builds fail (report whatever metrics were produced), but only on PRs
+  # and only when build-and-publish (which runs the audit on its
+  # x86_64-linux leg) wasn't path-skipped. Permissions are job-level:
+  # this workflow deliberately has no global permissions block.
+  audit-report:
+    name: "Audit report"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: ["changes", "build-and-publish", "summary"]
+    permissions:
+      contents: read
+      pull-requests: write
+    if: >-
+      always()
+      && github.event_name == 'pull_request'
+      && needs.build-and-publish.result != 'skipped'
+    steps:
+      - name: "Download audit metrics"
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: "metrics-*"
+          path: "metrics"
+          merge-multiple: true
+      - name: "Build report"
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(metrics/metrics-*.json)
+          {
+            echo "<!-- flox-ai-audit-report -->"
+            echo "## Skill audit report"
+            echo
+            if [ "${#files[@]}" -eq 0 ]; then
+              echo "_No audit metrics produced by this run._"
+            else
+              echo "| Skill | Overall | Status | Quality | Reliability | Security | Impact | Findings |"
+              echo "| ----- | ------- | ------ | ------- | ----------- | -------- | ------ | -------- |"
+              for f in "${files[@]}"; do
+                jq -r '[.identity.name, .overall, .status,
+                        .quality.score, .reliability.score,
+                        .security.score,
+                        "\(.impact.score)\(if .impact.estimated
+                          then " (est.)" else "" end)",
+                        (.findings | length)]
+                       | "| " + (map(tostring) | join(" | ")) + " |"' "$f"
+              done
+              for f in "${files[@]}"; do
+                name="$(jq -r '.identity.name' "$f")"
+                count="$(jq -r '.findings | length' "$f")"
+                [ "$count" -eq 0 ] && continue
+                echo
+                echo "<details>"
+                echo "<summary><b>${name}</b> — ${count} finding(s)</summary>"
+                echo
+                echo "| Tool | Severity | Rule | Message |"
+                echo "| ---- | -------- | ---- | ------- |"
+                jq -r '.findings[]
+                       | [.tool, .severity, .rule,
+                          (.message | gsub("\\|"; "\\|") | gsub("\n"; " "))]
+                       | "| " + join(" | ") + " |"' "$f"
+                echo
+                echo "</details>"
+              done
+            fi
+          } > report.md
+          cat report.md
+      - name: "Comment on PR"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Sticky comment: update the existing report comment if present.
+          cid="$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '[.[] | select(.body | startswith("<!-- flox-ai-audit-report -->"))][0].id // empty')"
+          if [ -n "$cid" ]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$cid" \
+              -F "body=@report.md" > /dev/null
+            echo "Updated comment $cid"
+          else
+            gh api --method POST "repos/$REPO/issues/$PR/comments" \
+              -F "body=@report.md" > /dev/null
+            echo "Created comment"
+          fi
 
   # Slack #pod-ai only when a main publish actually failed — PRs surface
   # failures in the checks UI and shouldn't page the channel. Reuses the

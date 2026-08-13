@@ -8,6 +8,20 @@ flox-ai.pkg-path = "flox/flox-ai"
 # from the toplevel group, and flox-ai alone (custom catalog) can't
 coreutils.pkg-path = "coreutils"
 
+# flox-ai audit toolchain (custom FloxHub catalog), used by the CI audit
+# step and locally to score skill quality. Toplevel to mirror
+# flox-internal-skills; if this poisons `flox build`/`flox publish`
+# resolution of the base catalog page, move these five to a dedicated
+# pkg-group (same fallback flox-internal-skills documents).
+skill-tools.pkg-path = "flox/skill-tools"
+skill-validator.pkg-path = "flox/skill-validator"
+claudelint.pkg-path = "flox/claudelint"
+skillcheck.pkg-path = "flox/skillcheck"
+skillspector.pkg-path = "flox/skillspector"
+# skillspector ships its own bin/python; priority 6 (> default 5) so the
+# eval suite's python311 keeps owning bin/python in the merged env.
+skillspector.priority = 6
+
 # The eval suite's interpreter. Activate this environment and run the
 # harnesses as plain `python3 evals/<...>` — that is the supported invocation
 # everywhere (README examples, and every CI job via a step-level
@@ -25,6 +39,13 @@ coreutils.pkg-path = "coreutils"
 # with python311, so an isolated group costs nothing.
 python311.pkg-path = "python311"
 python311.pkg-group = "python"
+
+[vars]
+# Suppress npm update-notifier banners. claudelint prints an
+# "Update available" line to stdout before its JSON, which flox-ai's
+# audit engine (whole-buffer JSON parse) then rejects, zeroing the
+# quality dimension. This makes claudelint's output pure JSON.
+NO_UPDATE_NOTIFIER = "1"
 
 # Packages the flox plugin (skills: flox, floxify, flox-debug) for all agents.
 # Stages the plugin under share/claude-code/plugins/flox, then
