@@ -1,0 +1,19 @@
+schema-version = "1.13.0"
+
+# Image `withpkg`: everything in `base`, plus the flox-ai launcher and the
+# PUBLISHED skills-flox package — so the Flox package delivery cells exercise
+# the exact artifact a consumer installs, not a working copy.
+
+[install]
+claude-code.pkg-path = "flox/claude-code"
+codex.pkg-path = "flox/codex"
+opencode.pkg-path = "flox/opencode"
+nodejs.pkg-path = "nodejs"
+git.pkg-path = "git"
+jq.pkg-path = "jq"
+flox-ai.pkg-path = "flox/flox-ai"
+skills-flox.pkg-path = "flox/skills-flox"
+skills-flox.version = "1.0.0"
+
+[options]
+systems = ["x86_64-linux"]
