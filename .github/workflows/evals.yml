@@ -254,6 +254,32 @@ jobs:
           python3 -m unittest discover -s tests -t . -v
           echo "::endgroup::"
 
+      - name: Free deterministic unit tests -- agent compatibility (run_matrix.py)
+        working-directory: evals/agent-compatibility
+        env:
+          FLOX_DISABLE_METRICS: "true"
+        shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
+        run: |
+          set -u
+          # The agent installation compatibility MATRIX never runs here: it
+          # needs a logged-in Claude Code and Codex on the machine, spends
+          # subscription rate limit, and builds two ~1.5GB containers. This
+          # step is its unit tests only -- every subprocess mocked, so no
+          # docker, no flox containerize, no network, no credentials, no
+          # model spend (AI-509 Ticket 5).
+          #
+          # Its own step for the same reason the one above is: these import
+          # `run_matrix` and `lib.*` by bare name, so they need
+          # evals/agent-compatibility/ as the sys.path root, and a third
+          # package named `tests` cannot share a process with the other two.
+          #
+          # `discover` rather than a module list, per the Ticket 2 review:
+          # every module here is TestCase subclasses, so nothing is green by
+          # omission when a test file is added.
+          echo "::group::everything unittest can discover (cells, creds, run_matrix)"
+          python3 -m unittest discover -s tests -t . -v
+          echo "::endgroup::"
+
       # No setup-node / `npm install -g @anthropic-ai/claude-code` here any
       # more: the Flox environment activated below already installs
       # `flox/claude-code` (it is what the manifest's claude-code pkg-group is
