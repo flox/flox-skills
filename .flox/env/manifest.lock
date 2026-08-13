@@ -7,6 +7,9 @@
         "pkg-path": "flox/claude-code",
         "pkg-group": "claude-code"
       },
+      "claudelint": {
+        "pkg-path": "flox/claudelint"
+      },
       "coreutils": {
         "pkg-path": "coreutils"
       },
@@ -16,15 +19,31 @@
       "python311": {
         "pkg-path": "python311",
         "pkg-group": "python"
+      },
+      "skill-tools": {
+        "pkg-path": "flox/skill-tools"
+      },
+      "skill-validator": {
+        "pkg-path": "flox/skill-validator"
+      },
+      "skillcheck": {
+        "pkg-path": "flox/skillcheck"
+      },
+      "skillspector": {
+        "pkg-path": "flox/skillspector",
+        "priority": 6
       }
+    },
+    "vars": {
+      "NO_UPDATE_NOTIFIER": "1"
     },
     "options": {},
     "build": {
       "skills-flox": {
         "command": "  mkdir -p \"$out/share/claude-code/plugins/flox\"\n  cp -R flox-plugin/. \"$out/share/claude-code/plugins/flox/\"\n  source .flox/nix/flox-agent-layout.sh\n  flox_agent_layout \"flox\" \"$out/share\"\n",
         "runtime-packages": [],
-        "version": "1.0.0",
-        "description": "Flox skills (flox, floxify) packaged for Claude Code, Codex, Pi, and OpenCode"
+        "version": "1.1.0",
+        "description": "Flox skills (flox, floxify, flox-debug) packaged for Claude Code, Codex, Pi, and OpenCode"
       }
     }
   },
@@ -154,283 +173,6 @@
       "priority": 5
     },
     {
-      "attr_path": "coreutils",
-      "broken": false,
-      "derivation": "/nix/store/xhh9r2djb00zz515x68m359kv3z35lp6-coreutils-9.11.drv",
-      "description": "GNU Core Utilities",
-      "install_id": "coreutils",
-      "license": "GPL-3.0-or-later",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=567a49d1913ce81ac6e9582e3553dd90a955875f",
-      "name": "coreutils-9.11",
-      "pname": "coreutils",
-      "rev": "567a49d1913ce81ac6e9582e3553dd90a955875f",
-      "rev_count": 1017464,
-      "rev_date": "2026-06-16T02:33:49Z",
-      "scrape_date": "2026-06-17T03:13:14.029360Z",
-      "stabilities": [
-        "stable",
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "9.11",
-      "outputs_to_install": [
-        "out",
-        "out",
-        "out",
-        "out",
-        "out",
-        "out",
-        "out"
-      ],
-      "outputs": {
-        "info": "/nix/store/83kk1z6r4n7il426hl9qhgvjn3gw3i3k-coreutils-9.11-info",
-        "out": "/nix/store/y0ha8v4gh5vnwwmp2r0msfbdlvgwv2np-coreutils-9.11"
-      },
-      "system": "aarch64-darwin",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "coreutils",
-      "broken": false,
-      "derivation": "/nix/store/hcyz1x1w9dxfsmq5kv2abdw2qvnv766h-coreutils-9.11.drv",
-      "description": "GNU Core Utilities",
-      "install_id": "coreutils",
-      "license": "GPL-3.0-or-later",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=567a49d1913ce81ac6e9582e3553dd90a955875f",
-      "name": "coreutils-9.11",
-      "pname": "coreutils",
-      "rev": "567a49d1913ce81ac6e9582e3553dd90a955875f",
-      "rev_count": 1017464,
-      "rev_date": "2026-06-16T02:33:49Z",
-      "scrape_date": "2026-06-17T03:44:08.473821Z",
-      "stabilities": [
-        "stable",
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "9.11",
-      "outputs_to_install": [
-        "out",
-        "out",
-        "out",
-        "out",
-        "out"
-      ],
-      "outputs": {
-        "debug": "/nix/store/p2vk0ll7l8dp5n203ffrvjpj491h6x90-coreutils-9.11-debug",
-        "info": "/nix/store/c96my4whwlw38gqj39370k93bbbrwn3h-coreutils-9.11-info",
-        "out": "/nix/store/9bhf1ff1kwhmyynws5jkjp8k7pkh6kix-coreutils-9.11"
-      },
-      "system": "aarch64-linux",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "coreutils",
-      "broken": false,
-      "derivation": "/nix/store/9hnqb5qhawavdjqys5bvfy84wyw3n8hd-coreutils-9.11.drv",
-      "description": "GNU Core Utilities",
-      "install_id": "coreutils",
-      "license": "GPL-3.0-or-later",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=567a49d1913ce81ac6e9582e3553dd90a955875f",
-      "name": "coreutils-9.11",
-      "pname": "coreutils",
-      "rev": "567a49d1913ce81ac6e9582e3553dd90a955875f",
-      "rev_count": 1017464,
-      "rev_date": "2026-06-16T02:33:49Z",
-      "scrape_date": "2026-06-17T04:13:06.288898Z",
-      "stabilities": [
-        "stable",
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "9.11",
-      "outputs_to_install": [
-        "out",
-        "out",
-        "out"
-      ],
-      "outputs": {
-        "info": "/nix/store/6dkbcg1yv4z4h2md9yi5cgr8f6scsgsb-coreutils-9.11-info",
-        "out": "/nix/store/5m3k4f22kg542p2lr4ikk2xj6grlmvrg-coreutils-9.11"
-      },
-      "system": "x86_64-darwin",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "coreutils",
-      "broken": false,
-      "derivation": "/nix/store/08fg4a5d85pnlagm8qrk1pga0zkyjsxm-coreutils-9.11.drv",
-      "description": "GNU Core Utilities",
-      "install_id": "coreutils",
-      "license": "GPL-3.0-or-later",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=567a49d1913ce81ac6e9582e3553dd90a955875f",
-      "name": "coreutils-9.11",
-      "pname": "coreutils",
-      "rev": "567a49d1913ce81ac6e9582e3553dd90a955875f",
-      "rev_count": 1017464,
-      "rev_date": "2026-06-16T02:33:49Z",
-      "scrape_date": "2026-06-17T04:47:04.532402Z",
-      "stabilities": [
-        "stable",
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "9.11",
-      "outputs_to_install": [
-        "out",
-        "out",
-        "out",
-        "out",
-        "out",
-        "out",
-        "out",
-        "out",
-        "out",
-        "out",
-        "out",
-        "out"
-      ],
-      "outputs": {
-        "debug": "/nix/store/gfcdh00xkdhrd6qqz1gxdlq7ba5xkyaq-coreutils-9.11-debug",
-        "info": "/nix/store/77sgl4gzlhg90154z7qk1fqs2qpvsqs8-coreutils-9.11-info",
-        "out": "/nix/store/9ypz3flqsrl5xl495mm8h645gadjsxi1-coreutils-9.11"
-      },
-      "system": "x86_64-linux",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "flox-ai",
-      "broken": false,
-      "derivation": "/nix/store/zp4w0cwp0sxbdch8fij6ifa2rpww45gi-flox-ai-0.8.0.drv",
-      "description": "Flox-native config management for Claude Code CLI",
-      "install_id": "flox-ai",
-      "license": "MIT",
-      "locked_url": "https://github.com/flox/floxenvs?rev=69304793cb90e07c2adefd7a05f0f678aed9bf55",
-      "name": "flox-ai-0.8.0",
-      "pname": "flox-ai",
-      "rev": "69304793cb90e07c2adefd7a05f0f678aed9bf55",
-      "rev_count": 14161,
-      "rev_date": "2026-07-13T15:44:29Z",
-      "scrape_date": "2026-07-16T15:38:52.429812Z",
-      "stabilities": [
-        "stable",
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.8.0",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/f0lzb5ni2d1sxrnpji9yrl5h12ij6qih-flox-ai-0.8.0"
-      },
-      "system": "aarch64-darwin",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "flox-ai",
-      "broken": false,
-      "derivation": "/nix/store/q68na0i39gz4x3j61ivpdfyanrrp16dk-flox-ai-0.8.0.drv",
-      "description": "Flox-native config management for Claude Code CLI",
-      "install_id": "flox-ai",
-      "license": "MIT",
-      "locked_url": "https://github.com/flox/floxenvs?rev=69304793cb90e07c2adefd7a05f0f678aed9bf55",
-      "name": "flox-ai-0.8.0",
-      "pname": "flox-ai",
-      "rev": "69304793cb90e07c2adefd7a05f0f678aed9bf55",
-      "rev_count": 14161,
-      "rev_date": "2026-07-13T15:44:29Z",
-      "scrape_date": "2026-07-16T15:38:52.429814Z",
-      "stabilities": [
-        "stable",
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.8.0",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/ngx0s4wqfx12631i5ak5yn6bzmk29b2b-flox-ai-0.8.0"
-      },
-      "system": "aarch64-linux",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "flox-ai",
-      "broken": false,
-      "derivation": "/nix/store/n3ha548ngmaczyjliqbni4xwla76s48f-flox-ai-0.8.0.drv",
-      "description": "Flox-native config management for Claude Code CLI",
-      "install_id": "flox-ai",
-      "license": "MIT",
-      "locked_url": "https://github.com/flox/floxenvs?rev=69304793cb90e07c2adefd7a05f0f678aed9bf55",
-      "name": "flox-ai-0.8.0",
-      "pname": "flox-ai",
-      "rev": "69304793cb90e07c2adefd7a05f0f678aed9bf55",
-      "rev_count": 14161,
-      "rev_date": "2026-07-13T15:44:29Z",
-      "scrape_date": "2026-07-16T15:38:52.429815Z",
-      "stabilities": [
-        "stable",
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.8.0",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/g53gm910jsgaqcld3hjxlndd068qbli0-flox-ai-0.8.0"
-      },
-      "system": "x86_64-darwin",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "flox-ai",
-      "broken": false,
-      "derivation": "/nix/store/scgz7wagyl5sv48ykpzrck78ja6rf310-flox-ai-0.8.0.drv",
-      "description": "Flox-native config management for Claude Code CLI",
-      "install_id": "flox-ai",
-      "license": "MIT",
-      "locked_url": "https://github.com/flox/floxenvs?rev=69304793cb90e07c2adefd7a05f0f678aed9bf55",
-      "name": "flox-ai-0.8.0",
-      "pname": "flox-ai",
-      "rev": "69304793cb90e07c2adefd7a05f0f678aed9bf55",
-      "rev_count": 14161,
-      "rev_date": "2026-07-13T15:44:29Z",
-      "scrape_date": "2026-07-16T15:38:52.429816Z",
-      "stabilities": [
-        "stable",
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.8.0",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/fw9wj78gija7qx4r09ia48fqnpm7j2kh-flox-ai-0.8.0"
-      },
-      "system": "x86_64-linux",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
       "attr_path": "python311",
       "broken": false,
       "derivation": "/nix/store/3a1f0j7pwas4zvz79wnvgggvaki3ml3p-python3-3.11.15.drv",
@@ -551,6 +293,870 @@
       "system": "x86_64-linux",
       "group": "python",
       "priority": 5
+    },
+    {
+      "attr_path": "claudelint",
+      "broken": false,
+      "derivation": "/nix/store/knmw4i16mii3m0yqs01lbflys14cnc8l-claude-code-lint-0.5.0.drv",
+      "description": "Linter for the whole Claude Code project: skills, agents, settings, hooks, MCP",
+      "install_id": "claudelint",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "claude-code-lint-0.5.0",
+      "pname": "claude-code-lint",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-13T11:03:35.156858Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.5.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/85wvni3fhrlwx20jm1mawbkhl78ycghh-claude-code-lint-0.5.0"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "claudelint",
+      "broken": false,
+      "derivation": "/nix/store/65030z2f9whqid0g36pfcgykhgnvc21n-claude-code-lint-0.5.0.drv",
+      "description": "Linter for the whole Claude Code project: skills, agents, settings, hooks, MCP",
+      "install_id": "claudelint",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "claude-code-lint-0.5.0",
+      "pname": "claude-code-lint",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-13T11:03:35.156861Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.5.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/9cfjsz0sfr23j4zbmlg9rmjfpfnn3hmf-claude-code-lint-0.5.0"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "claudelint",
+      "broken": false,
+      "derivation": "/nix/store/79rsj376nxgccz3n4n4cm53lx79f0dvc-claude-code-lint-0.5.0.drv",
+      "description": "Linter for the whole Claude Code project: skills, agents, settings, hooks, MCP",
+      "install_id": "claudelint",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "claude-code-lint-0.5.0",
+      "pname": "claude-code-lint",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-13T11:03:35.156861Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.5.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/sivx54p2d7bh0fvsq802fakxm28cnmwj-claude-code-lint-0.5.0"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "claudelint",
+      "broken": false,
+      "derivation": "/nix/store/5kibbav7j1pmzxmx3dbxjvph5qlpa85f-claude-code-lint-0.5.0.drv",
+      "description": "Linter for the whole Claude Code project: skills, agents, settings, hooks, MCP",
+      "install_id": "claudelint",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "claude-code-lint-0.5.0",
+      "pname": "claude-code-lint",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-13T11:03:35.156862Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.5.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/qwmmgl955g7x5idydyxgkimw4dvxil9b-claude-code-lint-0.5.0"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "coreutils",
+      "broken": false,
+      "derivation": "/nix/store/4l5v7bf1dfqh88kh919i9awqj15k06dv-coreutils-9.10.drv",
+      "description": "GNU Core Utilities",
+      "install_id": "coreutils",
+      "license": "GPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d233902339c02a9c334e7e593de68855ad26c4cb",
+      "name": "coreutils-9.10",
+      "pname": "coreutils",
+      "rev": "d233902339c02a9c334e7e593de68855ad26c4cb",
+      "rev_count": 998534,
+      "rev_date": "2026-05-15T18:21:44Z",
+      "scrape_date": "2026-05-17T07:05:50.972485Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "9.10",
+      "outputs_to_install": [
+        "out",
+        "out",
+        "out",
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "info": "/nix/store/g31k47nqwv2v7m236i5f16zv7v5xgwz9-coreutils-9.10-info",
+        "out": "/nix/store/nixxlz2dfdwmy6r8da5sas4nrnj7sq3z-coreutils-9.10"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "coreutils",
+      "broken": false,
+      "derivation": "/nix/store/l6zh0i18v2zxcxksi1jrqr8r3pav5k4d-coreutils-9.10.drv",
+      "description": "GNU Core Utilities",
+      "install_id": "coreutils",
+      "license": "GPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d233902339c02a9c334e7e593de68855ad26c4cb",
+      "name": "coreutils-9.10",
+      "pname": "coreutils",
+      "rev": "d233902339c02a9c334e7e593de68855ad26c4cb",
+      "rev_count": 998534,
+      "rev_date": "2026-05-15T18:21:44Z",
+      "scrape_date": "2026-05-17T07:33:29.398613Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "9.10",
+      "outputs_to_install": [
+        "out",
+        "out",
+        "out",
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/20b5irws8z0cllddnwsbb844pms1akzs-coreutils-9.10-debug",
+        "info": "/nix/store/cyq8sccm08p8a7kiwclnf4dk3mkp0h54-coreutils-9.10-info",
+        "out": "/nix/store/xs45f7342j015kywha1dc0asbvvw1xfw-coreutils-9.10"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "coreutils",
+      "broken": false,
+      "derivation": "/nix/store/cir6b8gqhqp7dkhq6bzmcrxvq6ln7ick-coreutils-9.10.drv",
+      "description": "GNU Core Utilities",
+      "install_id": "coreutils",
+      "license": "GPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d233902339c02a9c334e7e593de68855ad26c4cb",
+      "name": "coreutils-9.10",
+      "pname": "coreutils",
+      "rev": "d233902339c02a9c334e7e593de68855ad26c4cb",
+      "rev_count": 998534,
+      "rev_date": "2026-05-15T18:21:44Z",
+      "scrape_date": "2026-05-17T08:01:17.491149Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "9.10",
+      "outputs_to_install": [
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "info": "/nix/store/2x1zm1h7hxqkkd07xl5430xh66dgvncg-coreutils-9.10-info",
+        "out": "/nix/store/imxdgy6dqqmhb3mzzxg14zkfxx9vc1w0-coreutils-9.10"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "coreutils",
+      "broken": false,
+      "derivation": "/nix/store/ghb92hhhki9xqgj455zcnk9zasxihp2x-coreutils-9.10.drv",
+      "description": "GNU Core Utilities",
+      "install_id": "coreutils",
+      "license": "GPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=d233902339c02a9c334e7e593de68855ad26c4cb",
+      "name": "coreutils-9.10",
+      "pname": "coreutils",
+      "rev": "d233902339c02a9c334e7e593de68855ad26c4cb",
+      "rev_count": 998534,
+      "rev_date": "2026-05-15T18:21:44Z",
+      "scrape_date": "2026-05-17T08:32:09.632097Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "9.10",
+      "outputs_to_install": [
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/qxz76anix4lizckx1f438sii1m8xgyh2-coreutils-9.10-debug",
+        "info": "/nix/store/klz3g7klbxdv03dk7vnp1j8g4188xz95-coreutils-9.10-info",
+        "out": "/nix/store/jjxngswsb214vb58qx485jhmilf0kxxy-coreutils-9.10"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "flox-ai",
+      "broken": false,
+      "derivation": "/nix/store/2xb2axh9hb30qyaikqz9agi2ldw6mikj-flox-ai-0.7.0.drv",
+      "description": "Flox-native config management for Claude Code CLI",
+      "install_id": "flox-ai",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "flox-ai-0.7.0",
+      "pname": "flox-ai",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-13T11:03:35.156867Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.7.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/jdaxnz2pm4p5c6vnichv3hrm37m6pyvz-flox-ai-0.7.0"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "flox-ai",
+      "broken": false,
+      "derivation": "/nix/store/gf08b7f8j4a993pflslbc5521b38mbp8-flox-ai-0.7.0.drv",
+      "description": "Flox-native config management for Claude Code CLI",
+      "install_id": "flox-ai",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "flox-ai-0.7.0",
+      "pname": "flox-ai",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-13T11:03:35.156871Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.7.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/5d4s5iy34xiz3a8nb1l5svmrracaxvj5-flox-ai-0.7.0"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "flox-ai",
+      "broken": false,
+      "derivation": "/nix/store/k6qb4v4n316j91yhjg7hldbc1ridf4lh-flox-ai-0.7.0.drv",
+      "description": "Flox-native config management for Claude Code CLI",
+      "install_id": "flox-ai",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "flox-ai-0.7.0",
+      "pname": "flox-ai",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-13T11:03:35.156871Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.7.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/jdfli8fzxsa159bqmx5q7z1qk2x8fh2s-flox-ai-0.7.0"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "flox-ai",
+      "broken": false,
+      "derivation": "/nix/store/bbak0mcddzx2cvs0470c4pfbaxgwavsy-flox-ai-0.7.0.drv",
+      "description": "Flox-native config management for Claude Code CLI",
+      "install_id": "flox-ai",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "flox-ai-0.7.0",
+      "pname": "flox-ai",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-13T11:03:35.156872Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.7.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/d0c8nv8j1lif2v8lnf9f897n4s1y7jxy-flox-ai-0.7.0"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "skill-tools",
+      "broken": false,
+      "derivation": "/nix/store/njgsdm1fxlqxrmc14xx8npk4ddh7wwqa-skill-tools-0.4.1.drv",
+      "description": "CLI to score, validate, lint, and route Claude Agent Skills (SKILL.md)",
+      "install_id": "skill-tools",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/floxenvs?rev=5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
+      "name": "skill-tools-0.4.1",
+      "pname": "skill-tools",
+      "rev": "5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
+      "rev_count": 7401,
+      "rev_date": "2026-06-11T21:58:43Z",
+      "scrape_date": "2026-08-13T11:03:35.156873Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.4.1",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/ka28x03fb9ajgh52pajjinivgizgppyd-skill-tools-0.4.1"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "skill-tools",
+      "broken": false,
+      "derivation": "/nix/store/4s865qpmhmincrq3mbmq2dd6vk5vhhw3-skill-tools-0.4.1.drv",
+      "description": "CLI to score, validate, lint, and route Claude Agent Skills (SKILL.md)",
+      "install_id": "skill-tools",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "skill-tools-0.4.1",
+      "pname": "skill-tools",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-13T11:03:35.156873Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.4.1",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/g222a402nym43ahx1impg47pwy3h5d0p-skill-tools-0.4.1"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "skill-tools",
+      "broken": false,
+      "derivation": "/nix/store/d0y4jd2j132973y68ays63b75l21xaqz-skill-tools-0.4.1.drv",
+      "description": "CLI to score, validate, lint, and route Claude Agent Skills (SKILL.md)",
+      "install_id": "skill-tools",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/floxenvs?rev=5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
+      "name": "skill-tools-0.4.1",
+      "pname": "skill-tools",
+      "rev": "5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
+      "rev_count": 7401,
+      "rev_date": "2026-06-11T21:58:43Z",
+      "scrape_date": "2026-08-13T11:03:35.156874Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.4.1",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/hpminp2dvwyhv6prkaf5ksdpsa3g82wc-skill-tools-0.4.1"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "skill-tools",
+      "broken": false,
+      "derivation": "/nix/store/6kk6bhwz2wsv7l86b27j64736wq6v27y-skill-tools-0.4.1.drv",
+      "description": "CLI to score, validate, lint, and route Claude Agent Skills (SKILL.md)",
+      "install_id": "skill-tools",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "skill-tools-0.4.1",
+      "pname": "skill-tools",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-13T11:03:35.156874Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.4.1",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/nm979xgmjqi08ygp0csby7l7fdjxak9l-skill-tools-0.4.1"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "skill-validator",
+      "broken": false,
+      "derivation": "/nix/store/mn3q5vmrzp0gx69fjsk34w6hv8jb5g7j-skill-validator-1.5.6.drv",
+      "description": "Validate and score Claude Agent Skills (SKILL.md)",
+      "install_id": "skill-validator",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
+      "name": "skill-validator-1.5.6",
+      "pname": "skill-validator",
+      "rev": "5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
+      "rev_count": 7401,
+      "rev_date": "2026-06-11T21:58:43Z",
+      "scrape_date": "2026-08-13T11:03:35.156875Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.5.6",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/fasj5fdzcr3dk6g6jhy7qb3yha621na0-skill-validator-1.5.6"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "skill-validator",
+      "broken": false,
+      "derivation": "/nix/store/72d0ks422gzamk8abl52m1q1bqq00qy8-skill-validator-1.5.6.drv",
+      "description": "Validate and score Claude Agent Skills (SKILL.md)",
+      "install_id": "skill-validator",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
+      "name": "skill-validator-1.5.6",
+      "pname": "skill-validator",
+      "rev": "5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
+      "rev_count": 7401,
+      "rev_date": "2026-06-11T21:58:43Z",
+      "scrape_date": "2026-08-13T11:03:35.156876Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.5.6",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/6m107qq6pr88sanvsl1sl74k1la9lb50-skill-validator-1.5.6"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "skill-validator",
+      "broken": false,
+      "derivation": "/nix/store/jv4ivlj3a754p3kyxjzznnidmjbz4xmr-skill-validator-1.5.6.drv",
+      "description": "Validate and score Claude Agent Skills (SKILL.md)",
+      "install_id": "skill-validator",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
+      "name": "skill-validator-1.5.6",
+      "pname": "skill-validator",
+      "rev": "5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
+      "rev_count": 7401,
+      "rev_date": "2026-06-11T21:58:43Z",
+      "scrape_date": "2026-08-13T11:03:35.156877Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.5.6",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/dbq31i9n370ymxbx05vy9jciy8ccx2jr-skill-validator-1.5.6"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "skill-validator",
+      "broken": false,
+      "derivation": "/nix/store/yqwlc44c4bs314rhp15lq51x1nklmk0j-skill-validator-1.5.6.drv",
+      "description": "Validate and score Claude Agent Skills (SKILL.md)",
+      "install_id": "skill-validator",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "skill-validator-1.5.6",
+      "pname": "skill-validator",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-13T11:03:35.156877Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.5.6",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/fpnj0mxigg4pc2x510jgam09ybvjh4rb-skill-validator-1.5.6"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "skillcheck",
+      "broken": false,
+      "derivation": "/nix/store/h8xn58dnfbphs6jycrmwb90la7ifjfab-skillcheck-1.0.0.drv",
+      "description": "SAST scanner for SKILL.md bodies — secrets, injection, priv-esc (SARIF)",
+      "install_id": "skillcheck",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
+      "name": "skillcheck-1.0.0",
+      "pname": "skillcheck",
+      "rev": "5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
+      "rev_count": 7401,
+      "rev_date": "2026-06-11T21:58:43Z",
+      "scrape_date": "2026-08-13T11:03:35.156880Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.0.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/lixsiypkbkcmds7fnhwabldn3xhybpbw-skillcheck-1.0.0"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "skillcheck",
+      "broken": false,
+      "derivation": "/nix/store/bin7fzafj950p5xabswq56ykr70wfji7-skillcheck-1.0.0.drv",
+      "description": "SAST scanner for SKILL.md bodies — secrets, injection, priv-esc (SARIF)",
+      "install_id": "skillcheck",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "skillcheck-1.0.0",
+      "pname": "skillcheck",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-13T11:03:35.156881Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.0.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/ganmrf2nav81kvapnyljjyz1hxpcgypc-skillcheck-1.0.0"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "skillcheck",
+      "broken": false,
+      "derivation": "/nix/store/kc499kk7mzkd8sc2caj7hzzf6rjq35sv-skillcheck-1.0.0.drv",
+      "description": "SAST scanner for SKILL.md bodies — secrets, injection, priv-esc (SARIF)",
+      "install_id": "skillcheck",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
+      "name": "skillcheck-1.0.0",
+      "pname": "skillcheck",
+      "rev": "5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
+      "rev_count": 7401,
+      "rev_date": "2026-06-11T21:58:43Z",
+      "scrape_date": "2026-08-13T11:03:35.156881Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.0.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/g8agqnkbaag0bzdvdm9jhsbvq236wy3l-skillcheck-1.0.0"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "skillcheck",
+      "broken": false,
+      "derivation": "/nix/store/d96bzmn56qjc7f8w91qww3rbinx4rfq0-skillcheck-1.0.0.drv",
+      "description": "SAST scanner for SKILL.md bodies — secrets, injection, priv-esc (SARIF)",
+      "install_id": "skillcheck",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "skillcheck-1.0.0",
+      "pname": "skillcheck",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-13T11:03:35.156882Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "1.0.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/vwbf7831m7a075zayjhsf824sz7d6fyw-skillcheck-1.0.0"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "skillspector",
+      "broken": false,
+      "derivation": "/nix/store/x16xhm3imjgf9bm9hmq6mkkk5acqivrg-skillspector-env.drv",
+      "description": "Security scanner for AI agent skills",
+      "install_id": "skillspector",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/floxenvs?rev=763fec74a767c4ccb7693bb31fe5ffe5ff7ba225",
+      "name": "skillspector-env",
+      "pname": "skillspector",
+      "rev": "763fec74a767c4ccb7693bb31fe5ffe5ff7ba225",
+      "rev_count": 8694,
+      "rev_date": "2026-06-17T03:00:24Z",
+      "scrape_date": "2026-08-13T11:03:35.156882Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2.2.3",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/k3xb4s65h10vmpkbd9bbgwrxgyjrwxg9-skillspector-env"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 6
+    },
+    {
+      "attr_path": "skillspector",
+      "broken": false,
+      "derivation": "/nix/store/r9g8wynbfq32jj4hxzdz0vshjxr62vy7-skillspector-env.drv",
+      "description": "Security scanner for AI agent skills",
+      "install_id": "skillspector",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/floxenvs?rev=763fec74a767c4ccb7693bb31fe5ffe5ff7ba225",
+      "name": "skillspector-env",
+      "pname": "skillspector",
+      "rev": "763fec74a767c4ccb7693bb31fe5ffe5ff7ba225",
+      "rev_count": 8694,
+      "rev_date": "2026-06-17T03:00:24Z",
+      "scrape_date": "2026-08-13T11:03:35.156883Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2.2.3",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/3q322zxlg0px8k9hpbcc4mk02zmq4aaf-skillspector-env"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 6
+    },
+    {
+      "attr_path": "skillspector",
+      "broken": false,
+      "derivation": "/nix/store/hcw42qh9m5qcz7ssb2cdnd495gz8z1v1-skillspector-env.drv",
+      "description": "Security scanner for AI agent skills",
+      "install_id": "skillspector",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/floxenvs?rev=763fec74a767c4ccb7693bb31fe5ffe5ff7ba225",
+      "name": "skillspector-env",
+      "pname": "skillspector",
+      "rev": "763fec74a767c4ccb7693bb31fe5ffe5ff7ba225",
+      "rev_count": 8694,
+      "rev_date": "2026-06-17T03:00:24Z",
+      "scrape_date": "2026-08-13T11:03:35.156883Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2.2.3",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/3k94vzrwmpbcasxc95xjxmp8ydpwhrv1-skillspector-env"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 6
+    },
+    {
+      "attr_path": "skillspector",
+      "broken": false,
+      "derivation": "/nix/store/fzpbpcqhxvrdixl0i666914c90vh4cw9-skillspector-env.drv",
+      "description": "Security scanner for AI agent skills",
+      "install_id": "skillspector",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/floxenvs?rev=763fec74a767c4ccb7693bb31fe5ffe5ff7ba225",
+      "name": "skillspector-env",
+      "pname": "skillspector",
+      "rev": "763fec74a767c4ccb7693bb31fe5ffe5ff7ba225",
+      "rev_count": 8694,
+      "rev_date": "2026-06-17T03:00:24Z",
+      "scrape_date": "2026-08-13T11:03:35.156884Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2.2.3",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/xlppay5jm8bc625qn5833l2x1qp8f3sl-skillspector-env"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 6
     }
   ]
 }
