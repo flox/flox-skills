@@ -121,7 +121,10 @@ ask — there's nothing to invoke by hand. For example:
 - [`flox-plugin/skills/`](flox-plugin/skills/README.md) — the skill library: what
   each skill covers and how its reference material is organized.
 - [`evals/`](evals/README.md) — how the skills are measured and the results behind
-  the claims above, including the [floxify conversion evals](evals/floxify/README.md).
+  the claims above, including the [floxify conversion evals](evals/floxify/README.md)
+  and the [agent compatibility matrix](evals/agent-compatibility/README.md), which
+  checks that the skills install and reach the model across Claude Code, Codex and
+  OpenCode.
 
 ## Contributing
 

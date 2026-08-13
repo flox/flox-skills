@@ -1,17 +1,20 @@
 # Flox skills evals
 
-Two eval suites live here, split by what they measure rather than by skill —
-`flox/` covers the two prose skills, `floxify/` the one that writes a file. Each
+Three eval suites live here, split by what they measure rather than by skill —
+`flox/` covers the two prose skills, `floxify/` the one that writes a file, and
+`agent-compatibility/` the packaging that has to deliver any of them. Each
 suite owns its runners, its `tests/` package, and its own data.
 
 | Suite | What it measures | Where |
 |---|---|---|
 | [`flox/`](flox/) | The **written guidance** and **implicit triggering** of the `flox` and `flox-debug` skills — does a headless `claude` answer correctly, and does the skill fire on a prompt that never says "flox"? Also guards the TOML snippets the `flox` skill ships. | `flox/run.py`, `flox/screen.py`, `flox/skill_toml_lint.py` |
 | [`floxify/`](floxify/README.md) | The `/floxify` skill's **conversion outcomes** — point it at a repo, then score the `.flox/env/manifest.toml` it actually produces. | `floxify/run_floxify.py`, `floxify/real_world.py` |
+| [`agent-compatibility/`](agent-compatibility/README.md) | Whether the skill **installs and reaches the model** across three agent applications × three installation methods. **Manual-only**: it needs live developer credentials, so CI runs its unit tests and never the matrix. | `agent-compatibility/run_matrix.py`, `agent-compatibility/lib/` |
 
 Pick `flox/` when you changed guidance a user reads. Pick `floxify/` when you
-changed what the conversion produces. Most changes to `flox-plugin/skills/`
-touch one or the other, not both.
+changed what the conversion produces. Pick `agent-compatibility/` when you
+changed how the skills are packaged or installed. Most changes to
+`flox-plugin/skills/` touch one of the three, not several.
 
 `flox-debug` is evaluated in `flox/` rather than in a suite of its own: it is
 prose graded the same two ways, and its cases are the five `resolution`
@@ -19,7 +22,9 @@ candidates in `tasks/screening.jsonl`. They are screening-only — none is
 promoted into the gated `tasks/tasks.jsonl`, so per-PR eval cost is unchanged.
 
 The rest of this file is the common operating guide plus the runbook for the
-`flox` suite. `floxify/` has [its own README](floxify/README.md).
+`flox` suite. `floxify/` and `agent-compatibility/` have their own READMEs
+([floxify](floxify/README.md),
+[agent-compatibility](agent-compatibility/README.md)).
 
 ## Run this first: `flox activate`
 
@@ -63,14 +68,16 @@ name tells you what kind of thing is inside it.
 
 | Directory | Role | Committed? |
 |---|---|---|
-| `tasks/` | Registries of cases a runner executes (JSONL, one case per line) | yes |
+| `tasks/` | Registries of cases a runner executes (JSONL, one case per line). `agent-compatibility/` has none: its cases are executable shell carrying observed-behaviour rationale, so they live in `lib/cells.py` rather than in inert data | yes |
 | `tests/` | Deterministic unit tests for the harness itself | yes |
 | `fixtures/` | Input repositories the skill is pointed at | yes |
 | `expected/` | Reference manifests a produced manifest is graded against — expected *properties*, not byte-exact output | yes |
 | `samples/` | Captured inputs (agent stream transcripts, a real run's manifest) that tests parse | yes |
 | `baselines/` | Committed comparison measurements. Nothing here writes them by default; what reads them varies (see below) | yes |
 | `reports/` | Selected human-readable analyses worth keeping | yes |
-| `results/` | Generated run output. A runner's `--out` / `--json` lands here | **no — gitignored** |
+| `results/` | Generated run output. A runner's `--out` / `--json` lands here (`agent-compatibility/` names it `--version`, because the same identifier tags the container image) | **no — gitignored** |
+| `environments/` | Flox environments a suite builds its containers from (`agent-compatibility/` only) | yes |
+| `prompts/` | Prompt text a runner sends verbatim (`agent-compatibility/` only) | yes |
 
 The `baselines/` ↔ `results/` split is load-bearing: by default `--out` writes
 under `results/` and `--baseline` reads under `baselines/`, so an ordinary local
