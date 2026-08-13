@@ -1,0 +1,7 @@
+# Generated run output (AI-509 Ticket 3 conventions): one
+# `results/<version>.jsonl` per run, where `--version` defaults to the UTC
+# date, holding a raw agent transcript tail per cell. Not committed — a run
+# needs live developer credentials, so nobody else can reproduce or refresh the
+# file, and the transcripts are the noisiest thing this suite produces. The
+# analyses worth keeping are hand-written into reports/ instead.
+results/
