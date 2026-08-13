@@ -1,0 +1,2 @@
+I have a Python project that pins Python 3.12 in .python-version and needs
+PostgreSQL for local development. Write me the Flox manifest for it.
