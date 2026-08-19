@@ -1058,6 +1058,11 @@ def _is_version_literal(v):
     `catalog-version-missing` it deserves rather than disappearing into
     the unknown bucket.
 
+    An ABSENT version, and an empty one, are not this function's
+    business: `flox` treats `version = ""` as unconstrained, so the
+    caller routes any falsy value to the ordinary no-version walk
+    rather than asking here.
+
     A non-string `version` is not a literal. TOML allows an unquoted
     `version = 18.4`, which parses as a float — and `18.10` parses as
     `18.1`, so comparing the coerced text against catalog versions would
@@ -1602,7 +1607,7 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
             )),
         )
 
-        if version is not None and not _is_version_literal(version):
+        if version and not _is_version_literal(version):
             # A range, a wildcard, or a spelling this module does not
             # recognize. Not resolvable here and not resolvable by
             # walking every row either — that would ignore the constraint

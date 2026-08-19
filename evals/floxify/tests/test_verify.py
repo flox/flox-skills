@@ -2204,6 +2204,27 @@ systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
 
     @patch("shutil.which", return_value="/usr/bin/flox")
     @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_an_empty_version_is_checked_as_an_unpinned_entry(
+        self, mock_run, mock_which,
+    ):
+        # `flox` accepts `version = ""` and treats the entry as
+        # unconstrained, so this module has to as well -- routing it to
+        # `unknown` because the empty string is not a literal would stop
+        # verifying an entry flox itself considers unpinned.
+        manifest = '''
+[install]
+postgresql.pkg-path = "postgresql"
+postgresql.version = ""
+
+[options]
+systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
+'''
+        result = verify({}, manifest, check_catalog_live=True)
+        self.assertEqual(result["violations"], [])
+        self.assertEqual(result["catalog_unknown"], [])
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
     def test_a_prefixed_catalog_version_string_is_still_checked(
         self, mock_run, mock_which,
     ):
