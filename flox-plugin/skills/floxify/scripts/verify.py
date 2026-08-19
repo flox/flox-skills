@@ -1132,6 +1132,129 @@ def _parse_flox_show(text):
     return {"latest": latest, "latest_systems": latest_systems, "versions": versions}
 
 
+def _catalog_pages(show):
+    """`flox show`'s versions as an ordered, NEWEST-FIRST list of
+    `(version, systems-set-or-None)` — one entry per catalog page the
+    package is served from.
+
+    `_parse_flox_show` already returns both halves; this joins them into
+    the one shape the unpinned resolver below walks. Two joins matter:
+
+      - the `Latest:` version also appears as the first "Other versions"
+        entry, and its systems are taken from the header `Systems:` line
+        when that parsed (the ground truth for Latest per
+        `_parse_flox_show`'s docstring), falling back to the "Other
+        versions" parenthetical otherwise;
+      - a `Latest:` with no "Other versions" section at all (a package
+        served from a single page) still yields one entry, so the caller
+        never has to special-case an empty list to reproduce the old
+        Latest-only behavior.
+
+    `versions` is a dict built in `flox show`'s own emission order, which
+    is newest-first — the same ordering assumption `_pinned_version_match`
+    already documents and depends on.
+    """
+    latest = show.get("latest")
+    latest_systems = show.get("latest_systems")
+    versions = show.get("versions") or {}
+
+    pages = []
+    for version, systems in versions.items():
+        if version == latest and latest_systems is not None:
+            systems = latest_systems
+        pages.append((version, systems))
+    if latest and latest not in versions:
+        pages.insert(0, (latest, latest_systems))
+    return pages
+
+
+def _resolve_unpinned(show, wanted):
+    """Which catalog page an UNPINNED [install] entry actually resolves to,
+    given the systems the manifest declares.
+
+    This is NOT "Latest". `flox` does not pin an unpinned package to the
+    newest version it can see — it co-resolves the environment onto the
+    newest catalog page that carries a build for every declared system.
+    Verified live with flox 1.13.2: `flox init` with no `options.systems`
+    plus `flox install postgresql_18` locks `postgresql_18@18.4` on all
+    four systems (a working environment) while `flox show postgresql_18`
+    reports Latest 18.6, which has no `x86_64-darwin` build. Checking the
+    bare `Systems:` header line against the manifest's declared systems
+    therefore reported a mismatch on three goldens (lemmy/postgresql_18,
+    sentry/watchman, supabase/postgresql_17) whose environments really do
+    resolve and really do build everywhere they claim.
+
+    Returns a dict with:
+      - `status`: one of
+          "resolved"  — some page builds every declared system; `version`
+                        is the newest such page. Not a violation.
+          "uncovered" — every page's systems were readable and NONE covers
+                        all declared systems. That is a real
+                        catalog-systems-mismatch: the check doing its job.
+          "unknown"   — no readable page covers them all, but at least one
+                        page's systems `flox show`'s own text did not
+                        establish (see `_parse_flox_show`). Never asserted
+                        clean OR mismatched.
+      - `version`: the resolved page for "resolved", else the newest page
+        (what a reader would see as Latest).
+      - `systems`: that page's build set (None for "unknown").
+      - `never_built`: for "uncovered" only, the declared systems NO page
+        builds at all — empty when each is built somewhere but never all
+        on one page, which is a different (co-resolution) failure and gets
+        a different message.
+
+    An unreadable page only matters when nothing readable covers the
+    declared set: the question this answers is "does SOME page cover
+    them all", so a covering page found above an unreadable one settles
+    it regardless of what the unreadable one holds.
+
+    Scope: one package's own pages. Whether the whole pkg-group can
+    co-resolve onto ONE page is the golden lint's separate
+    lock-resolution leg (`test_<fixture>_locks_cleanly`), which runs a
+    real `flox` resolution — a per-package check cannot see it.
+    """
+    pages = _catalog_pages(show)
+    saw_unreadable = False
+    for version, systems in pages:
+        if systems is None:
+            saw_unreadable = True
+            continue
+        if wanted <= systems:
+            return {"status": "resolved", "version": version,
+                    "systems": systems, "never_built": set()}
+
+    newest_version = show.get("latest") or (pages[0][0] if pages else None)
+    if saw_unreadable or not pages:
+        return {"status": "unknown", "version": newest_version or "latest",
+                "systems": None, "never_built": set()}
+
+    built = set().union(*(systems for _, systems in pages))
+    return {"status": "uncovered", "version": newest_version,
+            "systems": pages[0][1], "never_built": wanted - built}
+
+
+def _uncovered_msg(install_id, pkg_path, wanted, resolution):
+    """The catalog-systems-mismatch message for an UNPINNED entry no
+    catalog page can serve. Two shapes, because the two failures have
+    different fixes: a system nothing is ever built for has to be dropped
+    from the declared set, while a system built somewhere but never
+    alongside the others is a co-resolution problem a version pin or a
+    pkg-group split can solve."""
+    never = resolution["never_built"]
+    if never:
+        return (f"[install] {install_id}.pkg-path = \"{pkg_path}\" has no "
+                f"catalog build for {', '.join(sorted(never))} at ANY "
+                f"version (newest is {resolution['version']}), but the "
+                f"manifest's declared systems include it")
+    missing_newest = sorted(wanted - (resolution["systems"] or set()))
+    return (f"[install] {install_id}.pkg-path = \"{pkg_path}\" has no single "
+            f"catalog page building all of {', '.join(sorted(wanted))} — the "
+            f"newest ({resolution['version']}) has no build for "
+            f"{', '.join(missing_newest)} and no older page covers every "
+            f"declared system, so an unpinned entry cannot resolve for all "
+            f"of them")
+
+
 def _flox_show(pkg_path, flox_bin="flox", timeout=30):
     if pkg_path in _SHOW_CACHE:
         return _SHOW_CACHE[pkg_path]
@@ -1153,6 +1276,21 @@ def _flox_show(pkg_path, flox_bin="flox", timeout=30):
 def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
     """Every pkg-path resolves; every declared version exists; every
     declared/default system is actually built for the resolved version.
+
+    Which version is "the resolved version" depends on whether the entry
+    is pinned. A PINNED entry resolves to the version it names (prefix
+    wildcards included — `_pinned_version_match`), and its systems are
+    that version's own. An UNPINNED entry does NOT resolve to Latest:
+    flox co-resolves onto the newest catalog page that builds every
+    declared system, so this checks the newest COVERING page instead
+    (`_resolve_unpinned`, which carries the live proof). Only when no
+    page covers the declared set is there a real mismatch.
+
+    The pinned path deliberately keeps its narrower rule — a partial pin
+    ("14") takes the newest matching version and checks that version's
+    systems, without walking older 14.x pages the way the unpinned path
+    walks the whole list. Widening it is a separate question from the
+    unpinned bug this branch fixes; nothing about the pinned path changed.
 
     Skipped (not failed) when `flox` is unavailable — same treatment the
     harness gives its own activation check, for the same reason: this needs
@@ -1223,14 +1361,20 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
             available = show["versions"][matched]
             version_label = matched
         else:
-            # Unpinned -> resolves to Latest. Ground truth for Latest's
-            # systems is the header `Systems:` line (`latest_systems`),
-            # not a guess — falling back to the "Other versions" entry
-            # only if the header itself was unparseable.
-            available = show.get("latest_systems")
-            if available is None:
-                available = show["versions"].get(show["latest"])
-            version_label = show["latest"] or "latest"
+            # Unpinned -> the real resolver does NOT pin to Latest; it
+            # co-resolves onto the newest catalog page that builds every
+            # declared system. See `_resolve_unpinned` for the live proof
+            # and for why an "uncovered" verdict is still a real finding.
+            resolution = _resolve_unpinned(show, entry_systems)
+            version_label = resolution["version"]
+            available = resolution["systems"]
+            if resolution["status"] == "uncovered":
+                violations.append(violation(
+                    "catalog-systems-mismatch",
+                    _uncovered_msg(install_id, pkg_path, entry_systems, resolution),
+                    pkg_path=pkg_path, install_id=install_id,
+                ))
+                continue
 
         if available is None:
             # flox show's own text didn't establish this version's

@@ -1556,6 +1556,60 @@ Other versions:
 """
 
 
+# Every declared system IS built somewhere, but never all on ONE page:
+# 3.0.0 has the three non-x86-darwin platforms, 2.0.0 has x86_64-darwin
+# but not the aarch64 pair. An unpinned entry declaring all four cannot
+# co-resolve onto any single page -- a genuine catalog-systems-mismatch,
+# and a different failure (and a different fix) from "nothing is ever
+# built for this system", which is why _uncovered_msg has two shapes.
+SPLIT_COVERAGE_SHOW = """split-pkg - a package no single page builds everywhere
+Catalog: nixpkgs
+Latest:  split-pkg@3.0.0
+License: MIT
+Outputs: out* (* installed by default)
+Systems: x86_64-linux, aarch64-linux, aarch64-darwin
+
+Other versions:
+    split-pkg@3.0.0 (aarch64-darwin, aarch64-linux, x86_64-linux only)
+    split-pkg@2.0.0 (x86_64-darwin, x86_64-linux only)
+"""
+
+# The newest page is readable and does NOT cover all four; the page
+# below it carries an unrecognized annotation. Nothing readable covers
+# the declared set and nothing readable rules it out either -- genuinely
+# unknown. (Note this needs the unreadable page to be an OLDER one: an
+# unrecognized annotation on the LATEST entry is still settled by the
+# header `Systems:` line, which _parse_flox_show documents as that
+# entry's ground truth.)
+UNREADABLE_OLDER_PAGE_SHOW = """murky-pkg - a package with an unreadable older page
+Catalog: nixpkgs
+Latest:  murky-pkg@3.0.0
+License: MIT
+Outputs: out* (* installed by default)
+Systems: x86_64-linux, aarch64-linux
+
+Other versions:
+    murky-pkg@3.0.0 (aarch64-linux, x86_64-linux only)
+    murky-pkg@2.0.0 (deprecated, use murky-pkg3)
+"""
+
+# The newest page covers everything; the page BELOW it carries an
+# unrecognized annotation. The unreadable page must not drag the verdict
+# to "unknown" -- the question is whether SOME page covers the declared
+# systems, and a covering page found first settles it.
+COVERING_ABOVE_UNREADABLE_SHOW = """settled-pkg - newest page covers everything
+Catalog: nixpkgs
+Latest:  settled-pkg@5.0.0
+License: MIT
+Outputs: out* (* installed by default)
+Systems: x86_64-linux, aarch64-linux, x86_64-darwin, aarch64-darwin
+
+Other versions:
+    settled-pkg@5.0.0
+    settled-pkg@4.0.0 (deprecated, use settled-pkg5)
+"""
+
+
 def _mock_show(pkg_path, flox_bin, timeout):
     if pkg_path == "postgresql":
         return _FakeProc(stdout=POSTGRESQL_SHOW)
@@ -1567,6 +1621,12 @@ def _mock_show(pkg_path, flox_bin, timeout):
         return _FakeProc(stdout=MISSING_LATEST_ENTRY_SHOW)
     if pkg_path == "weird-pkg":
         return _FakeProc(stdout=UNRECOGNIZED_ANNOTATION_SHOW)
+    if pkg_path == "murky-pkg":
+        return _FakeProc(stdout=UNREADABLE_OLDER_PAGE_SHOW)
+    if pkg_path == "split-pkg":
+        return _FakeProc(stdout=SPLIT_COVERAGE_SHOW)
+    if pkg_path == "settled-pkg":
+        return _FakeProc(stdout=COVERING_ABOVE_UNREADABLE_SHOW)
     return _FakeProc(returncode=1, stderr=f"✘ ERROR: no packages matched this pkg-path: '{pkg_path}'")
 
 
@@ -1635,12 +1695,170 @@ systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
 
     @patch("shutil.which", return_value="/usr/bin/flox")
     @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
-    def test_unpinned_version_checks_against_latest(self, mock_run, mock_which):
-        # nodejs_24 with no .version pinned -> latest (24.18.0), which is
-        # missing x86_64-darwin; default systems (no [options]) = all four.
+    def test_unpinned_fires_when_no_page_builds_a_declared_system(
+        self, mock_run, mock_which,
+    ):
+        # nodejs_24 with no .version pinned; default systems (no
+        # [options]) = all four. NONE of its three pages has an
+        # x86_64-darwin build, so there is no page the resolver could
+        # co-resolve onto -- a real violation, and the case the unpinned
+        # fix must NOT suppress.
         manifest = '[install]\nnodejs.pkg-path = "nodejs_24"\n'
         v = verify({}, manifest, check_catalog_live=True)["violations"]
         self.assertEqual(_rules(v), {"catalog-systems-mismatch"})
+        self.assertIn("x86_64-darwin", v[0]["message"])
+        self.assertIn("at ANY version", v[0]["message"])
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_unpinned_resolves_to_newest_page_covering_declared_systems(
+        self, mock_run, mock_which,
+    ):
+        # The lemmy/sentry/supabase shape (followup:190 / t-943). Latest
+        # (postgresql@18.4) has no x86_64-darwin build, but 17.10 does --
+        # and `flox` does not pin an unpinned package to Latest, it
+        # co-resolves onto the newest page covering every declared
+        # system. Verified live with flox 1.13.2 against postgresql_18:
+        # `flox init` + `flox install postgresql_18` locks 18.4 on all
+        # four systems while `flox show` reports Latest 18.6. Checking
+        # the bare `Systems:` header line reported a mismatch on three
+        # goldens whose environments really do resolve everywhere they
+        # claim.
+        manifest = '''
+[install]
+postgresql.pkg-path = "postgresql"
+
+[options]
+systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
+'''
+        result = verify({}, manifest, check_catalog_live=True)
+        self.assertEqual(result["violations"], [])
+        self.assertEqual(result["catalog_unknown"], [])
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_pinned_version_is_not_rescued_by_an_older_covering_page(
+        self, mock_run, mock_which,
+    ):
+        # The scope boundary of the unpinned fix, stated as a test. The
+        # SAME package and the SAME declared systems as the case above,
+        # differing only by an explicit `version` pin: 18.4 has no
+        # x86_64-darwin build and 17.10 does, but a pinned entry resolves
+        # to the version it names -- it does not walk down to an older
+        # page. Behavior here is unchanged by the unpinned fix, and a
+        # regression that let the pin fall through to 17.10 would report
+        # a manifest as clean that cannot build where it says it can.
+        manifest = '''
+[install]
+postgresql.pkg-path = "postgresql"
+postgresql.version = "18.4"
+
+[options]
+systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
+'''
+        v = verify({}, manifest, check_catalog_live=True)["violations"]
+        self.assertEqual(_rules(v), {"catalog-systems-mismatch"})
+        self.assertIn("x86_64-darwin", v[0]["message"])
+        self.assertIn("version 18.4", v[0]["message"])
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_pinned_with_own_systems_override_is_unchanged(
+        self, mock_run, mock_which,
+    ):
+        # A pinned entry carrying its own `systems` override (the
+        # sentry-golden pattern) is scoped to what that exact version
+        # builds, and the entry's override -- not [options].systems -- is
+        # what the pinned page is checked against. Both halves are
+        # untouched by the unpinned fix.
+        clean = '''
+[install]
+postgresql.pkg-path = "postgresql"
+postgresql.version = "18.4"
+postgresql.systems = ["x86_64-linux", "aarch64-linux", "aarch64-darwin"]
+
+[options]
+systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
+'''
+        self.assertEqual(verify({}, clean, check_catalog_live=True)["violations"], [])
+
+        # ... and the override still FIRES when it names a system that
+        # pinned version genuinely lacks.
+        dirty = clean.replace(
+            'postgresql.systems = ["x86_64-linux", "aarch64-linux", "aarch64-darwin"]',
+            'postgresql.systems = ["x86_64-linux", "x86_64-darwin"]',
+        )
+        v = verify({}, dirty, check_catalog_live=True)["violations"]
+        self.assertEqual(_rules(v), {"catalog-systems-mismatch"})
+        self.assertIn("x86_64-darwin", v[0]["message"])
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_unpinned_fires_when_coverage_is_split_across_pages(
+        self, mock_run, mock_which,
+    ):
+        # Every declared system is built SOMEWHERE, but no single page
+        # builds them all -- still a real mismatch (an unpinned entry
+        # co-resolves onto one page), and it gets its own message,
+        # because the fix is a pin or a pkg-group split rather than
+        # dropping a platform nothing ever builds.
+        manifest = '''
+[install]
+split.pkg-path = "split-pkg"
+
+[options]
+systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
+'''
+        v = verify({}, manifest, check_catalog_live=True)["violations"]
+        self.assertEqual(_rules(v), {"catalog-systems-mismatch"})
+        self.assertIn("no single catalog page", v[0]["message"])
+        self.assertIn("x86_64-darwin", v[0]["message"])
+        self.assertNotIn("at ANY version", v[0]["message"])
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_unpinned_is_unknown_when_no_readable_page_covers(
+        self, mock_run, mock_which,
+    ):
+        # murky-pkg's newest page is readable and does not cover all
+        # four; its only other page carries an unrecognized annotation.
+        # So nothing readable covers the declared systems and nothing
+        # readable rules them out either. Excluded from both "confirmed
+        # clean" and "violation" -- the same discipline the pinned path
+        # already applies (docs/absence-contract.md's rule, in this file).
+        manifest = '''
+[install]
+murky.pkg-path = "murky-pkg"
+
+[options]
+systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
+'''
+        result = verify({}, manifest, check_catalog_live=True)
+        self.assertEqual(result["violations"], [])
+        self.assertEqual(len(result["catalog_unknown"]), 1)
+        self.assertEqual(result["catalog_unknown"][0]["install_id"], "murky")
+        self.assertEqual(result["catalog_unknown"][0]["version"], "3.0.0")
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_unpinned_covering_page_above_an_unreadable_one_is_clean(
+        self, mock_run, mock_which,
+    ):
+        # An unreadable page only matters when nothing readable covers
+        # the declared set. settled-pkg's newest page builds all four, so
+        # the unrecognized annotation on the page below it changes
+        # nothing -- reporting "unknown" here would be the check refusing
+        # to answer a question it has already answered.
+        manifest = '''
+[install]
+settled.pkg-path = "settled-pkg"
+
+[options]
+systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
+'''
+        result = verify({}, manifest, check_catalog_live=True)
+        self.assertEqual(result["violations"], [])
+        self.assertEqual(result["catalog_unknown"], [])
 
     @patch("shutil.which", return_value="/usr/bin/flox")
     @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
@@ -1665,7 +1883,21 @@ nodejs.systems = ["x86_64-linux", "aarch64-linux"]
         # so an unpinned install used to fall through to
         # `.get(show["latest"], set(ALL_SYSTEMS))` and silently claim all
         # four systems. The header `Systems:` line (x86_64-linux,
-        # aarch64-linux only) is now the ground truth instead.
+        # aarch64-linux only) is the ground truth for Latest instead.
+        #
+        # Asserted through `_resolve_unpinned` rather than the violation
+        # list, because since the unpinned fix that ground truth changes
+        # WHICH PAGE is chosen rather than whether one fires: honoring
+        # the header rules 9.9.9 out and resolves down to 8.0.0, while
+        # the old ALL_SYSTEMS default would have stopped at 9.9.9. Both
+        # verdicts are clean, so only the chosen page distinguishes them.
+        show = verify_mod._parse_flox_show(MISSING_LATEST_ENTRY_SHOW)
+        self.assertEqual(show["latest_systems"], {"x86_64-linux", "aarch64-linux"})
+
+        resolution = verify_mod._resolve_unpinned(show, set(verify_mod.ALL_SYSTEMS))
+        self.assertEqual(resolution["status"], "resolved")
+        self.assertEqual(resolution["version"], "8.0.0")
+
         manifest = '''
 [install]
 flaky.pkg-path = "flaky-pkg"
@@ -1674,10 +1906,7 @@ flaky.pkg-path = "flaky-pkg"
 systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
 '''
         result = verify({}, manifest, check_catalog_live=True)
-        v = result["violations"]
-        self.assertEqual(_rules(v), {"catalog-systems-mismatch"})
-        self.assertIn("x86_64-darwin", v[0]["message"])
-        self.assertIn("aarch64-darwin", v[0]["message"])
+        self.assertEqual(result["violations"], [])
         self.assertEqual(result["catalog_unknown"], [])
 
     @patch("shutil.which", return_value="/usr/bin/flox")

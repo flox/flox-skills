@@ -105,48 +105,23 @@ LIVE_CATALOG = os.environ.get("FLOXIFY_GOLDEN_LINT_LIVE_CATALOG", "1") != "0"
 # AI-457, which fixed every golden's content instead of leaving it
 # allowlisted. New entries here should be rare and always tagged with the
 # ticket that will resolve them.
-KNOWN_VIOLATIONS = {
-    # Live-catalog drift, not a regression in any change that trips it: the
-    # newest `gcc` the catalog now serves is 15.3.0, which has no
-    # x86_64-darwin build, while lemmy.toml's `options.systems` declares all
-    # four systems. Nothing in lemmy.toml changed — the catalog moved under
-    # it, so the golden started failing on an unrelated PR. This is the
-    # allowlist's stated purpose; the content fix (pin `gcc.version` to a
-    # release that builds on all four systems, or scope `gcc.systems` to
-    # Linux) belongs to AI-457, which owns golden content.
-    #
-    # Deliberately narrow: the key matches ONLY lemmy's `gcc` under the
-    # `catalog-systems-mismatch` rule, so any other golden, any other
-    # package, or any other rule on this same package still fails loudly.
-    ("lemmy", "catalog-systems-mismatch", "gcc"): "AI-457",
-    # Same class as the lemmy entry above -- live-catalog drift, not a
-    # regression in any change that trips it -- but with one difference
-    # worth stating, because it changes who owns the fix. `nodejs_22`'s
-    # Latest is now 22.23.2, which has no x86_64-darwin build (confirmed
-    # live 2026-08-05), and supabase.toml declares NO `[options]` block at
-    # all: the x86_64-darwin in this violation comes from verify.py's
-    # ALL_SYSTEMS default, not from anything the golden wrote. So the
-    # message's "but options.systems declares it" is the DEFAULT talking.
-    #
-    # The golden is not defective and must not be narrowed to "fix" this.
-    # test_supabase_locks_cleanly passes: the real resolver co-resolves the
-    # whole toplevel group on one catalog page and picks nodejs_22@22.21.1,
-    # which does build on all four systems (verified 2026-08-05 by locking
-    # this exact manifest and reading manifest.lock). The per-package check
-    # here assumes an unpinned entry resolves to Latest; the group's actual
-    # resolution is free to land on an older page, and here it does. Adding
-    # `[options].systems` (or a `nodejs_22.systems`) would drop a platform
-    # the environment genuinely supports, and would declare systems where
-    # the house rule is to leave them at the default.
-    #
-    # Expected resolution is therefore NOT a content change: either flox's
-    # default resolve set stops including x86_64-darwin (in flight -- the
-    # catalog is visibly shedding those builds: nodejs_22, pnpm_10 and deno
-    # have all lost theirs at Latest), or verify.py stops equating
-    # "unpinned" with "Latest's Systems: line". Tagged AI-457 to match this
-    # allowlist's convention and keep the burn-down in one place.
-    ("supabase", "catalog-systems-mismatch", "nodejs_22"): "AI-457",
-}
+#
+# EMPTY AGAIN, and by the fix its last two entries themselves named
+# (followup:190 / t-943). Both were live-catalog drift on an UNPINNED
+# package -- lemmy's `gcc` (Latest 15.3.0 has no x86_64-darwin build,
+# 15.2.0 does) and supabase's `nodejs_22` (Latest 22.23.2 has none,
+# 22.23.1 does) -- and the supabase entry had already written down the
+# exit: "either flox's default resolve set stops including x86_64-darwin
+# ... or verify.py stops equating 'unpinned' with 'Latest's Systems:
+# line'." verify.py now walks the catalog pages the way the resolver
+# does (see `_resolve_unpinned` there), so neither is a violation to
+# allowlist any more. Nothing in either golden changed.
+#
+# What this means for FUTURE entries of this shape: an unpinned package
+# whose Latest sheds a platform is no longer an allowlist candidate at
+# all -- if the check still fires, no catalog page builds that platform
+# and the finding is real.
+KNOWN_VIOLATIONS = {}
 
 
 def _matches(fixture_id, v, key):
