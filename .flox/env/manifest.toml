@@ -3,23 +3,43 @@ schema-version = "1.13.0"
 [install]
 claude-code.pkg-path = "flox/claude-code"
 claude-code.pkg-group = "claude-code"
-flox-ai.pkg-path = "flox/flox-ai"
-# nixpkgs package in toplevel: flox publish pins the base catalog page
-# from the toplevel group, and flox-ai alone (custom catalog) can't
+
+# TOPLEVEL IS NIXPKGS-ONLY, DELIBERATELY. `flox publish` picks the base
+# catalog reference by taking the FIRST lockfile entry in the toplevel
+# group, with no check that its origin is nixpkgs (CLI-208). Every
+# `flox/...` package here resolves against the flox/floxenvs catalog
+# instead, so a single one of them in this group is enough to send a
+# floxenvs origin as the base catalog and have the server reject the
+# publish with a 400 — which is exactly what happened to every publish run
+# for this repo from 2026-08-13 (afcd725) until the audit toolchain moved
+# out below. It is not enough for the group to CONTAIN a nixpkgs package:
+# lockfile entries sort by install id, and `claudelint` sorts before
+# `coreutils`. Keep this group free of `flox/...` pkg-paths; anything from
+# the custom catalog goes in audit-tools (or its own group).
 coreutils.pkg-path = "coreutils"
 
 # flox-ai audit toolchain (custom FloxHub catalog), used by the CI audit
-# step and locally to score skill quality. Toplevel to mirror
-# flox-internal-skills; if this poisons `flox build`/`flox publish`
-# resolution of the base catalog page, move these five to a dedicated
-# pkg-group (same fallback flox-internal-skills documents).
+# step and locally to score skill quality. Own pkg-group for the CLI-208
+# reason above — this is the fallback flox-internal-skills documents,
+# taken. Group membership is a resolution constraint only: these six
+# already resolved together as toplevel members and still do, and nothing
+# about the merged environment's PATH or the build closure depends on
+# which group they sit in.
+flox-ai.pkg-path = "flox/flox-ai"
+flox-ai.pkg-group = "audit-tools"
 skill-tools.pkg-path = "flox/skill-tools"
+skill-tools.pkg-group = "audit-tools"
 skill-validator.pkg-path = "flox/skill-validator"
+skill-validator.pkg-group = "audit-tools"
 claudelint.pkg-path = "flox/claudelint"
+claudelint.pkg-group = "audit-tools"
 skillcheck.pkg-path = "flox/skillcheck"
+skillcheck.pkg-group = "audit-tools"
 skillspector.pkg-path = "flox/skillspector"
+skillspector.pkg-group = "audit-tools"
 # skillspector ships its own bin/python; priority 6 (> default 5) so the
 # eval suite's python311 keeps owning bin/python in the merged env.
+# Priority is a merge rule, independent of pkg-group.
 skillspector.priority = 6
 
 # The eval suite's interpreter. Activate this environment and run the
@@ -34,9 +54,11 @@ skillspector.priority = 6
 # what the tests run under, only where it comes from.
 #
 # Own pkg-group, deliberately: `flox publish` pins the skills-flox base
-# catalog page from the TOPLEVEL group, and adding a fourth constraint there
+# catalog page from the TOPLEVEL group, and adding another constraint there
 # would let the eval runtime move that page. Nothing here shares a closure
-# with python311, so an isolated group costs nothing.
+# with python311, so an isolated group costs nothing. It stays its own group
+# rather than joining audit-tools for the same reason: a Python floor and the
+# audit toolchain have no reason to be co-resolved.
 python311.pkg-path = "python311"
 python311.pkg-group = "python"
 

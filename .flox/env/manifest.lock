@@ -8,29 +8,35 @@
         "pkg-group": "claude-code"
       },
       "claudelint": {
-        "pkg-path": "flox/claudelint"
+        "pkg-path": "flox/claudelint",
+        "pkg-group": "audit-tools"
       },
       "coreutils": {
         "pkg-path": "coreutils"
       },
       "flox-ai": {
-        "pkg-path": "flox/flox-ai"
+        "pkg-path": "flox/flox-ai",
+        "pkg-group": "audit-tools"
       },
       "python311": {
         "pkg-path": "python311",
         "pkg-group": "python"
       },
       "skill-tools": {
-        "pkg-path": "flox/skill-tools"
+        "pkg-path": "flox/skill-tools",
+        "pkg-group": "audit-tools"
       },
       "skill-validator": {
-        "pkg-path": "flox/skill-validator"
+        "pkg-path": "flox/skill-validator",
+        "pkg-group": "audit-tools"
       },
       "skillcheck": {
-        "pkg-path": "flox/skillcheck"
+        "pkg-path": "flox/skillcheck",
+        "pkg-group": "audit-tools"
       },
       "skillspector": {
         "pkg-path": "flox/skillspector",
+        "pkg-group": "audit-tools",
         "priority": 6
       }
     },
@@ -295,126 +301,6 @@
       "priority": 5
     },
     {
-      "attr_path": "claudelint",
-      "broken": false,
-      "derivation": "/nix/store/knmw4i16mii3m0yqs01lbflys14cnc8l-claude-code-lint-0.5.0.drv",
-      "description": "Linter for the whole Claude Code project: skills, agents, settings, hooks, MCP",
-      "install_id": "claudelint",
-      "license": "MIT",
-      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
-      "name": "claude-code-lint-0.5.0",
-      "pname": "claude-code-lint",
-      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
-      "rev_count": 9730,
-      "rev_date": "2026-06-21T18:51:27Z",
-      "scrape_date": "2026-08-13T11:03:35.156858Z",
-      "stabilities": [
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.5.0",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/85wvni3fhrlwx20jm1mawbkhl78ycghh-claude-code-lint-0.5.0"
-      },
-      "system": "aarch64-darwin",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "claudelint",
-      "broken": false,
-      "derivation": "/nix/store/65030z2f9whqid0g36pfcgykhgnvc21n-claude-code-lint-0.5.0.drv",
-      "description": "Linter for the whole Claude Code project: skills, agents, settings, hooks, MCP",
-      "install_id": "claudelint",
-      "license": "MIT",
-      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
-      "name": "claude-code-lint-0.5.0",
-      "pname": "claude-code-lint",
-      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
-      "rev_count": 9730,
-      "rev_date": "2026-06-21T18:51:27Z",
-      "scrape_date": "2026-08-13T11:03:35.156861Z",
-      "stabilities": [
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.5.0",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/9cfjsz0sfr23j4zbmlg9rmjfpfnn3hmf-claude-code-lint-0.5.0"
-      },
-      "system": "aarch64-linux",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "claudelint",
-      "broken": false,
-      "derivation": "/nix/store/79rsj376nxgccz3n4n4cm53lx79f0dvc-claude-code-lint-0.5.0.drv",
-      "description": "Linter for the whole Claude Code project: skills, agents, settings, hooks, MCP",
-      "install_id": "claudelint",
-      "license": "MIT",
-      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
-      "name": "claude-code-lint-0.5.0",
-      "pname": "claude-code-lint",
-      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
-      "rev_count": 9730,
-      "rev_date": "2026-06-21T18:51:27Z",
-      "scrape_date": "2026-08-13T11:03:35.156861Z",
-      "stabilities": [
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.5.0",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/sivx54p2d7bh0fvsq802fakxm28cnmwj-claude-code-lint-0.5.0"
-      },
-      "system": "x86_64-darwin",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "claudelint",
-      "broken": false,
-      "derivation": "/nix/store/5kibbav7j1pmzxmx3dbxjvph5qlpa85f-claude-code-lint-0.5.0.drv",
-      "description": "Linter for the whole Claude Code project: skills, agents, settings, hooks, MCP",
-      "install_id": "claudelint",
-      "license": "MIT",
-      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
-      "name": "claude-code-lint-0.5.0",
-      "pname": "claude-code-lint",
-      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
-      "rev_count": 9730,
-      "rev_date": "2026-06-21T18:51:27Z",
-      "scrape_date": "2026-08-13T11:03:35.156862Z",
-      "stabilities": [
-        "staging",
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "0.5.0",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "out": "/nix/store/qwmmgl955g7x5idydyxgkimw4dvxil9b-claude-code-lint-0.5.0"
-      },
-      "system": "x86_64-linux",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
       "attr_path": "coreutils",
       "broken": false,
       "derivation": "/nix/store/4l5v7bf1dfqh88kh919i9awqj15k06dv-coreutils-9.10.drv",
@@ -559,6 +445,126 @@
       "priority": 5
     },
     {
+      "attr_path": "claudelint",
+      "broken": false,
+      "derivation": "/nix/store/knmw4i16mii3m0yqs01lbflys14cnc8l-claude-code-lint-0.5.0.drv",
+      "description": "Linter for the whole Claude Code project: skills, agents, settings, hooks, MCP",
+      "install_id": "claudelint",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "claude-code-lint-0.5.0",
+      "pname": "claude-code-lint",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-19T19:33:07.746960468Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.5.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/85wvni3fhrlwx20jm1mawbkhl78ycghh-claude-code-lint-0.5.0"
+      },
+      "system": "aarch64-darwin",
+      "group": "audit-tools",
+      "priority": 5
+    },
+    {
+      "attr_path": "claudelint",
+      "broken": false,
+      "derivation": "/nix/store/65030z2f9whqid0g36pfcgykhgnvc21n-claude-code-lint-0.5.0.drv",
+      "description": "Linter for the whole Claude Code project: skills, agents, settings, hooks, MCP",
+      "install_id": "claudelint",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "claude-code-lint-0.5.0",
+      "pname": "claude-code-lint",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-19T19:33:07.746971518Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.5.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/9cfjsz0sfr23j4zbmlg9rmjfpfnn3hmf-claude-code-lint-0.5.0"
+      },
+      "system": "aarch64-linux",
+      "group": "audit-tools",
+      "priority": 5
+    },
+    {
+      "attr_path": "claudelint",
+      "broken": false,
+      "derivation": "/nix/store/79rsj376nxgccz3n4n4cm53lx79f0dvc-claude-code-lint-0.5.0.drv",
+      "description": "Linter for the whole Claude Code project: skills, agents, settings, hooks, MCP",
+      "install_id": "claudelint",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "claude-code-lint-0.5.0",
+      "pname": "claude-code-lint",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-19T19:33:07.746972405Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.5.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/sivx54p2d7bh0fvsq802fakxm28cnmwj-claude-code-lint-0.5.0"
+      },
+      "system": "x86_64-darwin",
+      "group": "audit-tools",
+      "priority": 5
+    },
+    {
+      "attr_path": "claudelint",
+      "broken": false,
+      "derivation": "/nix/store/5kibbav7j1pmzxmx3dbxjvph5qlpa85f-claude-code-lint-0.5.0.drv",
+      "description": "Linter for the whole Claude Code project: skills, agents, settings, hooks, MCP",
+      "install_id": "claudelint",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/floxenvs?rev=e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "name": "claude-code-lint-0.5.0",
+      "pname": "claude-code-lint",
+      "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
+      "rev_count": 9730,
+      "rev_date": "2026-06-21T18:51:27Z",
+      "scrape_date": "2026-08-19T19:33:07.746973335Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.5.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/qwmmgl955g7x5idydyxgkimw4dvxil9b-claude-code-lint-0.5.0"
+      },
+      "system": "x86_64-linux",
+      "group": "audit-tools",
+      "priority": 5
+    },
+    {
       "attr_path": "flox-ai",
       "broken": false,
       "derivation": "/nix/store/2xb2axh9hb30qyaikqz9agi2ldw6mikj-flox-ai-0.7.0.drv",
@@ -571,7 +577,7 @@
       "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
       "rev_count": 9730,
       "rev_date": "2026-06-21T18:51:27Z",
-      "scrape_date": "2026-08-13T11:03:35.156867Z",
+      "scrape_date": "2026-08-19T19:33:07.746974456Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -585,7 +591,7 @@
         "out": "/nix/store/jdaxnz2pm4p5c6vnichv3hrm37m6pyvz-flox-ai-0.7.0"
       },
       "system": "aarch64-darwin",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -601,7 +607,7 @@
       "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
       "rev_count": 9730,
       "rev_date": "2026-06-21T18:51:27Z",
-      "scrape_date": "2026-08-13T11:03:35.156871Z",
+      "scrape_date": "2026-08-19T19:33:07.746975821Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -615,7 +621,7 @@
         "out": "/nix/store/5d4s5iy34xiz3a8nb1l5svmrracaxvj5-flox-ai-0.7.0"
       },
       "system": "aarch64-linux",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -631,7 +637,7 @@
       "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
       "rev_count": 9730,
       "rev_date": "2026-06-21T18:51:27Z",
-      "scrape_date": "2026-08-13T11:03:35.156871Z",
+      "scrape_date": "2026-08-19T19:33:07.746976610Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -645,7 +651,7 @@
         "out": "/nix/store/jdfli8fzxsa159bqmx5q7z1qk2x8fh2s-flox-ai-0.7.0"
       },
       "system": "x86_64-darwin",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -661,7 +667,7 @@
       "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
       "rev_count": 9730,
       "rev_date": "2026-06-21T18:51:27Z",
-      "scrape_date": "2026-08-13T11:03:35.156872Z",
+      "scrape_date": "2026-08-19T19:33:07.746977386Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -675,7 +681,7 @@
         "out": "/nix/store/d0c8nv8j1lif2v8lnf9f897n4s1y7jxy-flox-ai-0.7.0"
       },
       "system": "x86_64-linux",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -691,7 +697,7 @@
       "rev": "5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
       "rev_count": 7401,
       "rev_date": "2026-06-11T21:58:43Z",
-      "scrape_date": "2026-08-13T11:03:35.156873Z",
+      "scrape_date": "2026-08-19T19:33:07.746978177Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -705,7 +711,7 @@
         "out": "/nix/store/ka28x03fb9ajgh52pajjinivgizgppyd-skill-tools-0.4.1"
       },
       "system": "aarch64-darwin",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -721,7 +727,7 @@
       "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
       "rev_count": 9730,
       "rev_date": "2026-06-21T18:51:27Z",
-      "scrape_date": "2026-08-13T11:03:35.156873Z",
+      "scrape_date": "2026-08-19T19:33:07.746979846Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -735,7 +741,7 @@
         "out": "/nix/store/g222a402nym43ahx1impg47pwy3h5d0p-skill-tools-0.4.1"
       },
       "system": "aarch64-linux",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -751,7 +757,7 @@
       "rev": "5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
       "rev_count": 7401,
       "rev_date": "2026-06-11T21:58:43Z",
-      "scrape_date": "2026-08-13T11:03:35.156874Z",
+      "scrape_date": "2026-08-19T19:33:07.746980530Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -765,7 +771,7 @@
         "out": "/nix/store/hpminp2dvwyhv6prkaf5ksdpsa3g82wc-skill-tools-0.4.1"
       },
       "system": "x86_64-darwin",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -781,7 +787,7 @@
       "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
       "rev_count": 9730,
       "rev_date": "2026-06-21T18:51:27Z",
-      "scrape_date": "2026-08-13T11:03:35.156874Z",
+      "scrape_date": "2026-08-19T19:33:07.746981228Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -795,7 +801,7 @@
         "out": "/nix/store/nm979xgmjqi08ygp0csby7l7fdjxak9l-skill-tools-0.4.1"
       },
       "system": "x86_64-linux",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -811,7 +817,7 @@
       "rev": "5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
       "rev_count": 7401,
       "rev_date": "2026-06-11T21:58:43Z",
-      "scrape_date": "2026-08-13T11:03:35.156875Z",
+      "scrape_date": "2026-08-19T19:33:07.746981923Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -825,7 +831,7 @@
         "out": "/nix/store/fasj5fdzcr3dk6g6jhy7qb3yha621na0-skill-validator-1.5.6"
       },
       "system": "aarch64-darwin",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -841,7 +847,7 @@
       "rev": "5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
       "rev_count": 7401,
       "rev_date": "2026-06-11T21:58:43Z",
-      "scrape_date": "2026-08-13T11:03:35.156876Z",
+      "scrape_date": "2026-08-19T19:33:07.746982688Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -855,7 +861,7 @@
         "out": "/nix/store/6m107qq6pr88sanvsl1sl74k1la9lb50-skill-validator-1.5.6"
       },
       "system": "aarch64-linux",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -871,7 +877,7 @@
       "rev": "5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
       "rev_count": 7401,
       "rev_date": "2026-06-11T21:58:43Z",
-      "scrape_date": "2026-08-13T11:03:35.156877Z",
+      "scrape_date": "2026-08-19T19:33:07.746983355Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -885,7 +891,7 @@
         "out": "/nix/store/dbq31i9n370ymxbx05vy9jciy8ccx2jr-skill-validator-1.5.6"
       },
       "system": "x86_64-darwin",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -901,7 +907,7 @@
       "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
       "rev_count": 9730,
       "rev_date": "2026-06-21T18:51:27Z",
-      "scrape_date": "2026-08-13T11:03:35.156877Z",
+      "scrape_date": "2026-08-19T19:33:07.746984045Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -915,7 +921,7 @@
         "out": "/nix/store/fpnj0mxigg4pc2x510jgam09ybvjh4rb-skill-validator-1.5.6"
       },
       "system": "x86_64-linux",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -931,7 +937,7 @@
       "rev": "5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
       "rev_count": 7401,
       "rev_date": "2026-06-11T21:58:43Z",
-      "scrape_date": "2026-08-13T11:03:35.156880Z",
+      "scrape_date": "2026-08-19T19:33:07.746984790Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -945,7 +951,7 @@
         "out": "/nix/store/lixsiypkbkcmds7fnhwabldn3xhybpbw-skillcheck-1.0.0"
       },
       "system": "aarch64-darwin",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -961,7 +967,7 @@
       "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
       "rev_count": 9730,
       "rev_date": "2026-06-21T18:51:27Z",
-      "scrape_date": "2026-08-13T11:03:35.156881Z",
+      "scrape_date": "2026-08-19T19:33:07.746986810Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -975,7 +981,7 @@
         "out": "/nix/store/ganmrf2nav81kvapnyljjyz1hxpcgypc-skillcheck-1.0.0"
       },
       "system": "aarch64-linux",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -991,7 +997,7 @@
       "rev": "5d1e66d4c6097becf7151ee94e49b696fa11c8b1",
       "rev_count": 7401,
       "rev_date": "2026-06-11T21:58:43Z",
-      "scrape_date": "2026-08-13T11:03:35.156881Z",
+      "scrape_date": "2026-08-19T19:33:07.746987715Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -1005,7 +1011,7 @@
         "out": "/nix/store/g8agqnkbaag0bzdvdm9jhsbvq236wy3l-skillcheck-1.0.0"
       },
       "system": "x86_64-darwin",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -1021,7 +1027,7 @@
       "rev": "e5cedb962ebf276bbac5c58291c29b7a3f50fc12",
       "rev_count": 9730,
       "rev_date": "2026-06-21T18:51:27Z",
-      "scrape_date": "2026-08-13T11:03:35.156882Z",
+      "scrape_date": "2026-08-19T19:33:07.746988352Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -1035,7 +1041,7 @@
         "out": "/nix/store/vwbf7831m7a075zayjhsf824sz7d6fyw-skillcheck-1.0.0"
       },
       "system": "x86_64-linux",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 5
     },
     {
@@ -1051,7 +1057,7 @@
       "rev": "763fec74a767c4ccb7693bb31fe5ffe5ff7ba225",
       "rev_count": 8694,
       "rev_date": "2026-06-17T03:00:24Z",
-      "scrape_date": "2026-08-13T11:03:35.156882Z",
+      "scrape_date": "2026-08-19T19:33:07.746989091Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -1065,7 +1071,7 @@
         "out": "/nix/store/k3xb4s65h10vmpkbd9bbgwrxgyjrwxg9-skillspector-env"
       },
       "system": "aarch64-darwin",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 6
     },
     {
@@ -1081,7 +1087,7 @@
       "rev": "763fec74a767c4ccb7693bb31fe5ffe5ff7ba225",
       "rev_count": 8694,
       "rev_date": "2026-06-17T03:00:24Z",
-      "scrape_date": "2026-08-13T11:03:35.156883Z",
+      "scrape_date": "2026-08-19T19:33:07.746989831Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -1095,7 +1101,7 @@
         "out": "/nix/store/3q322zxlg0px8k9hpbcc4mk02zmq4aaf-skillspector-env"
       },
       "system": "aarch64-linux",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 6
     },
     {
@@ -1111,7 +1117,7 @@
       "rev": "763fec74a767c4ccb7693bb31fe5ffe5ff7ba225",
       "rev_count": 8694,
       "rev_date": "2026-06-17T03:00:24Z",
-      "scrape_date": "2026-08-13T11:03:35.156883Z",
+      "scrape_date": "2026-08-19T19:33:07.746990519Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -1125,7 +1131,7 @@
         "out": "/nix/store/3k94vzrwmpbcasxc95xjxmp8ydpwhrv1-skillspector-env"
       },
       "system": "x86_64-darwin",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 6
     },
     {
@@ -1141,7 +1147,7 @@
       "rev": "763fec74a767c4ccb7693bb31fe5ffe5ff7ba225",
       "rev_count": 8694,
       "rev_date": "2026-06-17T03:00:24Z",
-      "scrape_date": "2026-08-13T11:03:35.156884Z",
+      "scrape_date": "2026-08-19T19:33:07.746991276Z",
       "stabilities": [
         "staging",
         "unstable"
@@ -1155,7 +1161,7 @@
         "out": "/nix/store/xlppay5jm8bc625qn5833l2x1qp8f3sl-skillspector-env"
       },
       "system": "x86_64-linux",
-      "group": "toplevel",
+      "group": "audit-tools",
       "priority": 6
     }
   ]
