@@ -1007,16 +1007,67 @@ def check_hook_network(manifest):
 # network calls across a multi-task harness run.
 _SHOW_CACHE = {}
 
-# Matches a pinned version string ("24.13.0", "14", "python3-3.13.13").
-# Semver-range specs ("^1.2", ">=2.0") are legitimate manifest syntax but
-# resolve to whichever version satisfies the range — verifying that needs
-# full semver resolution, out of scope here, so those are left unchecked
-# rather than flagged with a guessed, possibly-wrong match.
-_PINNED_VERSION_RE = re.compile(r"^[0-9][\w.+-]*$")
+# A declared `version` this module may compare against catalog version
+# strings literally: the characters catalog versions are actually built
+# from, and nothing else. Confirmed against real catalog output --
+# "18.6", "1.95.0", "python3-3.13.13", "18rc1", "18beta2".
+_VERSION_LITERAL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
+# ... minus two alphanumeric shapes that are range syntax rather than a
+# version: a `v`-prefixed semver (`v18.4`) and an `x`/`X` wildcard
+# segment (`X`, `18.x`). Both are accepted by `flox edit` and both
+# resolve to something other than themselves.
+_VERSION_V_PREFIX_RE = re.compile(r"^v[0-9]")
+_VERSION_WILDCARD_RE = re.compile(r"(^|\.)[xX](\.|$)")
 
 
-def _is_pinned_version(v):
-    return bool(v) and bool(_PINNED_VERSION_RE.match(v)) and not re.search(r"[\^~<>*]", v)
+def _is_version_literal(v):
+    """Is this declared `version` one this module may look up in the
+    catalog's own version list — and therefore one it may say does not
+    EXIST there?
+
+    The question is deliberately "is it a literal", not "is it a range".
+    Those are not complements, and getting the direction wrong breaks a
+    different thing at each end:
+
+      - As a *recognizer* used to detect ranges, a narrow pattern drops
+        real pins. `python3-3.13.13` — the exact pin
+        `evals/floxify/expected/posthog.toml` documents as deliberate,
+        because the catalog's own version string for `python313` carries
+        a `python3-` prefix — has no leading digit, so a leading-digit
+        recognizer calls it a range and silently stops checking it.
+      - As a *range detector*, a fixed operator class under-recognizes,
+        and then every spec it misses gets accused of not existing.
+        `=18.4`, `v18.4`, `18.4 || 18.3`, `18.2 - 18.5`, `18.x` and `X`
+        are all accepted by `flox edit` against `postgresql_18` and all
+        resolve — a `catalog-version-missing` on any of them is a false
+        claim about the catalog, made by a checker that simply did not
+        recognize the syntax.
+
+    So the rule is positive and conservative: a literal is a string
+    built only from the characters catalog versions are built from, and
+    is not one of the two alphanumeric spellings that are range syntax
+    anyway. EVERYTHING ELSE is unknown — including range syntax nobody
+    here has enumerated, which is the point. The set of things flox's
+    resolver accepts is defined server-side; this module has no business
+    asserting non-existence on the strength of a syntax table it cannot
+    validate.
+
+    What survives as a real finding: `latest` is a literal by this rule
+    and `flox edit` genuinely rejects it ("No version compatible with
+    'latest'"), so a typo still gets the loud
+    `catalog-version-missing` it deserves rather than disappearing into
+    the unknown bucket.
+
+    A non-string `version` is not a literal. TOML allows an unquoted
+    `version = 18.4`, which parses as a float — and `18.10` parses as
+    `18.1`, so comparing the coerced text against catalog versions would
+    check a version the manifest does not name. `flox edit` rejects such
+    a manifest outright; this module records it as unchecked rather than
+    half-checking it.
+    """
+    if not isinstance(v, str) or not _VERSION_LITERAL_RE.match(v):
+        return False
+    return not (_VERSION_V_PREFIX_RE.match(v) or _VERSION_WILDCARD_RE.search(v))
 
 
 def _pinned_version_match(declared, catalog_versions):
@@ -1041,6 +1092,26 @@ def _pinned_version_match(declared, catalog_versions):
         if cv.split(".")[:len(declared_parts)] == declared_parts:
             return cv
     return None
+
+
+# Why an install entry landed in `catalog_unknown`. Three distinct
+# causes reach that one list and they are not interchangeable: two are
+# facts about `flox show`'s output and the third is a limit of this
+# checker. Every consumer that renders the list -- this module's own
+# report and the eval harness's judge note -- reads the reason off the
+# record rather than asserting one, because a single sentence covering
+# all three was already false for the range case.
+UNKNOWN_REASONS = {
+    "range": ("declares a version spec this checker cannot resolve to a "
+              "literal catalog version -- a range, a wildcard, or a "
+              "spelling it does not recognize -- so which version applies "
+              "was never established"),
+    "version_unreadable": ("`flox show` listed a version row this parser "
+                           "could not read, so the declared version cannot "
+                           "be ruled out as missing"),
+    "unestablished": ("`flox show`'s own text did not establish which "
+                      "version row applies, or what systems it builds"),
+}
 
 
 def _coerce_systems(value, default, on_malformed=None):
@@ -1348,7 +1419,18 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
             )),
         )
 
-        if version and _is_pinned_version(version):
+        if version is not None and not _is_version_literal(version):
+            # A range, a wildcard, or a spelling this module does not
+            # recognize. Not resolvable here and not resolvable by
+            # walking every version either — that would ignore the
+            # constraint and clear the entry on a version the range
+            # forbids. Say so instead of guessing in either direction.
+            unknown.append({"install_id": install_id, "pkg_path": pkg_path,
+                            "version": version,
+                            "reason": UNKNOWN_REASONS["range"]})
+            continue
+
+        if version:
             matched = _pinned_version_match(version, show["versions"].keys())
             if matched is None:
                 violations.append(violation(
@@ -1381,7 +1463,8 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
             # systems — genuinely unknown. Never asserted clean OR
             # mismatched; excluded from the harness's "confirmed" table.
             unknown.append({"install_id": install_id, "pkg_path": pkg_path,
-                            "version": version_label})
+                            "version": version_label,
+                            "reason": UNKNOWN_REASONS["unestablished"]})
             continue
 
         missing = entry_systems - available
@@ -1709,13 +1792,13 @@ def _print_report(result):
         )
     unknown = result.get("catalog_unknown") or []
     if unknown:
-        names = ", ".join(u["install_id"] for u in unknown)
         print(
-            f"\nNOTE: {len(unknown)} install entr{'y' if len(unknown) == 1 else 'ies'} "
-            f"({names}) had UNKNOWN per-system availability — `flox show`'s "
-            f"own text didn't establish it, so it was neither confirmed nor "
-            f"flagged."
+            f"\nNOTE: {len(unknown)} install entr"
+            f"{'y' if len(unknown) == 1 else 'ies'} could not be checked "
+            f"against the catalog — neither confirmed nor flagged:"
         )
+        for u in unknown:
+            print(f"  {u['install_id']}: {u.get('reason', UNKNOWN_REASONS['unestablished'])}")
 
 
 def main(argv):
