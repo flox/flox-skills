@@ -1931,6 +1931,77 @@ systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
         self.assertEqual(result["catalog_unknown"][0]["install_id"], "weird")
         self.assertEqual(result["catalog_unknown"][0]["pkg_path"], "weird-pkg")
 
+    def test_only_a_plain_literal_may_be_looked_up_in_the_catalog(self):
+        # The gate that decides which entries this module may say a
+        # version does not EXIST for. Both directions are asserted
+        # because each fails differently and each has bitten:
+        #
+        #   - too narrow a notion of "literal" drops a real pin out of
+        #     the checked set silently -- `python3-3.13.13` is the exact
+        #     pin expected/posthog.toml documents as deliberate, since
+        #     the catalog's own version string for `python313` carries a
+        #     `python3-` prefix, and it has no leading digit;
+        #   - too narrow a notion of "range" turns a spec flox accepts
+        #     into a false `catalog-version-missing`. Every entry in the
+        #     second list below was confirmed accepted and resolved by a
+        #     live `flox edit` against postgresql_18, which is why the
+        #     rule is a positive literal test with everything else
+        #     unknown, rather than an operator table.
+        for literal in ("python3-3.13.13", "24.13.0", "14", "18.4",
+                        "18rc1", "18beta2"):
+            with self.subTest(literal):
+                self.assertTrue(verify_mod._is_version_literal(literal))
+        for spec in ("^16", ">=2.0", "~17.0", "1.2.*", "<3",
+                     "=18.4", "v18.4", "18.4 || 18.3", "18.2 - 18.5",
+                     "X", "18.x"):
+            with self.subTest(spec):
+                self.assertFalse(verify_mod._is_version_literal(spec))
+        # `latest` IS a literal by this rule, and that is deliberate:
+        # live flox rejects it outright ("No version compatible with
+        # 'latest'"), so a typo of this shape should get the loud
+        # catalog-version-missing rather than disappear into `unknown`.
+        self.assertTrue(verify_mod._is_version_literal("latest"))
+        # TOML allows an unquoted `version = 18.4`, which parses as a
+        # float -- and `18.10` parses as `18.1`, so text-coercing it
+        # would check a version the manifest does not name.
+        self.assertFalse(verify_mod._is_version_literal(18.4))
+        self.assertFalse(verify_mod._is_version_literal(None))
+
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_an_unresolvable_version_spec_is_unknown_not_cleared_or_accused(
+        self, mock_run, mock_which,
+    ):
+        # A spec this module cannot reduce to a literal catalog version
+        # is the third case, and neither of the other two can answer for
+        # it. The version-row walk ignores `version` entirely, so letting
+        # one fall into it clears the entry on whichever row happens to
+        # cover the declared systems -- here 17.10, which "^16" cannot
+        # select, while 18.4 (the only row the range's own major would
+        # reach) has no x86_64-darwin build. Falling the other way is no
+        # better: every spec below the first four was confirmed accepted
+        # and resolved by a live `flox edit`, so reporting
+        # catalog-version-missing on one is a false claim about the
+        # catalog. Neither a guess biased toward clean nor a guess biased
+        # toward a finding; the answer is that it was not established.
+        for spec in ("^16", ">=2.0", "~17.0", "1.2.*", "=18.4", "v18.4",
+                     "18.4 || 18.3", "18.2 - 18.5", "18.x"):
+            with self.subTest(spec):
+                manifest = f'''
+[install]
+pg.pkg-path = "postgresql"
+pg.version = "{spec}"
+
+[options]
+systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
+'''
+                result = verify({}, manifest, check_catalog_live=True)
+                self.assertEqual(result["violations"], [])
+                self.assertEqual(len(result["catalog_unknown"]), 1)
+                self.assertEqual(result["catalog_unknown"][0]["install_id"], "pg")
+                self.assertEqual(result["catalog_unknown"][0]["version"], spec)
+
     @patch("shutil.which", return_value=None)
     def test_skips_cleanly_when_flox_unavailable(self, mock_which):
         manifest = '[install]\nghost.pkg-path = "nonexistent-pkg-zzz"\n'
