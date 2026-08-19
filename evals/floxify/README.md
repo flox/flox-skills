@@ -321,15 +321,30 @@ It last held two entries, both the same shape: the catalog dropped an
 nobody touched (`lemmy`'s `gcc`, `supabase`'s `nodejs_22`). Neither golden was
 defective — the per-package check was, because `flox` does not pin an unpinned
 package to Latest. It co-resolves onto the newest catalog page that builds
-every declared system, and in both cases the page directly below Latest builds
-all four. `verify.py` now walks the pages the same way (`_resolve_unpinned`),
-which retired both entries with no golden content changed and fixed the same
-premise showing on three more packages (`lemmy`'s `postgresql_18`, `sentry`'s
-`watchman`, `supabase`'s `postgresql_17`).
+every declared system, and in both cases the version directly below Latest
+builds all four. `verify.py` now descends the version list the same way
+(`_resolve_rows`), which retired both entries with no golden content changed
+and fixed the same premise showing on three more packages (`lemmy`'s
+`postgresql_18`, `sentry`'s `watchman`, `supabase`'s `postgresql_17`).
 
-That closes the whole class: an unpinned package whose Latest sheds a platform
-is no longer an allowlist candidate. If `catalog-systems-mismatch` still fires
-on one, no catalog page builds that platform and the finding is real.
+An unpinned or prefix-pinned package whose newest matching version sheds a
+platform is therefore no longer an allowlist candidate. If
+`catalog-systems-mismatch` still fires on one, the message says which of the
+two real failures it is — no version builds that platform at all, or every
+declared platform is built somewhere but never all on one version — and
+neither is a checker artifact.
+
+Two things a clean catalog leg still does not establish, both stated because
+this is where someone will look before adding the next allowlist entry.
+Resolution picks one catalog page for a whole **pkg-group**, so a constrained
+groupmate moves an unpinned entry: `supabase`'s `nodejs_22` really locks
+22.21.1, not the 22.23.1 a per-package walk names, because
+`pnpm_10.version = "10.24.0"` shares its group. And `flox show` reports each
+version's systems as the **union across every page serving it**, discarding
+the page revision, so an unannotated row is an upper bound rather than proof
+that one page builds everywhere. `test_<fixture>_locks_cleanly` — a real
+resolution — is what answers both, and it is why that leg exists alongside
+this one.
 
 An allowlisted reference is still fed to the LLM judge, so a defective golden
 can move an advisory score.
@@ -481,12 +496,15 @@ supplies `python3`. The free per-PR CI step pins that switch to `0`; the
 real teeth.
 
 The real-world lint carries an explicit `KNOWN_VIOLATIONS` allowlist, one entry
-per current reference defect, matched against a violation's structured
-`pkg_path` field exactly rather than as a substring of the message. A dedicated
-test asserts every allowlist entry still matches a live violation, so fixing a
-reference without removing its entry cannot leave a stale slot absorbing a
-future regression. The stretch lint has **no allowlist** — a stretch reference
-must be clean.
+per open reference defect, matched against a violation's structured `pkg_path`
+field exactly rather than as a substring of the message. It is empty right now,
+so the dedicated staleness test — which asserts every entry still matches a
+live violation, so fixing a reference without removing its entry cannot leave a
+stale slot absorbing a future regression — has nothing to check and skips. The
+lint also fails a reference whose catalog leg returned `catalog_unknown`
+entries: with the allowlist empty that is the only remaining way a package can
+quietly stop being verified while the lint stays green. The stretch lint has
+**no allowlist** — a stretch reference must be clean.
 
 A lock failure is classified before it is reported: a genuine resolver defect
 (`resolution failed:`) is a real finding on that reference, while a catalog-API
