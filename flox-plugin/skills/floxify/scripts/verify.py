@@ -1070,8 +1070,8 @@ def _is_version_literal(v):
     return not (_VERSION_V_PREFIX_RE.match(v) or _VERSION_WILDCARD_RE.search(v))
 
 
-def _pinned_version_match(declared, catalog_versions):
-    """Resolve a declared version against `flox show`'s version list.
+def _version_constraint_matches(declared, catalog_version):
+    """Does one catalog version satisfy a declared pinned version?
 
     Confirmed against a live `flox edit` (not just the doc): a declared
     version with FEWER dot-segments than a catalog version is a prefix
@@ -1083,15 +1083,16 @@ def _pinned_version_match(declared, catalog_versions):
     but the catalog's real version string is `python3-3.13.13` — that
     declaration does NOT resolve, confirmed live).
 
-    `catalog_versions` must preserve `flox show`'s newest-first order so
-    the first prefix match is the *latest* matching version, matching
-    "latest 1.2.X" semantics. Returns the matched catalog version, or None.
+    A predicate over ONE version rather than a pick-the-first search,
+    because a partial pin constrains a RANGE of rows and the caller has
+    to walk all of them: taking only the newest match is the same
+    Latest-shaped mistake this module makes on the unpinned path, and
+    `_resolve_rows` documents the real resolution that proves it. `flox
+    show`'s newest-first order still matters — it is what makes the
+    caller's walk over the matching rows a newest-first walk.
     """
     declared_parts = declared.split(".")
-    for cv in catalog_versions:
-        if cv.split(".")[:len(declared_parts)] == declared_parts:
-            return cv
-    return None
+    return catalog_version.split(".")[:len(declared_parts)] == declared_parts
 
 
 # Why an install entry landed in `catalog_unknown`. Three distinct
@@ -1114,6 +1115,16 @@ UNKNOWN_REASONS = {
 }
 
 
+def _usable_systems(value):
+    """Is this `systems` value one `_coerce_systems` will actually honor —
+    a non-empty list of strings? The single predicate behind both the
+    coercion and `_systems_source`'s attribution, so a value that gets
+    discarded there cannot be named as the source here.
+    """
+    return (isinstance(value, list) and bool(value)
+            and all(isinstance(s, str) for s in value))
+
+
 def _coerce_systems(value, default, on_malformed=None):
     """A manifest `systems` value ([options].systems or an [install]
     entry's own .systems) coerced to a set of strings (AI-485 F4). TOML
@@ -1131,7 +1142,7 @@ def _coerce_systems(value, default, on_malformed=None):
     """
     if not value:
         return set(default)
-    if isinstance(value, list) and all(isinstance(s, str) for s in value):
+    if _usable_systems(value):
         return set(value)
     if on_malformed:
         on_malformed()
@@ -1156,7 +1167,8 @@ def _parse_flox_show(text):
     """Parse `flox show <pkg-path>` output.
 
     Returns `{"latest": version-or-None, "latest_systems": set-or-None,
-    "versions": {version: systems-set-or-None}}`.
+    "versions": {version: systems-set-or-None},
+    "unparsed_rows": int}`.
 
     `latest_systems` comes from the header `Systems:` line, confirmed
     against live output to describe ONLY the `Latest:` entry (it matches
@@ -1168,6 +1180,32 @@ def _parse_flox_show(text):
     doesn't recognize, so that version's systems is None — genuinely
     unknown, never asserted as either present or absent (see
     check_catalog's handling of `available is None`).
+
+    An INDENTED row this regex cannot read at all is counted in
+    `unparsed_rows` rather than silently dropped; an UNINDENTED line
+    ends the block, because that is where `flox show` puts anything
+    that is not a version row. Both halves matter, and in opposite
+    directions: `unparsed_rows` gates whether an absence may be
+    concluded at all, so counting a footer would disable the catalog
+    check for the package, while dropping an unreadable row mid-list
+    would let a truncated reading report itself complete. The two
+    failures are
+    not the same shape — an unrecognized parenthetical leaves a version
+    whose systems are unknown, while an unreadable row leaves no version
+    at all — but they license exactly the same conclusion, which is
+    none: `_resolve_rows` treats a non-zero count as "this reading is
+    incomplete" and refuses to conclude an absence over it. Dropping the
+    row instead let a truncated reading support a hard
+    "no build at ANY version" claim, which is the one thing the rest of
+    this module is careful never to do.
+
+    What `flox show` will and will not emit here was read off its own
+    source rather than assumed: it keys results by version string and
+    prints one row per distinct version (a `seen_versions` guard), so
+    there are no duplicate rows to collide; and it applies no limit to
+    the version list, so the list is not truncated. What it DOES do is
+    union each version's systems across every catalog page serving that
+    version, discarding the page revision — see `_catalog_version_rows`.
     """
     latest = None
     m = re.search(r"^Latest:\s*\S+@(\S+)", text, re.M)
@@ -1180,6 +1218,7 @@ def _parse_flox_show(text):
         latest_systems = {s.strip() for s in m.group(1).split(",") if s.strip()}
 
     versions = {}
+    unparsed_rows = 0
     in_other = False
     for line in text.splitlines():
         stripped = line.strip()
@@ -1188,8 +1227,25 @@ def _parse_flox_show(text):
             continue
         if not in_other or not stripped:
             continue
+        if line[:1].strip():
+            # Unindented, so the version block has ENDED and this is the
+            # next section or a footer. Discriminating on indentation
+            # rather than on content is what keeps both failure
+            # directions safe: an unindented trailer must not be counted
+            # as an unreadable version (that would make `unparsed_rows`
+            # non-zero and turn the catalog check into a permanent
+            # `unknown` for the package), while an INDENTED line this
+            # parser cannot read must not end the block silently (that
+            # would drop every row below it and still report the reading
+            # complete, letting a truncated list support a hard "no build
+            # at ANY version" claim). `flox show` emits neither today;
+            # the two mistakes fail in opposite directions and only one
+            # of them is recoverable.
+            in_other = False
+            continue
         vm = re.match(r"^\S+@(\S+?)\s*(?:\((?P<paren>[^)]*)\))?$", stripped)
         if not vm:
+            unparsed_rows += 1
             continue
         ver, paren = vm.group(1), vm.group("paren")
         if paren is None:
@@ -1200,16 +1256,30 @@ def _parse_flox_show(text):
         else:
             systems = None
         versions[ver] = systems
-    return {"latest": latest, "latest_systems": latest_systems, "versions": versions}
+    return {"latest": latest, "latest_systems": latest_systems,
+            "versions": versions, "unparsed_rows": unparsed_rows}
 
 
-def _catalog_pages(show):
+def _catalog_version_rows(show):
     """`flox show`'s versions as an ordered, NEWEST-FIRST list of
-    `(version, systems-set-or-None)` — one entry per catalog page the
-    package is served from.
+    `(version, systems-set-or-None)` — one entry per VERSION ROW
+    `flox show` prints.
+
+    A row is not a catalog page, and the distinction is load-bearing for
+    what the walk below is allowed to conclude. `flox show` keys its
+    results by version string and unions each version's systems across
+    every catalog page serving it, discarding the page revision that
+    identifies them (read off its own source, not inferred). So an
+    unannotated row establishes that the UNION over pages covers all four
+    systems — not that any single page does. That makes a restrictive
+    "(… only)" annotation reliable evidence that coverage is incomplete,
+    and makes an unannotated row an upper bound rather than a guarantee.
+    Nothing reachable from `flox show`'s text can recover page identity,
+    so this module states the bound rather than pretending to the
+    stronger claim.
 
     `_parse_flox_show` already returns both halves; this joins them into
-    the one shape the unpinned resolver below walks. Two joins matter:
+    the one shape `_resolve_rows` walks. Two joins matter:
 
       - the `Latest:` version also appears as the first "Other versions"
         entry, and its systems are taken from the header `Systems:` line
@@ -1217,113 +1287,200 @@ def _catalog_pages(show):
         `_parse_flox_show`'s docstring), falling back to the "Other
         versions" parenthetical otherwise;
       - a `Latest:` with no "Other versions" section at all (a package
-        served from a single page) still yields one entry, so the caller
+        with a single version row) still yields one entry, so the caller
         never has to special-case an empty list to reproduce the old
         Latest-only behavior.
 
     `versions` is a dict built in `flox show`'s own emission order, which
-    is newest-first — the same ordering assumption `_pinned_version_match`
-    already documents and depends on.
+    is newest-first. Nothing here re-sorts it: `_resolve_rows` walks this
+    list in order and calls the first entry the newest, so `flox show`'s
+    emission order IS the precedence this module resolves by.
     """
     latest = show.get("latest")
     latest_systems = show.get("latest_systems")
     versions = show.get("versions") or {}
 
-    pages = []
+    rows = []
     for version, systems in versions.items():
         if version == latest and latest_systems is not None:
             systems = latest_systems
-        pages.append((version, systems))
+        rows.append((version, systems))
     if latest and latest not in versions:
-        pages.insert(0, (latest, latest_systems))
-    return pages
+        rows.insert(0, (latest, latest_systems))
+    return rows
 
 
-def _resolve_unpinned(show, wanted):
-    """Which catalog page an UNPINNED [install] entry actually resolves to,
-    given the systems the manifest declares.
+def _resolve_rows(rows, declared_systems, incomplete=False):
+    """Which of `rows` an entry resolves onto, given the systems the
+    manifest declares. `rows` is a NEWEST-FIRST candidate list from
+    `_catalog_version_rows`, already narrowed to whatever the entry's
+    `version` allows (the whole list when it declares none).
 
-    This is NOT "Latest". `flox` does not pin an unpinned package to the
-    newest version it can see — it co-resolves the environment onto the
-    newest catalog page that carries a build for every declared system.
-    Verified live with flox 1.13.2: `flox init` with no `options.systems`
-    plus `flox install postgresql_18` locks `postgresql_18@18.4` on all
-    four systems (a working environment) while `flox show postgresql_18`
-    reports Latest 18.6, which has no `x86_64-darwin` build. Checking the
-    bare `Systems:` header line against the manifest's declared systems
-    therefore reported a mismatch on three goldens (lemmy/postgresql_18,
-    sentry/watchman, supabase/postgresql_17) whose environments really do
-    resolve and really do build everywhere they claim.
+    `flox` does not take the newest version it can see. It co-resolves
+    the environment onto the newest catalog page carrying a build for
+    every declared system, and a version constraint NARROWS the candidate
+    pages rather than selecting one — so an unpinned entry and a
+    prefix-pinned entry descend the same way, differing only in which
+    rows are candidates. Both established by real resolution against
+    flox 1.13.2: `flox install postgresql_18` locks 18.4 while
+    `flox show` reports Latest 18.6 (no `x86_64-darwin` build), and
+    `gcc.version = "15"` locks 15.2.0 rather than the non-covering
+    15.3.0 that its constraint also matches. Checking the newest
+    candidate alone reported a mismatch on three goldens
+    (lemmy/postgresql_18, sentry/watchman, supabase/postgresql_17) whose
+    environments really do resolve and really do build everywhere they
+    claim.
+
+    `incomplete` says the reading itself was partial — a row
+    `_parse_flox_show` could not read at all. It can only ever subtract:
+    it never turns an absence into a finding, only a finding into an
+    unknown.
 
     Returns a dict with:
       - `status`: one of
-          "resolved"  — some page builds every declared system; `version`
-                        is the newest such page. Not a violation.
-          "uncovered" — every page's systems were readable and NONE covers
-                        all declared systems. That is a real
-                        catalog-systems-mismatch: the check doing its job.
-          "unknown"   — no readable page covers them all, but at least one
-                        page's systems `flox show`'s own text did not
-                        establish (see `_parse_flox_show`). Never asserted
-                        clean OR mismatched.
-      - `version`: the resolved page for "resolved", else the newest page
-        (what a reader would see as Latest).
-      - `systems`: that page's build set (None for "unknown").
-      - `never_built`: for "uncovered" only, the declared systems NO page
-        builds at all — empty when each is built somewhere but never all
-        on one page, which is a different (co-resolution) failure and gets
-        a different message.
+          "resolved"  — some candidate builds every declared system;
+                        `version` is the newest such row. Not a violation.
+          "uncovered" — every candidate's systems were readable, the
+                        reading was complete, and NONE covers all declared
+                        systems. A real catalog-systems-mismatch: the
+                        check doing its job.
+          "unknown"   — no readable candidate covers them all, and either
+                        a candidate's systems `flox show`'s text did not
+                        establish or a row could not be read at all.
+                        Never asserted clean OR mismatched.
+      - `version`: the resolved row for "resolved", the newest candidate
+        for "uncovered", and None for "unknown" — because on that branch
+        no row has been established as the one that applies, and naming
+        the newest anyway is how the record ends up labelled with a row
+        that WAS readable.
+      - `systems`: that row's build set (None for "unknown"). Always the
+        set belonging to the version in `version`, so a message cannot
+        pair one row's label with another row's gap.
+      - `never_built`: for "uncovered" only, the declared systems NO
+        candidate builds at all — empty when each is built somewhere but
+        never all on one row, which is a different (co-resolution)
+        failure and gets a different message.
+      - `elsewhere`: for "uncovered" only, `{system: version}` naming the
+        newest candidate that DOES build each system the newest one
+        lacks. A fact about rows already read, not a prediction.
 
-    An unreadable page only matters when nothing readable covers the
-    declared set: the question this answers is "does SOME page cover
-    them all", so a covering page found above an unreadable one settles
-    it regardless of what the unreadable one holds.
+    An unreadable row only matters when nothing readable covers the
+    declared set: the question this answers is "does SOME candidate cover
+    them all", so a covering row found above an unreadable one settles it
+    regardless of what the unreadable one holds.
 
-    Scope: one package's own pages. Whether the whole pkg-group can
-    co-resolve onto ONE page is the golden lint's separate
-    lock-resolution leg (`test_<fixture>_locks_cleanly`), which runs a
-    real `flox` resolution — a per-package check cannot see it.
+    Scope, and it is not a footnote: this walks ONE package's rows.
+    Resolution is per-pkg-group, one page for the whole group, so a
+    constrained groupmate moves an entry off the row named here — with
+    `gcc.version = "13.2.0"` beside it in `toplevel`, unpinned
+    `nodejs_22` locks 22.2.0 rather than the 22.23.1 this returns. What
+    this establishes is therefore an UPPER BOUND — the newest row that
+    could serve this package alone — and never what the environment will
+    lock. Whether a whole group co-resolves is answered only by a real
+    `flox` resolution: `flox activate -c "echo __ok__"` for someone
+    running the skill (SKILL.md), and the golden lint's separate
+    `test_<fixture>_locks_cleanly` leg for the eval suite.
     """
-    pages = _catalog_pages(show)
-    saw_unreadable = False
-    for version, systems in pages:
+    saw_unreadable = incomplete
+    for version, systems in rows:
         if systems is None:
             saw_unreadable = True
             continue
-        if wanted <= systems:
+        if declared_systems <= systems:
             return {"status": "resolved", "version": version,
-                    "systems": systems, "never_built": set()}
+                    "systems": systems, "never_built": set(), "elsewhere": {}}
 
-    newest_version = show.get("latest") or (pages[0][0] if pages else None)
-    if saw_unreadable or not pages:
-        return {"status": "unknown", "version": newest_version or "latest",
-                "systems": None, "never_built": set()}
+    if saw_unreadable or not rows:
+        return {"status": "unknown", "version": None,
+                "systems": None, "never_built": set(), "elsewhere": {}}
 
-    built = set().union(*(systems for _, systems in pages))
+    newest_version, newest_systems = rows[0]
+    built = set().union(*(systems for _, systems in rows))
+    elsewhere = {}
+    for version, systems in rows:
+        for system in declared_systems - newest_systems:
+            if system not in elsewhere and system in systems:
+                elsewhere[system] = version
     return {"status": "uncovered", "version": newest_version,
-            "systems": pages[0][1], "never_built": wanted - built}
+            "systems": newest_systems, "never_built": declared_systems - built,
+            "elsewhere": elsewhere}
 
 
-def _uncovered_msg(install_id, pkg_path, wanted, resolution):
-    """The catalog-systems-mismatch message for an UNPINNED entry no
-    catalog page can serve. Two shapes, because the two failures have
-    different fixes: a system nothing is ever built for has to be dropped
-    from the declared set, while a system built somewhere but never
-    alongside the others is a co-resolution problem a version pin or a
-    pkg-group split can solve."""
+def _systems_source(install_id, raw_entry_systems, raw_default_systems):
+    """Where the system set being complained about actually came from.
+
+    Three places, and the message used to name only one of them: the
+    entry's own `systems`, `[options].systems`, or neither — in which
+    case it is this module's own `ALL_SYSTEMS` default and no line of the
+    manifest declares it at all. The retired supabase allowlist entry was
+    a note about exactly this ("supabase.toml declares NO `[options]`
+    block at all ... the message's 'but options.systems declares it' is
+    the DEFAULT talking"), so saying "declares" over a default is how a
+    reader is sent looking for a line that is not there.
+
+    "Present" is not enough — the test has to be the one `_coerce_systems`
+    itself applies, because a malformed value (`systems = [1]`) is
+    DISCARDED there and the default used instead. Naming a field whose
+    value was thrown away sends the reader to a line that does not
+    contain the system being complained about, which is the same failure
+    as blaming a default on `[options]`.
+    """
+    if _usable_systems(raw_entry_systems):
+        return f"{install_id}.systems"
+    if _usable_systems(raw_default_systems):
+        return "options.systems"
+    return "the all-systems default (no systems declared anywhere)"
+
+
+def _uncovered_msg(install_id, pkg_path, declared_systems, resolution,
+                   systems_source, constraint=None):
+    """The catalog-systems-mismatch message for an entry no version row
+    can serve. Two clauses, because the two failures have different
+    fixes: a system nothing is ever built for has to be dropped from the
+    declared set, while a system built somewhere but never alongside the
+    others is a co-resolution problem a version pin or a pkg-group split
+    can solve. BOTH are emitted when both apply — they are independent
+    failures of the same declaration, and reporting only the first sends
+    the reader to fix one and meet the other on the next run. The
+    split clause names WHICH row carries each missing system, which the
+    walk has already read — a fact about rows, not a recommendation of a
+    version to pin, since by construction no single row here covers
+    everything. Strings are reproduced verbatim from check_catalog's call
+    site; test_verify.py asserts the exact text, same convention as
+    `_leaf_msg`.
+    """
     never = resolution["never_built"]
+    missing_newest = sorted(declared_systems - (resolution["systems"] or set()))
+    split = [s for s in missing_newest if s not in never]
+
+    # Every "any version" claim is scoped to the versions actually
+    # walked. For an unconstrained entry that is the whole list; for a
+    # prefix pin it is only the versions the pin matches, and saying
+    # "ANY version" there would assert something about versions the walk
+    # deliberately excluded.
+    scope = "ANY version" if constraint is None else f"ANY version matching \"{constraint}\""
+    older = "no older version" if constraint is None else "no older matching version"
+
+    clauses = []
     if never:
-        return (f"[install] {install_id}.pkg-path = \"{pkg_path}\" has no "
-                f"catalog build for {', '.join(sorted(never))} at ANY "
-                f"version (newest is {resolution['version']}), but the "
-                f"manifest's declared systems include it")
-    missing_newest = sorted(wanted - (resolution["systems"] or set()))
-    return (f"[install] {install_id}.pkg-path = \"{pkg_path}\" has no single "
-            f"catalog page building all of {', '.join(sorted(wanted))} — the "
-            f"newest ({resolution['version']}) has no build for "
-            f"{', '.join(missing_newest)} and no older page covers every "
-            f"declared system, so an unpinned entry cannot resolve for all "
-            f"of them")
+        clauses.append(
+            f"no catalog build for {', '.join(sorted(never))} at {scope} "
+            f"(newest is {resolution['version']}), but {systems_source} "
+            f"includes it")
+    if split:
+        elsewhere = resolution.get("elsewhere") or {}
+        carried = ", ".join(f"{system} on {elsewhere[system]}"
+                            for system in split if system in elsewhere)
+        tail = f" ({carried})" if carried else ""
+        clauses.append(
+            f"no single catalog version building all of "
+            f"{', '.join(sorted(declared_systems))} — the newest "
+            f"({resolution['version']}) has no build for "
+            f"{', '.join(split)}{tail} and {older} covers every declared "
+            f"system, so no single version satisfies {systems_source}")
+
+    return (f"[install] {install_id}.pkg-path = \"{pkg_path}\" has "
+            + "; and ".join(clauses))
 
 
 def _flox_show(pkg_path, flox_bin="flox", timeout=30):
@@ -1348,20 +1505,36 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
     """Every pkg-path resolves; every declared version exists; every
     declared/default system is actually built for the resolved version.
 
-    Which version is "the resolved version" depends on whether the entry
-    is pinned. A PINNED entry resolves to the version it names (prefix
-    wildcards included — `_pinned_version_match`), and its systems are
-    that version's own. An UNPINNED entry does NOT resolve to Latest:
-    flox co-resolves onto the newest catalog page that builds every
-    declared system, so this checks the newest COVERING page instead
-    (`_resolve_unpinned`, which carries the live proof). Only when no
-    page covers the declared set is there a real mismatch.
+    An entry's `version` decides which version rows are candidates, and
+    `_resolve_rows` then walks the candidates newest-first for one that
+    builds every declared system. Three cases, and they differ only in
+    the candidate set:
 
-    The pinned path deliberately keeps its narrower rule — a partial pin
-    ("14") takes the newest matching version and checks that version's
-    systems, without walking older 14.x pages the way the unpinned path
-    walks the whole list. Widening it is a separate question from the
-    unpinned bug this branch fixes; nothing about the pinned path changed.
+      - NO `version` — every row is a candidate. `flox` does not pin an
+        unpinned entry to Latest; it co-resolves onto the newest page
+        building every declared system.
+      - A PINNED `version` — the rows that version matches, which for a
+        partial pin ("14") is every `14.x` row and not just the newest
+        of them. A partial version is a range the resolver descends
+        WITHIN: `gcc.version = "15"` locks 15.2.0 rather than the
+        non-covering 15.3.0 that its constraint also matches (confirmed
+        by real resolution). An exact pin matches one row and this
+        degenerates to checking that row, as it always did.
+      - A `version` that is neither — a semver range (`^1.2`, `>=2.0`).
+        Resolving one needs full semver solving, which is out of scope
+        here. Neither branch above can answer for it: comparing it
+        against catalog version strings has no range semantics, and
+        walking every row would ignore the constraint entirely and clear
+        the entry on a version the range forbids. Recorded as `unknown`
+        — which is what this module says everywhere else when it cannot
+        establish something. `_is_version_literal` decides which case an
+        entry is in, and it decides POSITIVELY: anything not recognizable
+        as a plain catalog version string lands here, including range
+        spellings nobody has enumerated. That direction is the point —
+        the alternative accuses a spec flox accepts of not existing.
+
+    Only when no candidate covers the declared set, over a complete
+    reading, is there a real mismatch.
 
     Skipped (not failed) when `flox` is unavailable — same treatment the
     harness gives its own activation check, for the same reason: this needs
@@ -1369,11 +1542,21 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
     always has.
 
     Returns `(violations, catalog_checked, unknown)`. `unknown` lists
-    install entries whose per-system availability `flox show`'s own text
-    didn't establish (see `_parse_flox_show`) — these are NOT asserted
+    install entries this check could not conclude about — a version row
+    whose per-system availability `flox show`'s own text didn't establish
+    (see `_parse_flox_show`), a row it could not read at all, or a range
+    constraint it cannot resolve. Their `version` is the row the finding
+    is about when one was established and None when none was, so the
+    record never names a row that WAS readable. These are NOT asserted
     clean. A caller that reports "every pkg-path was confirmed" (the
     harness's judge note) must exclude this list from that claim, not
     silently fold it into a default-to-all-systems guess.
+
+    What a clean result does and does not establish: resolution is
+    per-pkg-group, one page for the whole group, and this check is
+    per-package — so it bounds each entry rather than proving the group
+    co-resolves. See `_resolve_rows`' Scope paragraph for the
+    demonstration and for the two real resolutions that do answer it.
     """
     if not live or not shutil.which(flox_bin):
         return [], False, []
@@ -1422,17 +1605,32 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
         if version is not None and not _is_version_literal(version):
             # A range, a wildcard, or a spelling this module does not
             # recognize. Not resolvable here and not resolvable by
-            # walking every version either — that would ignore the
-            # constraint and clear the entry on a version the range
-            # forbids. Say so instead of guessing in either direction.
+            # walking every row either — that would ignore the constraint
+            # and clear the entry on a version the range forbids. Say so
+            # instead of guessing in either direction.
             unknown.append({"install_id": install_id, "pkg_path": pkg_path,
                             "version": version,
                             "reason": UNKNOWN_REASONS["range"]})
             continue
 
+        rows = _catalog_version_rows(show)
+        incomplete = bool(show.get("unparsed_rows"))
+
         if version:
-            matched = _pinned_version_match(version, show["versions"].keys())
-            if matched is None:
+            candidates = [(v, s) for v, s in rows
+                          if _version_constraint_matches(version, v)]
+            if not candidates:
+                if incomplete:
+                    # "This version does not exist" is an absence claim,
+                    # and a row this parser could not read carries no
+                    # version at all -- so it could be exactly the one
+                    # asked for. The same rule that stops an incomplete
+                    # reading from supporting "no build at ANY version"
+                    # has to stop it supporting this.
+                    unknown.append({"install_id": install_id,
+                                    "pkg_path": pkg_path, "version": version,
+                                    "reason": UNKNOWN_REASONS["version_unreadable"]})
+                    continue
                 violations.append(violation(
                     "catalog-version-missing",
                     f"[install] {install_id}.version = \"{version}\" does not "
@@ -1440,30 +1638,50 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
                     pkg_path=pkg_path, install_id=install_id,
                 ))
                 continue
-            available = show["versions"][matched]
-            version_label = matched
         else:
-            # Unpinned -> the real resolver does NOT pin to Latest; it
-            # co-resolves onto the newest catalog page that builds every
-            # declared system. See `_resolve_unpinned` for the live proof
-            # and for why an "uncovered" verdict is still a real finding.
-            resolution = _resolve_unpinned(show, entry_systems)
-            version_label = resolution["version"]
-            available = resolution["systems"]
-            if resolution["status"] == "uncovered":
-                violations.append(violation(
-                    "catalog-systems-mismatch",
-                    _uncovered_msg(install_id, pkg_path, entry_systems, resolution),
-                    pkg_path=pkg_path, install_id=install_id,
-                ))
-                continue
+            candidates = rows
+
+        # An unreadable row bears on this entry only if it could have
+        # been a candidate. `flox show` emits one row per distinct
+        # version, so when the declared version appears verbatim among
+        # the rows that DID parse, the unreadable row is some other
+        # version and cannot be the one asked for -- carrying
+        # `incomplete` into that walk would suppress a fully established
+        # finding on a row nothing was wrong with. A partial pin ("18")
+        # gets no such reprieve: an unreadable row could be 18.5.
+        exact_row_read = any(v == version for v, _ in candidates)
+        resolution = _resolve_rows(candidates, entry_systems,
+                                   incomplete=incomplete and not exact_row_read)
+        version_label = resolution["version"]
+        available = resolution["systems"]
+
+        if resolution["status"] == "uncovered" and len(candidates) > 1:
+            # More than one candidate was walked, so the single-row
+            # message below would name the newest and imply it is the one
+            # that applies. `_uncovered_msg` says what was actually
+            # established across the range.
+            violations.append(violation(
+                "catalog-systems-mismatch",
+                _uncovered_msg(
+                    install_id, pkg_path, entry_systems, resolution,
+                    _systems_source(install_id, raw_entry_systems,
+                                    raw_default_systems),
+                    constraint=version,
+                ),
+                pkg_path=pkg_path, install_id=install_id,
+            ))
+            continue
 
         if available is None:
-            # flox show's own text didn't establish this version's
-            # systems — genuinely unknown. Never asserted clean OR
-            # mismatched; excluded from the harness's "confirmed" table.
+            # No candidate row was established as the one that applies --
+            # `flox show`'s own text didn't give a candidate's systems, or
+            # a row could not be read at all. Genuinely unknown: never
+            # asserted clean OR mismatched, and excluded from the
+            # harness's "confirmed" table. A pinned entry still names the
+            # version it asked for, which is the thing the reader has to
+            # go and check.
             unknown.append({"install_id": install_id, "pkg_path": pkg_path,
-                            "version": version_label,
+                            "version": version_label or version,
                             "reason": UNKNOWN_REASONS["unestablished"]})
             continue
 
@@ -1473,7 +1691,9 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
                 "catalog-systems-mismatch",
                 f"[install] {install_id}.pkg-path = \"{pkg_path}\" "
                 f"(version {version_label}) has no build for "
-                f"{', '.join(sorted(missing))}, but options.systems declares it",
+                f"{', '.join(sorted(missing))}, but "
+                f"{_systems_source(install_id, raw_entry_systems, raw_default_systems)} "
+                f"includes it",
                 pkg_path=pkg_path, install_id=install_id,
             ))
     return violations, True, unknown
