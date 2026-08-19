@@ -313,20 +313,23 @@ well-structured manifest that differs in layout, comments, or hook style can
 still score 5/5. They are hand-curated and per-package verified: every
 `pkg-path` and version confirmed via `flox show` / `flox search`, and the whole
 manifest lock-tested so the group actually co-resolves — **except where
-`KNOWN_VIOLATIONS` records an open finding**. Two are open right now, both
-tagged AI-457 and both the same shape: the catalog dropped an `x86_64-darwin`
-build at Latest under a golden nobody touched.
+`KNOWN_VIOLATIONS` records an open finding**. `KNOWN_VIOLATIONS` is empty
+right now.
 
-- `(lemmy, catalog-systems-mismatch, gcc)` — the catalog's current `gcc` has no
-  `x86_64-darwin` build while `lemmy.toml` declares all four systems
-  explicitly.
-- `(supabase, catalog-systems-mismatch, nodejs_22)` — `nodejs_22`'s Latest
-  dropped its `x86_64-darwin` build. `supabase.toml` declares no `[options]`
-  block at all, so the platform in that violation is `verify.py`'s own
-  all-systems default. The golden still locks cleanly: the resolver co-resolves
-  the group on a page carrying `nodejs_22@22.21.1`, which builds everywhere, so
-  this one is the per-package check's "unpinned means Latest" premise showing,
-  not a defect to narrow the golden around.
+It last held two entries, both the same shape: the catalog dropped an
+`x86_64-darwin` build at Latest for an **unpinned** package under a golden
+nobody touched (`lemmy`'s `gcc`, `supabase`'s `nodejs_22`). Neither golden was
+defective — the per-package check was, because `flox` does not pin an unpinned
+package to Latest. It co-resolves onto the newest catalog page that builds
+every declared system, and in both cases the page directly below Latest builds
+all four. `verify.py` now walks the pages the same way (`_resolve_unpinned`),
+which retired both entries with no golden content changed and fixed the same
+premise showing on three more packages (`lemmy`'s `postgresql_18`, `sentry`'s
+`watchman`, `supabase`'s `postgresql_17`).
+
+That closes the whole class: an unpinned package whose Latest sheds a platform
+is no longer an allowlist candidate. If `catalog-systems-mismatch` still fires
+on one, no catalog page builds that platform and the finding is real.
 
 An allowlisted reference is still fed to the LLM judge, so a defective golden
 can move an advisory score.
