@@ -214,14 +214,20 @@ class TestCatalogNote(unittest.TestCase):
             "catalog_checked": True,
             "violations": [],
             "catalog_unknown": [
-                {"install_id": "weird", "pkg_path": "weird-pkg", "version": "2.0.0"},
+                {"install_id": "weird", "pkg_path": "weird-pkg",
+                 "version": "2.0.0", "reason": "the reason it gave"},
             ],
         }
         note = run_floxify._catalog_note(result)
-        self.assertIn("UNKNOWN", note)
+        self.assertIn("could NOT be evaluated", note)
         self.assertIn("weird", note)
         self.assertNotIn("every installed pkg-path/version/system combination "
                          "was CONFIRMED", note)
+        # The entry's own reason is relayed rather than a single sentence
+        # asserted over every entry -- verify.py has three distinct ways
+        # of failing to conclude and one of them (a semver range it does
+        # not resolve) is not about `flox show`'s text at all.
+        self.assertIn("the reason it gave", note)
 
     def test_no_unknown_entries_still_confirms_cleanly(self):
         result = {"catalog_checked": True, "violations": [], "catalog_unknown": []}

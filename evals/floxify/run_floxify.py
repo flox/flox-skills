@@ -593,15 +593,23 @@ def _catalog_note(verify_result):
         # `available is None` path) — the judge note must too, rather than
         # rounding "no violation" up to "confirmed clean" for entries the
         # catalog leg genuinely could not evaluate.
-        names = ", ".join(u["install_id"] for u in unknown)
+        # Each entry carries its own reason: verify.py has three distinct
+        # ways of failing to conclude (an unreadable version row, an
+        # unestablished systems annotation, a semver range it does not
+        # resolve) and a single sentence covering all three was false for
+        # the range case.
+        listing = "; ".join(
+            f"{u['install_id']} ({u.get('reason', 'not established')})"
+            for u in unknown
+        )
         note = (
             f"\nDETERMINISTIC CATALOG CHECK (verify.py, via `flox show`): no "
             f"violations found, but {len(unknown)} install entr"
-            f"{'y' if len(unknown) == 1 else 'ies'} ({names}) had UNKNOWN "
-            f"per-system availability and were NOT confirmed either way — "
-            f"do not assert catalog facts about those specific entries from "
-            f"memory. All other installed pkg-path/version/system "
-            f"combinations were CONFIRMED to resolve.\n"
+            f"{'y' if len(unknown) == 1 else 'ies'} could NOT be evaluated "
+            f"and were not confirmed either way — {listing}. Do not assert "
+            f"catalog facts about those specific entries from memory. All "
+            f"other installed pkg-path/version/system combinations were "
+            f"CONFIRMED to resolve.\n"
         )
     else:
         note = (
