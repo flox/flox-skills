@@ -30,16 +30,18 @@ whichever mode was requested, so a silent skip (e.g. a future bug that
 makes check_catalog bail out even with flox present) can't masquerade as
 "genuinely clean."
 
-KNOWN_VIOLATIONS is an explicit allowlist, one entry per current golden
-defect, each tagged AI-457 (the follow-up that fixes the goldens — do NOT
-fix golden content in this change, per the AI-461 ticket). Entries match
-the violation's structured `pkg_path` field EXACTLY, not a substring of
-the message — short needles like "uv" or "deno" would otherwise collide
-with unrelated text a message might contain in the future. A dedicated
-test (test_known_violations_allowlist_has_no_stale_entries) asserts every
-entry still corresponds to a live violation, so AI-457 fixing a golden
-without removing its entry doesn't leave a dead allowlist slot that could
-silently absorb an unrelated future regression.
+KNOWN_VIOLATIONS is an explicit allowlist, one entry per open golden
+defect, each tagged with the ticket that will resolve it. IT IS EMPTY
+RIGHT NOW — see the note at the assignment for what its last two entries
+were and why they are gone. Entries match the violation's structured
+`pkg_path` field EXACTLY, not a substring of the message — short needles
+like "uv" or "deno" would otherwise collide with unrelated text a message
+might contain in the future. A dedicated test
+(test_known_violations_allowlist_has_no_stale_entries) asserts every
+entry still corresponds to a live violation, so fixing a golden without
+removing its entry doesn't leave a dead allowlist slot that could
+silently absorb an unrelated future regression; with the allowlist empty
+that test has nothing to check and skips.
 
 Whole-manifest lock-resolution leg (AI-479): the checks above are all
 PER-PACKAGE (does this one pkg-path/version/system resolve) — none of
@@ -101,26 +103,39 @@ LIVE_CATALOG = os.environ.get("FLOXIFY_GOLDEN_LINT_LIVE_CATALOG", "1") != "0"
 # EXACTLY against the violation's structured `pkg_path` field.
 #
 # Populated from a live `flox show` run against nixpkgs on 2026-07-16 (see
-# the AI-461 PR description for that snapshot) and burned down to empty by
-# AI-457, which fixed every golden's content instead of leaving it
-# allowlisted. New entries here should be rare and always tagged with the
-# ticket that will resolve them.
+# the AI-461 PR description for that snapshot). It has been emptied twice,
+# by opposite means: AI-457 fixed every golden's content, and the later
+# entries below were retired by fixing the CHECKER with no golden content
+# touched at all. New entries here should be rare and always tagged with
+# the ticket that will resolve them.
 #
-# EMPTY AGAIN, and by the fix its last two entries themselves named
-# (followup:190 / t-943). Both were live-catalog drift on an UNPINNED
-# package -- lemmy's `gcc` (Latest 15.3.0 has no x86_64-darwin build,
-# 15.2.0 does) and supabase's `nodejs_22` (Latest 22.23.2 has none,
-# 22.23.1 does) -- and the supabase entry had already written down the
-# exit: "either flox's default resolve set stops including x86_64-darwin
-# ... or verify.py stops equating 'unpinned' with 'Latest's Systems:
-# line'." verify.py now walks the catalog pages the way the resolver
-# does (see `_resolve_unpinned` there), so neither is a violation to
-# allowlist any more. Nothing in either golden changed.
+# EMPTY AGAIN, and by the fix its last two entries themselves named. Both
+# were live-catalog drift on an UNPINNED package -- lemmy's `gcc` (Latest
+# 15.3.0 has no x86_64-darwin build; 15.2.0 below it does, and a
+# single-package `flox install gcc` really does lock 15.2.0) and
+# supabase's `nodejs_22` (Latest 22.23.2 has none, 22.23.1 does) -- and
+# the supabase entry had already written down the exit: "either flox's
+# default resolve set stops including x86_64-darwin ... or verify.py
+# stops equating 'unpinned' with 'Latest's Systems: line'." verify.py now
+# descends the version rows the way the resolver does (see
+# `_resolve_rows` there), so neither is a violation to allowlist any
+# more. Nothing in either golden changed.
 #
-# What this means for FUTURE entries of this shape: an unpinned package
-# whose Latest sheds a platform is no longer an allowlist candidate at
-# all -- if the check still fires, no catalog page builds that platform
-# and the finding is real.
+# One caveat the burn-down does not license, kept here because this is
+# where someone will look before adding the next entry: what supabase's
+# whole group locks is not what a per-package walk predicts. Its
+# `nodejs_22` really locks 22.21.1, not the 22.23.1 above, because
+# `pnpm_10.version = "10.24.0"` shares its pkg-group and resolution picks
+# ONE page for the group. The 22.23.1 here is the newest row that could
+# serve nodejs_22 alone; `test_<fixture>_locks_cleanly` is what actually
+# answers the group question.
+#
+# What this means for FUTURE entries of this shape: an unpinned or
+# prefix-pinned package whose newest matching version sheds a platform is
+# no longer an allowlist candidate. If `catalog-systems-mismatch` still
+# fires on one, then either no version builds that platform at all or no
+# single version builds every declared platform together -- the message
+# says which, and both are real findings rather than checker artifacts.
 KNOWN_VIOLATIONS = {}
 
 
@@ -329,7 +344,31 @@ class TestGoldenLint(unittest.TestCase):
             self.fail(
                 f"{fixture_id}.toml has {len(unlisted)} violation(s) not in "
                 f"KNOWN_VIOLATIONS (new regression, or the allowlist needs "
-                f"an AI-457-tagged entry):\n{detail}"
+                f"a tagged entry):\n{detail}"
+            )
+
+        # An entry that stops being CHECKABLE is the other way a golden
+        # can quietly leave the verified set, and with KNOWN_VIOLATIONS
+        # empty it is the only silent channel left. verify.py declines to
+        # conclude for three reasons (see its UNKNOWN_REASONS), and every
+        # one of them means this golden's pkg-path/version/systems went
+        # unverified while the lint stayed green. These manifests are
+        # hand-curated and per-package verified, so the expected count is
+        # zero; a real one belongs in the same review as whatever made it
+        # unresolvable.
+        unknown = result.get("catalog_unknown") or []
+        if unknown:
+            detail = "\n".join(
+                f"  {u['install_id']} ({u.get('pkg_path')}"
+                f"{'@' + str(u['version']) if u.get('version') else ''}): "
+                f"{u.get('reason', 'no reason recorded')}"
+                for u in unknown
+            )
+            self.fail(
+                f"{fixture_id}.toml has {len(unknown)} install entr"
+                f"{'y' if len(unknown) == 1 else 'ies'} the catalog leg could "
+                f"not evaluate — verification silently stopped covering "
+                f"{'it' if len(unknown) == 1 else 'them'}:\n{detail}"
             )
 
     def _lock(self, fixture_id, live_catalog=None, flox_available=None):
@@ -403,10 +442,17 @@ class TestGoldenLint(unittest.TestCase):
     def test_known_violations_allowlist_has_no_stale_entries(self):
         """Every KNOWN_VIOLATIONS entry must still match a live violation.
 
-        Otherwise AI-457 could fix a golden, leave the entry behind, and
-        a future unrelated regression that happens to match the same
+        Otherwise a golden could be fixed, the entry left behind, and a
+        future unrelated regression that happens to match the same
         (fixture, rule, pkg_path) triple would be silently allowlisted.
         """
+        if not KNOWN_VIOLATIONS:
+            # `set() - consumed` is empty for every possible `consumed`,
+            # so the loop below cannot change the outcome -- it would
+            # just re-`verify()` all eight goldens to compute a
+            # guaranteed pass. Skipping states the invariant instead of
+            # spending a live catalog run establishing it.
+            self.skipTest("allowlist is empty — no entry can be stale")
         if not LIVE_CATALOG:
             self.skipTest("stale-allowlist check needs the live catalog leg")
         if not shutil.which("flox"):
@@ -431,7 +477,7 @@ class TestGoldenLint(unittest.TestCase):
             self.fail(
                 f"{len(stale)} KNOWN_VIOLATIONS entr"
                 f"{'y' if len(stale) == 1 else 'ies'} no longer match any live "
-                f"violation — fixed upstream? Remove the entry so AI-457's "
+                f"violation — fixed upstream? Remove the entry so the "
                 f"burn-down stays visible:\n{detail}"
             )
 
@@ -459,6 +505,58 @@ for _fixture_id in _GOLD_IDS:
         TestGoldenLint, _make_lock_test(_fixture_id).__name__,
         _make_lock_test(_fixture_id),
     )
+
+
+class TestAllowlistMatching(unittest.TestCase):
+    """`_matches`' exact-`pkg_path` rule, unit-tested against a synthetic
+    entry rather than through `KNOWN_VIOLATIONS`.
+
+    The entries were data and the matching is behavior, and with the
+    allowlist empty the behavior has no live exerciser at all -- every
+    `_is_allowlisted` call now iterates an empty dict and `_matches` is
+    never invoked. The module docstring goes out of its way to explain
+    why the match is exact ("short needles like 'uv' or 'deno' would
+    otherwise collide"), which is worth keeping honest for whoever adds
+    the next entry under incident pressure. Needs no live catalog.
+    """
+
+    VIOLATION = {"rule": "catalog-systems-mismatch", "pkg_path": "uv",
+                 "message": 'no build for x86_64-darwin; see also deno and uvloop'}
+
+    def test_exact_triple_matches(self):
+        key = ("sentry", "catalog-systems-mismatch", "uv")
+        self.assertTrue(_matches("sentry", self.VIOLATION, key))
+        with patch.dict(KNOWN_VIOLATIONS, {key: "TICKET-1"}, clear=True):
+            self.assertTrue(_is_allowlisted("sentry", self.VIOLATION))
+
+    def test_near_misses_do_not_match(self):
+        # One field wrong in each direction, plus the substring case the
+        # exact rule exists to reject: `uvloop` must not be absorbed by
+        # an entry written for `uv`.
+        for key in (
+            ("supabase", "catalog-systems-mismatch", "uv"),   # other fixture
+            ("sentry", "catalog-version-missing", "uv"),      # other rule
+            ("sentry", "catalog-systems-mismatch", "uvloop"),  # superstring
+            ("sentry", "catalog-systems-mismatch", "u"),       # substring
+        ):
+            with self.subTest(key):
+                self.assertFalse(_matches("sentry", self.VIOLATION, key))
+                with patch.dict(KNOWN_VIOLATIONS, {key: "TICKET-1"},
+                                clear=True):
+                    self.assertFalse(_is_allowlisted("sentry", self.VIOLATION))
+
+    def test_a_violation_without_a_pkg_path_needs_a_none_keyed_entry(self):
+        # Not every rule carries `pkg_path` (malformed-section, for one),
+        # and `.get` yields None. Stating what the rule actually is
+        # rather than what one might hope: such a violation is NOT
+        # unallowlistable -- it is allowlisted by an entry whose third
+        # element is literally None, and by nothing else. Worth being
+        # exact about here, because the audience for this class is
+        # whoever is adding an entry under incident pressure.
+        v = {"rule": "malformed-section"}
+        self.assertTrue(_matches("sentry", v, ("sentry", "malformed-section", None)))
+        self.assertFalse(_matches("sentry", v, ("sentry", "malformed-section", "uv")))
+        self.assertFalse(_matches("sentry", v, ("supabase", "malformed-section", None)))
 
 
 class TestLockResolutionLeg(unittest.TestCase):
