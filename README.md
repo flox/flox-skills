@@ -84,10 +84,10 @@ claude plugin install flox@flox-skills
 
 ### Codex
 
-Run from a clone of this repository:
+From the command line:
 
 ```bash
-codex plugin marketplace add .   # in the repo's top-level directory
+codex plugin marketplace add flox/flox-skills
 codex plugin add flox@flox-skills
 codex plugin list                # verify
 ```
