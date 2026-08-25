@@ -773,5 +773,167 @@ class TestCostSummary(unittest.TestCase):
         self.assertEqual(c["total_usd"], 0.0)
 
 
+class TestCiActivateChecks(unittest.TestCase):
+    """AI-511: CI guidance must not repeat `flox activate --` per line."""
+
+    GOOD_SHELL = """Use the custom shell:
+
+```yaml
+- name: Run tests
+  shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
+  run: |
+    python3 -m pytest -q
+    ruff check .
+    mypy src
+```
+"""
+
+    BAD_REPEATED = """Run each command in the environment:
+
+```yaml
+- name: Run tests
+  run: |
+    flox activate -- python3 -m pytest -q
+    flox activate -- ruff check .
+    flox activate -- mypy src
+```
+"""
+
+    SINGLE_ACTIVATE_OK = """One activation in one step is fine:
+
+```yaml
+- name: Run tests
+  run: |
+    flox activate -- python3 -m pytest -q
+```
+"""
+
+    TWO_STEPS_OK = """Separate steps each activate once:
+
+```yaml
+- name: Unit
+  run: |
+    flox activate -- python3 -m pytest -q
+- name: Lint
+  run: |
+    flox activate -- ruff check .
+```
+"""
+
+    ACTION_OK = """Short command via the action:
+
+```yaml
+- uses: flox/activate-action@7065dcbe5583b7b015f07a8ebd49d7266e3053e8 # v1.1.1
+  with:
+    command: python3 -m pytest -q
+```
+"""
+
+    BAD_COMPACT = """The same violation, written with `run:` as the step's first key:
+
+```yaml
+steps:
+  - run: |
+      flox activate -- python3 -m pytest -q
+      flox activate -- ruff check .
+```
+"""
+
+    REMOTE_SHELL_OK = """Custom shell against a remote environment:
+
+```yaml
+- name: Run tests
+  shell: flox activate -r myorg/ci-tools -- bash --noprofile --norc -e -o pipefail {0}
+  run: |
+    python3 -m pytest -q
+```
+"""
+
+    DIR_SHELL_OK = """Custom shell against a `.flox/` in a subdirectory:
+
+```yaml
+- name: Run tests
+  shell: flox activate --dir=./service -- bash --noprofile --norc -e -o pipefail {0}
+  run: |
+    python3 -m pytest -q
+```
+"""
+
+    def test_repeated_activate_in_one_run_block_fails(self):
+        self.assertFalse(run.CHECKS["ci_no_repeated_activate"](self.BAD_REPEATED))
+
+    def test_repeated_activate_in_a_compact_run_step_fails(self):
+        """`- run: |` is as common as `run:` under a `- name:`. An anchor that
+        only matches the latter misses half the real violations."""
+        self.assertFalse(run.CHECKS["ci_no_repeated_activate"](self.BAD_COMPACT))
+
+    def test_a_sibling_key_ends_the_block_scalar(self):
+        """Two steps, one activation each, written compactly: not a violation."""
+        answer = """```yaml
+steps:
+  - run: |
+      flox activate -- python3 -m pytest -q
+  - run: |
+      flox activate -- ruff check .
+```
+"""
+        self.assertTrue(run.CHECKS["ci_no_repeated_activate"](answer))
+
+    def test_custom_shell_passes(self):
+        self.assertTrue(run.CHECKS["ci_no_repeated_activate"](self.GOOD_SHELL))
+
+    def test_single_activate_passes(self):
+        self.assertTrue(run.CHECKS["ci_no_repeated_activate"](self.SINGLE_ACTIVATE_OK))
+
+    def test_activation_split_across_steps_passes(self):
+        """Two steps that each activate once is not the failure mode."""
+        self.assertTrue(run.CHECKS["ci_no_repeated_activate"](self.TWO_STEPS_OK))
+
+    def test_prose_outside_a_yaml_fence_is_ignored(self):
+        prose = "flox activate -- a\nflox activate -- b\n"
+        self.assertTrue(run.CHECKS["ci_no_repeated_activate"](prose))
+
+    def test_custom_shell_counts_as_an_activate_mechanism(self):
+        self.assertTrue(run.CHECKS["ci_uses_activate_mechanism"](self.GOOD_SHELL))
+
+    def test_remote_custom_shell_counts_as_an_activate_mechanism(self):
+        """`ci.md` teaches `flox activate -r org/env -- bash …`. A check that
+        anchors `--` straight onto `activate` fails a correct answer."""
+        self.assertTrue(run.CHECKS["ci_uses_activate_mechanism"](self.REMOTE_SHELL_OK))
+
+    def test_dir_custom_shell_counts_as_an_activate_mechanism(self):
+        self.assertTrue(run.CHECKS["ci_uses_activate_mechanism"](self.DIR_SHELL_OK))
+
+    def test_activate_action_counts_as_an_activate_mechanism(self):
+        self.assertTrue(run.CHECKS["ci_uses_activate_mechanism"](self.ACTION_OK))
+
+    def test_prose_naming_the_action_is_not_an_activate_mechanism(self):
+        """The check grades the workflow, not the sales pitch. An answer that
+        names `flox/activate-action` in prose while its YAML leaves every step
+        on the bare runner has not fixed anything."""
+        answer = """You could use flox/activate-action here, or set the shell
+to flox activate -- bash. For now:
+
+```yaml
+- uses: flox/install-flox-action@1128abd73431089ab9d871c893b4e72a729354e1 # v2.6.0
+- name: Run tests
+  run: |
+    python3 -m pytest -q
+```
+"""
+        self.assertFalse(run.CHECKS["ci_uses_activate_mechanism"](answer))
+
+    def test_install_action_alone_is_not_an_activate_mechanism(self):
+        """install-flox-action installs; it never activates. This is the AI-511 bug."""
+        answer = """```yaml
+- uses: flox/install-flox-action@1128abd73431089ab9d871c893b4e72a729354e1 # v2.6.0
+- name: Run tests
+  run: |
+    python3 -m pytest -q
+```
+"""
+        self.assertFalse(run.CHECKS["ci_uses_activate_mechanism"](answer))
+
+
 if __name__ == "__main__":
     unittest.main()

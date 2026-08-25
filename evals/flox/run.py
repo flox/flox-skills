@@ -456,6 +456,85 @@ def _sandbox_schema_version(answer):
     )
 
 
+# --- CI activation shape (AI-511) -------------------------------------------
+# A GitHub Actions step that repeats `flox activate --` on every line of one
+# multiline `run:` block re-enters the environment per command: slow, and it
+# loses any state the previous line set. The skill teaches one activation per
+# step — either `shell: flox activate -- bash ... {0}` or `flox/activate-action`.
+#
+# Scanned with an indentation walk rather than a YAML parse on purpose: this
+# repo's harnesses are stdlib-only (tomllib, no PyYAML), and the shape we care
+# about — how many activations sit inside ONE block scalar — is exactly what
+# indentation encodes.
+_YAML_FENCE = re.compile(r"```ya?ml\n(.*?)```", re.S | re.I)
+# The `- ` prefix is part of the match, not skipped: `- run: |` (run as the
+# first key of the step) is as common as a `run:` under a `- name:`, and a
+# `^(\s*)run:` anchor silently misses every one of them — the exact violation
+# this check exists to catch would go undetected. Capturing the whole prefix
+# also gives the right indent: for `  - run: |` the body sits at 6 and the
+# sibling `  - name:` at 2, so a 4-wide prefix separates them correctly.
+_RUN_SCALAR = re.compile(r"^(\s*(?:-\s+)?)run:\s*[|>][-+]?\s*$")
+_ACTIVATE_LINE = re.compile(r"^\s*flox\s+activate\b")
+# Either mechanism the skill sanctions for getting INTO the environment.
+# `install-flox-action` deliberately does not appear: it installs the CLI and
+# never activates, which is the confusion this check exists to catch.
+#
+# `[^\n]*?\s--\s` rather than `\s+--`: the flags between `activate` and `--`
+# are part of the sanctioned spelling. `flox activate -r org/env -- bash …`
+# (remote env) and `flox activate --dir=./svc -- bash …` are both taught in
+# `references/ci.md`, and anchoring `--` directly to `activate` would fail a
+# correct answer that used either.
+_CI_ACTIVATE_MECHANISM = re.compile(
+    r"shell:\s*flox\s+activate\b[^\n]*?\s--\s|flox/activate-action", re.I
+)
+
+
+def _run_block_bodies(answer):
+    """Yield the body lines of every GitHub-Actions `run:` block scalar."""
+    for fence in _YAML_FENCE.findall(answer):
+        lines = fence.splitlines()
+        i = 0
+        while i < len(lines):
+            m = _RUN_SCALAR.match(lines[i])
+            if not m:
+                i += 1
+                continue
+            indent = len(m.group(1))
+            body = []
+            i += 1
+            while i < len(lines):
+                ln = lines[i]
+                # A non-blank line at or left of the `run:` indent ends the scalar.
+                if ln.strip() and (len(ln) - len(ln.lstrip())) <= indent:
+                    break
+                body.append(ln)
+                i += 1
+            yield body
+
+
+def _repeats_activate(answer):
+    """True iff any single `run:` block scalar activates more than once."""
+    return any(
+        sum(bool(_ACTIVATE_LINE.match(ln)) for ln in body) > 1
+        for body in _run_block_bodies(answer)
+    )
+
+
+def _uses_activate_mechanism(answer):
+    """True iff a YAML block actually wires up an activation mechanism.
+
+    Fence-scoped rather than a whole-answer grep, for the reason the Gate
+    policy section of `evals/README.md` already gives about manifests: a
+    whole-answer search certifies workflow YAML it never inspected. An answer
+    whose prose says "you could use flox/activate-action" while its only
+    workflow leaves every step on the bare runner is precisely the failure this
+    check exists to catch, and a bare `.search(answer)` passes it.
+    """
+    return any(
+        _CI_ACTIVATE_MECHANISM.search(fence) for fence in _YAML_FENCE.findall(answer)
+    )
+
+
 CHECKS = {
     "no_fake_install_url": lambda a: not FAKE_INSTALL.search(a),
     "no_abs_paths": lambda a: not ABS_PATH.search(toml_blocks(a)),
@@ -475,6 +554,10 @@ CHECKS = {
     "sets_build_sandbox_mode": _sets_sandbox_mode,
     "build_sandbox_schema_version": _sandbox_schema_version,
     "uses_remote_env": lambda a: "flox push" in a or "flox pull" in a or "flox activate -r" in a,
+    # AI-511: one activation per step, and an actual activation mechanism —
+    # `install-flox-action` on its own does not activate anything.
+    "ci_no_repeated_activate": lambda a: not _repeats_activate(a),
+    "ci_uses_activate_mechanism": _uses_activate_mechanism,
     # Implicit-trigger check: did the skill fire and produce Flox guidance even
     # though the prompt never said "flox"?
     "invokes_flox": lambda a: bool(
