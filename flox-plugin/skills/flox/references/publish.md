@@ -409,20 +409,24 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0        # publish needs the commit on the remote
 
       - name: Install Flox
-        run: |
-          curl -fsSL https://downloads.flox.dev/by-env/stable/install | bash
+        uses: flox/install-flox-action@1128abd73431089ab9d871c893b4e72a729354e1 # v2.6.0
 
-      - name: Authenticate
+      - name: Authenticate and publish
         env:
-          FLOX_AUTH_TOKEN: ${{ secrets.FLOX_AUTH_TOKEN }}
-        run: flox auth login --token "$FLOX_AUTH_TOKEN"
-
-      - name: Publish package
+          FLOX_FLOXHUB_TOKEN: ${{ secrets.FLOX_FLOXHUB_TOKEN }}
         run: flox publish -o myorg mypackage
 ```
+
+`install-flox-action` installs the CLI; it does not activate an environment.
+These steps do not need one: `flox publish` acts on the environment directory,
+so it needs `flox` on `PATH`, not the environment's contents. Reach for
+`flox/activate-action` or a `flox activate` shell only when a step runs
+something the environment *provides* — see `references/ci.md`.
 
 ### GitLab CI Example
 
@@ -432,10 +436,15 @@ publish:
   only:
     - tags
   script:
-    - curl -fsSL https://downloads.flox.dev/by-env/stable/install | bash
-    - flox auth login --token "$FLOX_AUTH_TOKEN"
+    - flox --version  # Flox provided by the runner image; see flox.dev/download
     - flox publish -o myorg mypackage
 ```
+
+Set `FLOX_FLOXHUB_TOKEN` as a masked CI/CD variable; GitLab exports it into the
+job, so `flox publish` picks it up with no separate login step. Install Flox in
+the runner image (see `flox.dev/download`) rather than piping an installer into
+a shell at job time. As above, publishing needs the CLI on `PATH`, not an
+activated environment.
 
 ## Package Metadata Best Practices
 
