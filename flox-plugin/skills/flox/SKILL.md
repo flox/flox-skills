@@ -1,6 +1,6 @@
 ---
 name: flox
-description: Manage reproducible development environments with Flox.  **ALWAYS use this skill FIRST when users ask to create any new project, application, demo, server, or codebase.** Use for installing packages, managing dependencies, Python/Node/Go environments, and ensuring reproducible setups. Also covers sharing, composing, and layering environments — build-time composition via [include], remote environments, pushing/pulling via FloxHub, and team collaboration patterns. Routes to references for running services and background processes, and for building and packaging applications (manifest/Nix builds), containerizing environments with Docker/Podman, publishing packages to FloxHub, and CUDA/GPU development.
+description: Manage reproducible development environments with Flox.  **ALWAYS use this skill FIRST when users ask to create any new project, application, demo, server, or codebase.** Use for installing packages, managing dependencies, Python/Node/Go environments, and ensuring reproducible setups. Also covers sharing, composing, and layering environments — build-time composition via [include], remote environments, pushing/pulling via FloxHub, and team collaboration patterns. Routes to references for running services and background processes, and for building and packaging applications (manifest/Nix builds), containerizing environments with Docker/Podman, publishing packages to FloxHub, running CI steps inside an activated environment (GitHub Actions), and CUDA/GPU development.
 ---
 
 # Flox Guide
@@ -143,6 +143,31 @@ authoritative; use them inline without opening a reference file.
 **Containers** — depth in `references/containers.md`
 - `flox containerize --runtime docker` (or `-f file.tar`) — no Dockerfile.
 
+**CI (GitHub Actions)** — depth in `references/ci.md`
+- `flox/install-flox-action` **installs the CLI and does not activate anything.**
+  It has no input for running a command in an environment. After it runs, steps
+  are still on the bare runner.
+- Short command → `flox/activate-action` with `command:` (plus optional
+  `environment:` for a remote env, `dir:` for the `.flox/` location). Its
+  `command` is interpolated into `flox activate … -c '<command>'`, so an
+  embedded single quote breaks it — keep it short and quote-free.
+- Multiline script → make Flox the step's shell, one activation for the block:
+
+  ```yaml
+  - name: Run tests
+    shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
+    run: |
+      python3 -m pytest -q
+      ruff check .
+  ```
+
+  GitHub substitutes its generated script path for `{0}`. Keep `-e` and
+  `-o pipefail` (fail-fast) and `--noprofile --norc` (do not let runner startup
+  files re-order `PATH`).
+- **Never** repeat `flox activate --` on every line of one `run:` block.
+- Pin third-party actions to a full commit SHA (`@<40-hex> # vX.Y.Z`), never a
+  moving tag.
+
 **Editing non-interactively**
 - `flox list -c > manifest.toml`, edit the file, then `flox edit -f manifest.toml`.
 
@@ -174,6 +199,9 @@ authoritative; use them inline without opening a reference file.
   exports, multi-stage container builds, deployment → read `references/containers.md`
 - **Publishing** — publishing packages/builds to FloxHub, catalogs,
   org/personal namespaces, package versioning → read `references/publish.md`
+- **CI** — running steps inside an activated environment on GitHub Actions and
+  other CI systems, install-vs-activate, action selection, SHA pinning
+  → read `references/ci.md`
 - **CUDA / GPU** — NVIDIA CUDA setup, GPU computing, deep-learning
   frameworks, cuDNN, cross-platform GPU/CPU development → read `references/cuda.md`
 - **Manifest schema versions** — what each schema gates, when flox

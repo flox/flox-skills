@@ -25,8 +25,8 @@ platform-specific difference is intentional.
 
 - `flox`: Create and manage reproducible Flox environments. The top `SKILL.md`
   holds the core guidance and routes to reference files in `references/` for
-  sharing/composition, services, builds, containers, publishing, and CUDA/GPU
-  workflows.
+  sharing/composition, services, builds, containers, publishing, CI, and
+  CUDA/GPU workflows.
 - `floxify`: Convert an existing repository to a verified working Flox
   environment, with detection and verification scripts in `scripts/`.
 - `flox-debug`: Debug a Flox environment when it doesn't behave as expected.
