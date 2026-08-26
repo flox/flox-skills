@@ -364,21 +364,26 @@ containerize:
 ### GitHub Actions
 
 ```yaml
+# The job needs `permissions: packages: write` — the default workflow
+# token is read-only on repositories created since 2023.
 - uses: flox/install-flox-action@1128abd73431089ab9d871c893b4e72a729354e1 # v2.6.0
 
 - name: Build and push container
   env:
     IMAGE: ghcr.io/${{ github.repository }}:${{ github.sha }}
     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    ACTOR: ${{ github.actor }}
   run: |
     flox containerize --tag "$IMAGE" --runtime docker
-    echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+    echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
     docker push "$IMAGE"
 ```
 
-Both need Flox installed and neither needs it activated: `flox containerize`
-reads the environment, it does not run inside it. See `references/ci.md` for
-the steps that *do* need an activation, and how to write one.
+Both need Flox available and neither needs it activated: `flox containerize`
+reads the environment, it does not run inside it. The GitLab job expects a
+runner image that already ships Flox, since there is no install action there;
+the GitHub job installs it. See `references/ci.md` for the steps that *do* need
+an activation, and how to write one.
 
 ## Kubernetes Deployment
 

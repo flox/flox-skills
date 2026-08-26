@@ -402,28 +402,43 @@ name: Publish to Flox
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0        # publish needs the commit on the remote
+          fetch-depth: 0
 
       - name: Install Flox
         uses: flox/install-flox-action@1128abd73431089ab9d871c893b4e72a729354e1 # v2.6.0
 
-      - name: Authenticate and publish
+      - name: Publish
         env:
           FLOX_FLOXHUB_TOKEN: ${{ secrets.FLOX_FLOXHUB_TOKEN }}
         run: flox publish -o myorg mypackage
 ```
 
+**Publish from a branch, not a tag.** `actions/checkout` checks a tag out in
+detached HEAD, and `flox publish` refuses to publish from one:
+
+```
+Repository is in detached HEAD state and has no upstream remote configured.
+Check out a branch before publishing: `git checkout -b <branch-name>`
+```
+
+There is nothing a tag-triggered job can do about that, so trigger on the push
+to your release branch instead. `fetch-depth: 0` is still worth setting: under
+the default depth-1 checkout the publish records a commit count of 1 rather
+than the repository's real one.
+
 `install-flox-action` installs the CLI; it does not activate an environment.
-These steps do not need one: `flox publish` acts on the environment directory,
+This job does not need one: `flox publish` acts on the environment directory,
 so it needs `flox` on `PATH`, not the environment's contents. Reach for
 `flox/activate-action` or a `flox activate` shell only when a step runs
 something the environment *provides* — see `references/ci.md`.

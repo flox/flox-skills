@@ -37,12 +37,24 @@ Inputs:
 | `environment` | no | A remote environment (`owner/name`), passed as `-r=`. Omit to use the local `.flox/` |
 | `dir` | no | Path containing the `.flox/` directory, passed as `--dir=` |
 
-**Caveat — do not pass an arbitrary multiline script as `command`.** The
-composite action interpolates the input into a single-quoted
-`flox activate … -c '<command>'`. Any single quote in your script terminates
-that wrapper: `awk '{print $1}'`, `bash -c 'x'`, and even an apostrophe in an
-echoed message will break or silently mis-execute the step. Keep `command` to a
-short, quote-free invocation; for anything longer, use the custom shell below.
+**Caveat — never build `command` from untrusted input, and keep it short.**
+The action's `runs:` block interpolates the input into a single-quoted
+`flox activate … -c '<command>'`. `environment` and `dir` are interpolated on
+that same line **unquoted**.
+
+That makes this a command-injection sink, not just a quoting nuisance. A single
+quote in the value closes the wrapper and everything after it is read as shell:
+a `command` built from `${{ github.event.pull_request.title }}` with the value
+`a'; id; echo PWNED; 'x` runs `id` and `echo PWNED` as separate commands on the
+runner. GitHub names PR titles and bodies, branch names, and review comments as
+attacker-controlled contexts. Never interpolate any of them into `command`,
+`environment`, or `dir`; pass them through `env:` and reference the variable
+instead.
+
+The same mechanism bites benign scripts by accident: `awk '{print $1}'`,
+`bash -c 'x'`, and an apostrophe in an echoed message all terminate the
+wrapper. Keep `command` to a short, quote-free invocation; for anything longer,
+use the custom shell below.
 
 ## Multiline scripts: Flox as the step's shell
 
@@ -63,8 +75,12 @@ activation covers the whole block.
 
 Each flag earns its place:
 
-- `--noprofile --norc` — do not source the runner's shell startup files, which
-  would re-order `PATH` and can undo the activation.
+- `--noprofile --norc` — mirror GitHub's own default shell invocation,
+  `bash --noprofile --norc -eo pipefail {0}`, so replacing the default shell
+  changes nothing about startup behaviour. (Bash given a script file, which
+  `{0}` is, is neither interactive nor a login shell, so it would not read
+  those files anyway. The flags document the intent and keep the two
+  invocations identical.)
 - `-e` — fail the step on the first failing command. Without it a custom shell
   reports success as long as the last line succeeded.
 - `-o pipefail` — fail on a failing command anywhere in a pipeline, not just the
@@ -95,8 +111,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Install Flox
         uses: flox/install-flox-action@1128abd73431089ab9d871c893b4e72a729354e1 # v2.6.0
@@ -126,7 +144,7 @@ jobs:
       run:
         shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: flox/install-flox-action@1128abd73431089ab9d871c893b4e72a729354e1 # v2.6.0
       - run: python3 -m pytest -q
 ```
@@ -149,7 +167,9 @@ To run against a FloxHub environment rather than the repo's `.flox/`:
 
 The custom-shell equivalent is `shell: flox activate -r myorg/ci-tools -- bash --noprofile --norc -e -o pipefail {0}`.
 A remote environment that is not already trusted must be listed in
-`install-flox-action`'s `trusted-environments` input.
+`install-flox-action`'s `trusted-environments` input. Trust is not credentials:
+a private FloxHub environment also needs `FLOX_FLOXHUB_TOKEN` in the step's
+`env:`, the same way `references/publish.md` passes it.
 
 ## Pinning
 
@@ -172,13 +192,14 @@ at any commit. The SHA cannot.
 | `flox activate --` on every line of one `run:` block | Re-enters the environment per command; per-line state is lost | One `shell:` on the step |
 | A multiline script in `activate-action`'s `command:` | Interpolated into `-c '…'`; an embedded `'` breaks the wrapper | Use the custom `shell:` |
 | Custom shell without `-e -o pipefail` | Step passes as long as the last line passes | Keep both flags |
-| Custom shell without `--noprofile --norc` | Runner startup files re-order `PATH` | Keep both flags |
+| Custom shell without `--noprofile --norc` | Diverges from GitHub's default shell invocation for no reason | Keep both flags |
 | `curl … \| bash` to install Flox | Not a supported install path | `flox/install-flox-action` |
 | `uses: flox/install-flox-action@v2` | Moving tag; supply-chain risk | Pin the full SHA |
 
 ## Other CI systems
 
-The same split applies. Install Flox with the platform's package manager or the
-documented installer, then enter the environment once per script rather than per
+The same split applies. Provide Flox in the runner image, via the platform's
+package manager or a prebuilt image, rather than piping an installer into a
+shell at job time. Then enter the environment once per script rather than per
 line — `flox activate -- <interpreter> <script>`, or by making the script's
 first action an activation.
