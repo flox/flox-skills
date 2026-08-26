@@ -676,6 +676,9 @@ class TestMain(unittest.TestCase):
         self.assertEqual(rc, 5)
 
     def test_an_unreadable_credential_file_exits_5_not_1(self):
+        if os.geteuid() == 0:
+            self.skipTest("root reads a mode-000 path, so this state is "
+                          "unconstructible here")
         with TemporaryDirectory() as tmp:
             locked = Path(tmp) / "claude.json"
             locked.write_text("{}")
@@ -955,6 +958,9 @@ class TestLeakScan(unittest.TestCase):
         read — measured on CPython 3.14.4 — and containers write into these
         trees as root, so the alarm was failing open in exactly the state it
         exists for."""
+        if os.geteuid() == 0:
+            self.skipTest("root reads a mode-000 path, so this state is "
+                          "unconstructible here")
         with TemporaryDirectory() as tmp:
             run_dir = Path(tmp) / "run"
             hidden = run_dir / "cell" / "claude"
