@@ -1,0 +1,93 @@
+{
+  "summary": {
+    "model": "claude-opus-4-8",
+    "reps": 5,
+    "setting_sources": "project,local",
+    "mean_baseline_hard_pass_rate": 1.0,
+    "mean_skills_hard_pass_rate": 1.0,
+    "total_cost_usd": 5.464,
+    "total": 2,
+    "errors": 0,
+    "discriminators": 0,
+    "skill_gaps": 0,
+    "no_signals": 2,
+    "mean_judge_gap": 0.0,
+    "discriminator_ids": [],
+    "skill_gap_ids": [],
+    "no_signal_ids": [
+      "ci-github-actions-multiline",
+      "ci-install-vs-activate"
+    ],
+    "error_ids": []
+  },
+  "results": [
+    {
+      "id": "ci-github-actions-multiline",
+      "area": "ci",
+      "tier": "should",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "hard_pass_rate": 1.0,
+        "hard_pass_count": 5,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 5.0,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "Everything checks out against the repo's `references/ci.md` guidance. Here's the complete solution.\n\n## Manifest\n\nThe repo's Flox environment lives at `.flox/env/manifest.toml` and must provide the three tools the CI step invokes:\n\n```toml\nversion = 1\n\n[install]\npython3.pkg-path = \"python3\"\nruff.pkg-path = \"ruff\"\nmypy.pkg-path = \"mypy\"\n```\n\n## Flox commands to create it\n\n```bash\nflox init\nflox install python3 ruff mypy\n```\n\n`flox init` scaffolds `.flox/` in the repo (commit it). `flox install` writes the three entries above into the manifest. Do **not** install Flox itself in CI with `curl \u2026 | bash` \u2014 the workflow uses the official install action.\n\n## Complete workflow\n\n```yaml\nname: CI\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n    steps:\n      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2\n\n      - name: Install Flox\n        uses: flox/install-flox-action@1128abd73431089ab9d871c893b4e72a729354e1 # v2.6.0\n\n      - name: Run checks\n        shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}\n        run: |\n          python3 -m pytest -q\n          ruff che",
+        "cost_usd": 1.2195
+      },
+      "skills": {
+        "hard_pass": true,
+        "hard_pass_rate": 1.0,
+        "hard_pass_count": 5,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 5.0,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "Here is the complete solution.\n\n## The workflow YAML\n\nPut all three commands in **one step**, with Flox as that step's shell so GitHub's generated script runs entirely inside the activated environment:\n\n```yaml\nname: CI\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n    steps:\n      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2\n\n      - name: Install Flox\n        uses: flox/install-flox-action@1128abd73431089ab9d871c893b4e72a729354e1 # v2.6.0\n\n      - name: Run checks\n        shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}\n        run: |\n          python3 -m pytest -q\n          ruff check .\n          mypy src\n```\n\n## The manifest\n\n`.flox/env/manifest.toml`, providing the interpreter and the three tools the step invokes:\n\n```toml\nversion = 1\n\n[install]\npython3.pkg-path = \"python3\"\npytest.pkg-path = \"python3Packages.pytest\"\nruff.pkg-path = \"ruff\"\nmypy.pkg-path = \"mypy\"\n```\n\n## The flox commands to create it\n\n```bash\nflox init\nflox install python3 python3Packages.pytest ruff mypy\n```\n\nVerify names/versions with `flox search <term>` and `flox show <pkg>` be",
+        "cost_usd": 1.506
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0.0,
+      "classification": "no-signal"
+    },
+    {
+      "id": "ci-install-vs-activate",
+      "area": "ci",
+      "tier": "should",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": true,
+        "hard_pass_rate": 1.0,
+        "hard_pass_count": 5,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 5.0,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## What's wrong\n\n`flox/install-flox-action` only **installs the Flox CLI** onto the runner. It does not **activate** your environment. Those are two separate things, and that action does only the first one.\n\nAfter the install step, `flox` is on `PATH`, but the next step is still running on the bare runner. Anything your environment provides (interpreters, linters, CLIs, services) isn't there until *something activates the environment*. There's no input on `install-flox-action` that runs a command inside it.\n\n## How to fix it\n\nActivate the environment for the steps that need it. Two ways:\n\n- **Short, single command** \u2192 use `flox/activate-action`.\n- **Multiline script** \u2192 make `flox activate` the step's `shell:` so GitHub's generated script runs entirely inside the environment (one activation for the whole block).\n\nDo **not** prefix each line with `flox activate --` \u2014 that re-enters the environment per command and loses any state between lines.\n\n### Corrected workflow (custom `shell:`, best for multiline)\n\n```yaml\nname: CI\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n    steps:\n      - uses: actions/",
+        "cost_usd": 1.2677
+      },
+      "skills": {
+        "hard_pass": true,
+        "hard_pass_rate": 1.0,
+        "hard_pass_count": 5,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 5.0,
+        "judge_correct": true,
+        "judge_issues": [],
+        "answer_excerpt": "## What's wrong\n\n`flox/install-flox-action` **only installs the Flox CLI onto the runner. It does not activate your environment.** There's no input on it for running a command inside an environment. So after it runs, `flox` is on `PATH`, but your next step is still executing on the bare runner \u2014 none of the interpreters, linters, or other tools from your `.flox/` environment are there until *something activates it*.\n\nThe fix is to add an activation step (for a short command) or make Flox the step's shell (for a multiline script).\n\n## The manifest\n\nYour environment definition lives at `.flox/env/manifest.toml`. Nothing about the CI problem requires changing it, but here's a representative one so the example is complete (swap in your real packages \u2014 verify names with `flox search` and versions with `flox show` before pinning):\n\n```toml\nversion = 1\n\n[install]\npython3.pkg-path = \"python3\"\nruff.pkg-path = \"ruff\"\n\n[options]\nsystems = [\"x86_64-linux\", \"aarch64-linux\", \"x86_64-darwin\", \"aarch64-darwin\"]\n```\n\n## The flox commands (to create/commit that environment)\n\n```bash\nflox init                    # creates .flox/ with the manifest\nflox install python3 ruff    # add the tools your CI n",
+        "cost_usd": 1.4708
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0.0,
+      "classification": "no-signal"
+    }
+  ]
+}
