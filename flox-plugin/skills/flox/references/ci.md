@@ -184,6 +184,19 @@ comment:
 A moving tag (`@v2`, `@main`) is a supply-chain hole: the tag can be repointed
 at any commit. The SHA cannot.
 
+**Look the SHA up; never invent one.** Forty plausible hex characters are easy
+to produce and impossible to eyeball, and a wrong one fails the workflow at
+`uses:` resolution with nothing pointing at the cause. Read it off the action's
+releases page, or:
+
+```bash
+git ls-remote --tags https://github.com/flox/install-flox-action.git | grep v2.6.0
+```
+
+Make the trailing comment name the tag the SHA actually carries. A pin resolved
+from `v6` and commented `# v6` goes stale the moment that moving tag advances,
+which is the failure this section exists to prevent.
+
 ## Common mistakes
 
 | Mistake | Why it fails | Fix |
@@ -195,6 +208,7 @@ at any commit. The SHA cannot.
 | Custom shell without `--noprofile --norc` | Diverges from GitHub's default shell invocation for no reason | Keep both flags |
 | `curl … \| bash` to install Flox | Not a supported install path | `flox/install-flox-action` |
 | `uses: flox/install-flox-action@v2` | Moving tag; supply-chain risk | Pin the full SHA |
+| A made-up 40-character SHA | Fails at `uses:` resolution, and looks correct | Read it from the releases page or `git ls-remote` |
 
 ## Other CI systems
 
