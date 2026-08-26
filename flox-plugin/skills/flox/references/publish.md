@@ -448,15 +448,18 @@ something the environment *provides* — see `references/ci.md`.
 ```yaml
 publish:
   stage: deploy
+  # Flox is provided by the runner image; see flox.dev/download
   only:
-    - tags
+    - main
   script:
-    - flox --version  # Flox provided by the runner image; see flox.dev/download
     - flox publish -o myorg mypackage
 ```
 
+The branch-not-tag constraint above applies here too: a GitLab tag pipeline
+also checks out a detached HEAD, which `flox publish` refuses.
+
 Set `FLOX_FLOXHUB_TOKEN` as a masked CI/CD variable; GitLab exports it into the
-job, so `flox publish` picks it up with no separate login step. Install Flox in
+job, so `flox publish` picks it up with no separate login step. Provide Flox in
 the runner image (see `flox.dev/download`) rather than piping an installer into
 a shell at job time. As above, publishing needs the CLI on `PATH`, not an
 activated environment.

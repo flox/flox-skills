@@ -355,7 +355,7 @@ docker push registry.company.com/myapp:v1.0
 ```yaml
 containerize:
   stage: build
-  # Flox provided by the runner image; see flox.dev/download
+  # Flox is provided by the runner image; see flox.dev/download
   script:
     - flox containerize --tag $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG --runtime docker
     - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
