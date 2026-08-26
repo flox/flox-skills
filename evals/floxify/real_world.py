@@ -916,6 +916,12 @@ def process_entry(entry, skill_dir, activate=False, services=False,
                 "hard_count": len(verify_hard),
                 "advisory_count": len(verify_advisory),
                 "catalog_checked": verify_result.get("catalog_checked", False),
+                # Same field as run_floxify.py's record, for the same
+                # reason: an entry the catalog leg declined to check is
+                # neither a violation nor a confirmation, and zero
+                # violations is what both look like once the list is
+                # dropped. See _stats' verify_unknown.
+                "catalog_unknown": verify_result.get("catalog_unknown") or [],
             },
             "judge": verdict,
             # Full text persisted alongside the excerpt (AI-468) — forensics

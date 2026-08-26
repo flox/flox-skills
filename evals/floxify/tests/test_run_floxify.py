@@ -235,6 +235,51 @@ class TestCatalogNote(unittest.TestCase):
         self.assertIn("every installed pkg-path/version/system combination "
                       "was CONFIRMED", note)
 
+    def test_a_violation_does_not_hide_an_unchecked_entry(self):
+        # The two are independent facts about different entries, and
+        # reporting them exclusively told the judge about the violation
+        # and nothing about the entry beside it that was never checked --
+        # which is the shape this note exists to close, one branch over.
+        result = {
+            "catalog_checked": True,
+            "violations": [
+                {"rule": "catalog-systems-mismatch", "severity": "hard",
+                 "message": "nodejs_24 has no build for x86_64-darwin"},
+            ],
+            "catalog_unknown": [
+                {"install_id": "weird", "pkg_path": "weird-pkg",
+                 "version": "^2.0", "reason": "the reason it gave"},
+            ],
+        }
+        note = run_floxify._catalog_note(result)
+        self.assertIn("1 pkg-path/version/system violation", note)
+        self.assertIn("x86_64-darwin", note)
+        self.assertIn("could NOT be evaluated", note)
+        self.assertIn("the reason it gave", note)
+
+    def test_the_singular_verb_agrees(self):
+        result = {"catalog_checked": True, "violations": [],
+                  "catalog_unknown": [{"install_id": "weird",
+                                       "reason": "r"}]}
+        note = run_floxify._catalog_note(result)
+        self.assertIn("1 install entry could NOT be evaluated and was not "
+                      "confirmed either way", note)
+
+    def test_a_truncated_listing_says_so_and_keeps_the_count(self):
+        # The note ends by claiming every entry it did not name resolved,
+        # so an item dropped in silence is swept into a positive claim
+        # that is false about it.
+        result = {
+            "catalog_checked": True, "violations": [],
+            "catalog_unknown": [
+                {"install_id": f"p{i}", "reason": "r"} for i in range(9)
+            ],
+        }
+        note = run_floxify._catalog_note(result)
+        self.assertIn("9 install entries could NOT be evaluated", note)
+        self.assertIn("(first 5 of 9 shown)", note)
+        self.assertNotIn("p8", note)
+
 
 class TestStats(unittest.TestCase):
     """The harness leg is advisory (never gates --gate), so
@@ -243,13 +288,15 @@ class TestStats(unittest.TestCase):
     though nothing fails the build on it (see README's "Why verify.py is
     advisory in the harness")."""
 
-    def _result(self, hard_count, catalog_checked=True, judge_score=5):
+    def _result(self, hard_count, catalog_checked=True, judge_score=5,
+                catalog_unknown=None):
         return {
             "id": "x", "tier": "should", "ecosystem": "node",
             "hard_pass": True,
             "judge": {"score": judge_score, "correct": True, "issues": []},
             "verify": {"hard_count": hard_count, "advisory_count": 0,
-                      "catalog_checked": catalog_checked},
+                      "catalog_checked": catalog_checked,
+                      "catalog_unknown": list(catalog_unknown or [])},
         }
 
     def test_hard_violation_rate_reflects_fraction_with_violations(self):
@@ -277,6 +324,27 @@ class TestStats(unittest.TestCase):
         results = [self._result(0), self._result(0)]
         stats = run_floxify._stats(results)
         self.assertEqual(stats["verify_hard_violation_rate"], 0.0)
+
+    def test_unchecked_entries_are_counted_apart_from_clean_ones(self):
+        # `verify_clean` is "checked and no hard violation", and an entry
+        # the catalog leg DECLINED to check contributes zero violations
+        # -- so a fixture nothing could be established about scores
+        # exactly like one that was confirmed good. Both fixtures below
+        # are `verify_clean`; only one of them was actually verified.
+        results = [
+            self._result(0),
+            self._result(0, catalog_unknown=[{"install_id": "a"},
+                                             {"install_id": "b"}]),
+        ]
+        stats = run_floxify._stats(results)
+        self.assertEqual(stats["verify_clean"], 2)
+        self.assertEqual(stats["verify_unknown"], 1)
+        self.assertEqual(stats["verify_unknown_entries"], 2)
+
+    def test_no_unknowns_reports_zero_rather_than_nothing(self):
+        stats = run_floxify._stats([self._result(0), self._result(1)])
+        self.assertEqual(stats["verify_unknown"], 0)
+        self.assertEqual(stats["verify_unknown_entries"], 0)
 
 
 class TestVacuousRunMessage(unittest.TestCase):
