@@ -24,7 +24,7 @@ Two different questions, and the difference matters:
 | **Trigger reliability** | How *often* does a prompt make the agent reach for the skill? | **Not measured here.** Each cell gets **one** prompt, scored pass/fail. |
 
 Only `claude-native` and `codex-native` query the application itself (`claude
-plugin list`, `codex plugin list`). The other six assert on the filesystem: the
+plugin list`, `codex plugin list --json`). The other six assert on the filesystem: the
 skills.sh cells list the installer's destination and the Flox-package cells list
 `$FLOX_ENV/share/flox/<agent>`, which is the `skills-flox` package's own payload
 directory. Those six prove the files landed, not that the agent reads them —
@@ -32,6 +32,18 @@ and they match on `floxify`, so what they establish is that the install
 delivered this repo's skills, not that `flox` in particular arrived. `flox` is
 a substring of `floxify` and of `flox-skills`, so it cannot carry that
 distinction; making it carry one needs a stricter match than these checks have.
+
+The two native cells match `flox@flox-skills`, the exact id both CLIs print for
+an installed plugin, and the Codex one asks in JSON. `expect="flox"` was a live
+false pass there: `codex plugin list` prints a ``Marketplace `<name>` `` header
+*and* a row per plugin with a `not installed` status, and this repo's
+marketplace is named `flox-skills` with plugin `flox` — so registering the
+marketplace alone satisfied it, and so would a `flox@flox-skills` match, since
+that is the id the not-installed row prints too. `codex plugin list --json`
+without `--available` reports `{"installed": [], "available": []}` in that
+state and carries `"pluginId": "flox@flox-skills"` only once the plugin is
+really installed. `claude plugin list` prints installed plugins only, so the
+bare substring was merely loose there rather than wrong.
 
 The trigger half is a *smoke test*: one attempt per cell. A pass says the
 plumbing works end to end — the plugin installed, the agent started, the prompt
@@ -135,27 +147,36 @@ results, and prints exactly what each cell would run. `--load-only` is the next
 cheapest step: it short-circuits before the model call, so it answers load
 compatibility for every cell without a credential or a token.
 
-Results are merged by cell id into `results/<version>.jsonl` (gitignored, mode
-600, `--version` defaults to today in UTC), one JSON object per cell — `cell`,
+Results are merged into `results/<version>.jsonl` (gitignored, mode 600,
+`--version` defaults to today in UTC), one JSON object per cell — `cell`,
 `agent`, `install_method`, `image`, `load`, `trigger`, `evidence_class`,
 `load_evidence` and `trigger_evidence` transcript tails, and `notes` — plus a
 summary table on stdout. A `--cells` subset run updates only the cells it ran;
 the rest of the day's file survives, and an unknown cell id is an error rather
 than a silent smaller run.
 
+The merge is by cell id **and then by field**: a run that did not measure the
+trigger half cannot overwrite one that did. `--version` defaults to today, so
+without that rule the `--load-only` run recommended above would blank the
+`trigger`, `evidence_class` and `trigger_evidence` of an authenticated run made
+the same morning — exit 0, no warning. A preserved verdict says so in `notes`
+and on stderr. Each cell is written as it finishes, so an interrupt during a
+full run keeps every cell already paid for in rate limit.
+
 The exit status says what happened, so a release check does not have to parse
-the table. **The codes are ranked, not disjoint — the highest that applies
-wins**, so a wrapper testing only `-eq 1` will miss a run that also leaked a
-credential:
+the table. **The codes are not disjoint: 3 outranks every other code here**, so
+a wrapper testing only `-eq 1` will miss a run that also leaked a credential.
+Nothing else can co-occur — a run that never started ran no cells, and a bad
+argument started nothing — so 3-over-everything is the whole ranking rule:
 
 | code | meaning |
 |---|---|
 | 0 | everything the run attempted came out green |
 | 1 | a cell did not |
-| 2 | a bad `--cells` or `--version` argument |
-| 3 | a credential copy survived cleanup — outranks everything, it is the only outcome here with a security consequence |
+| 2 | a bad `--cells`, `--version` or `--timeout` argument |
+| 3 | a credential copy, or a container still holding one, survived cleanup — **outranks every code in this table**, including 5, because it is the only outcome here with a security consequence |
 | 4 | every failing cell failed on **credentials**, not on the skill; kept distinct because that is the distinction the runner exists to make |
-| 5 | the run never started — an image build failed, or the credentials could not be read |
+| 5 | the run never started — an image build failed, or the credentials could not be read. This covers a missing `docker` or `flox` and an unreadable, truncated or non-JSON credential file, not only the well-formed refusals |
 
 ## What a full run needs from you
 
@@ -195,25 +216,43 @@ Notion, Slack, Sentry, and friends). None of that is needed here, so
 - writes both copies mode 600, gives each cell its own copy (OAuth tokens are
   refreshed in place; mounting your live files would let a container race your
   own session), and **never** bakes a credential into an image layer;
-- mounts them **only into the trigger container**. The load check is
-  credential-free and now runs with nothing mounted. Note that every recorded
-  successful load — including the 8/8 in `reports/` — was produced *with* both
-  directories mounted, so the first `--load-only` run against logged-out CLIs
-  is what confirms the two native cells still install without a login. If they
-  do not, those two cells go red on the half this README calls deterministic.
+- mounts them **only into the trigger container**, and only the store
+  belonging to that cell's own agent. The load check is credential-free and
+  runs with nothing mounted. Note that every recorded successful load —
+  including the 8/8 in `reports/` — was produced *with* both directories
+  mounted, so the first `--load-only` run against logged-out CLIs is what
+  confirms the two native cells still install without a login. If they do not,
+  those two cells go red on the half this README calls deterministic.
 
 **Residual exposure, stated plainly.** The trigger container re-runs the cell's
-install step before launching the agent, and it does hold both tokens. So on
-the three skills.sh cells, `npx --yes skills add` — unpinned code fetched from
-npm at run time, running as root — executes with both OAuth files readable. The
-load half no longer does this, which is where the installer is exercised for its
-own sake; the trigger half needs the skill installed *and* the agent
-authenticated in one container. Narrowing it further means either splitting the
-trigger into two containers or gating each mount on `cell.agent`, and neither is
-done here — see the follow-ups in the PR description.
+install step before launching the agent, and it holds one token: the one that
+cell's own agent uses. So on the three skills.sh cells, `npx --yes skills add` —
+unpinned code fetched from npm at run time, running as root — still executes
+with that OAuth file readable, and on `opencode-npx` with neither. The load half
+does not do this at all, which is where the installer is exercised for its own
+sake; the trigger half needs the skill installed *and* the agent authenticated
+in one container. Narrowing it further means splitting the trigger into two
+containers, which is not done here — see the follow-ups in the PR description.
+
+Gating on `cell.agent` was deferred once, on the grounds that "nothing prepares
+an OpenCode credential at all, yet both OpenCode cells passed authenticated", so
+gating would redden two cells. That premise does not hold: the shipped OpenCode
+resolves credentials only from `$XDG_DATA_HOME/opencode/auth.json`, else
+`~/.local/share/opencode/auth.json`, and a binary scan of 1.18.23 finds
+`claudeAiOauth` zero times and no reference to either mounted path outside skill
+discovery. Those cells consumed neither directory, so gating leaves their
+credential state exactly as it was. **How the retained report's two OpenCode
+rows passed authenticated is therefore an open question** — see
+[`reports/`](reports/).
 
 The run directory is swept at the end — including files the container wrote as
-root — and any surviving credential copy is reported loudly as a `WARNING`.
+root — and anything that still holds a credential is reported loudly as a
+`WARNING`: a surviving copy, a directory the sweep could not read into, or a
+container that could not be reclaimed. Every `docker run` here carries a
+`--cidfile`, because `subprocess.run(timeout=)` kills the docker *client* while
+the container is a child of the daemon: a timed-out cell used to leave a root
+container running with the OAuth directory mounted read-write while the run
+reported no leak.
 
 ## What binds CI
 
@@ -235,6 +274,13 @@ The matrix itself is never run by CI and there is no scheduled job for it. It is
 run by hand when something it crosses changes: a new agent application, a new
 installation method, a new published `skills-flox`, or a release check.
 
+A new published `skills-flox` means **editing the pin** in
+`environments/withpkg/.flox/env/manifest.toml` and re-locking — `--rebuild` on
+its own re-runs `flox containerize` against the same lock and produces a
+byte-identical image, so the three flox-ai cells would keep exercising the
+superseded artifact while this README says they exercise the one a consumer
+installs. Check with `flox show flox/skills-flox`.
+
 These properties are pinned by tests because a green cell once meant nothing:
 
 - **Every verdict judges one step's output.** `run_matrix.py` emits a marker
@@ -247,8 +293,17 @@ These properties are pinned by tests because a green cell once meant nothing:
   exits 0 with the prompt dropped.
 - **A subset run merges into the day's results**, rather than rewriting the file
   with only the cells it ran — and a `--dry-run` writes nothing at all.
+- **A run that measured nothing overwrites nothing.** `--load-only` records
+  `not-attempted`, and that cannot replace a trigger verdict an authenticated
+  run of the same day already measured.
 - **A measured verdict survives the other half.** A trigger timeout or crash
-  leaves an already-passing `load` alone.
+  leaves an already-passing `load` alone — and a *load* timeout records the
+  trigger as `skipped`, because that container never started.
+- **Every failure to start exits 5, not 1.** A missing `docker`, a truncated
+  credential file, an unreadable one: each leaves its module as the one
+  exception type the caller catches.
+- **The leak alarm cannot fail open.** A directory the scan could not read and
+  a container docker could not be asked about both count as positives.
 - **The flox-ai patch warning is a note, not a verdict.** It once suppressed the
   evidence classifier outright, which excluded a healthy cell from the green
   count on every run.
