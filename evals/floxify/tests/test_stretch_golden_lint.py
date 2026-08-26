@@ -10,6 +10,12 @@ pkg-path, a version/system that does not resolve, a non-literal [vars], a
 tree-mutating hook, or packages that cannot co-resolve together is caught
 deterministically, no `claude` and no agent run required.
 
+Unknowns are deliberately un-allowlistable, here and in the sibling. An
+entry verify.py declined to check is not a defect to be carried with a
+ticket — it is a gold nothing can say is correct, and the remedy is
+always to write a `version` the checker can resolve rather than to
+record an exception. That is why neither `_lint` offers a valve for one.
+
 Only the goldens named in stretch.jsonl are linted here (not every file in
 expected/): the six original synthetic goldens predate this check and are out of
 scope for AI-431 — adding them is a separate change, exactly as AI-456/457
@@ -102,6 +108,31 @@ class TestStretchGoldenLint(unittest.TestCase):
                 f"stretch golden must be clean (unlike the real-world goldens, "
                 f"there is no KNOWN_VIOLATIONS allowlist here; fix the "
                 f"golden):\n{detail}"
+            )
+
+        # An entry that stops being CHECKABLE is the other way a golden
+        # leaves the verified set, and it is silent: verify.py reports no
+        # violation for it, so a `hard_violations`-only lint stays green
+        # over a gold whose pkg-path/version/systems nothing established.
+        # This tier has no KNOWN_VIOLATIONS valve at all, which is the
+        # enforcement rather than a gap — an unknown is not a defect to
+        # be tolerated with a ticket, it is a gold nobody can say is
+        # correct, and the fix is to write a version this checker can
+        # resolve. Same gate, same wording, as
+        # test_real_world_golden_lint.py's `_lint`.
+        unknown = result.get("catalog_unknown") or []
+        if unknown:
+            detail = "\n".join(
+                f"  {u['install_id']} ({u.get('pkg_path')}"
+                f"{'@' + str(u['version']) if u.get('version') else ''}): "
+                f"{u.get('reason', 'no reason recorded')}"
+                for u in unknown
+            )
+            self.fail(
+                f"{fixture_id}.toml has {len(unknown)} install entr"
+                f"{'y' if len(unknown) == 1 else 'ies'} the catalog leg could "
+                f"not evaluate — verification silently stopped covering "
+                f"{'it' if len(unknown) == 1 else 'them'}:\n{detail}"
             )
 
     def _lock(self, fixture_id, live_catalog=None, flox_available=None):

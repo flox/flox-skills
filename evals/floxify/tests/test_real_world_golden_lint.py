@@ -30,6 +30,12 @@ whichever mode was requested, so a silent skip (e.g. a future bug that
 makes check_catalog bail out even with flox present) can't masquerade as
 "genuinely clean."
 
+Unknowns are deliberately un-allowlistable. KNOWN_VIOLATIONS covers
+violations only; an entry verify.py declined to check is not a defect to
+be carried with a ticket but a gold nothing can say is correct, and the
+remedy is always to write a `version` the checker can resolve. Both
+`_lint`s therefore fail on a non-empty `catalog_unknown` with no valve.
+
 KNOWN_VIOLATIONS is an explicit allowlist, one entry per open golden
 defect, each tagged with the ticket that will resolve it. IT IS EMPTY
 RIGHT NOW — see the note at the assignment for what its last two entries
@@ -505,6 +511,57 @@ for _fixture_id in _GOLD_IDS:
         TestGoldenLint, _make_lock_test(_fixture_id).__name__,
         _make_lock_test(_fixture_id),
     )
+
+
+class TestUnknownGate(unittest.TestCase):
+    """The checkability half of `_lint`, unit-tested against a synthetic
+    record.
+
+    Same argument `TestAllowlistMatching` makes below: every committed
+    golden's `version` passes `_is_version_literal` and the offline path
+    returns `([], False, [])`, so this block's `detail` comprehension has
+    no live exerciser and would first run on the day it reports a real
+    problem. Needs no live catalog.
+    """
+
+    UNKNOWN = {"install_id": "node", "pkg_path": "nodejs_22",
+               "version": "^20.0", "reason": "the reason it gave"}
+
+    def _lint_over(self, unknown):
+        lint = TestGoldenLint("_lint")
+        with patch(f"{__name__}.verify",
+                   return_value={"violations": [],
+                                 "catalog_checked": True,
+                                 "catalog_unknown": unknown}):
+            lint._lint("sentry")
+
+    def test_a_clean_result_passes(self):
+        self._lint_over([])
+
+    def test_an_unknown_entry_fails_and_names_it(self):
+        with self.assertRaises(AssertionError) as caught:
+            self._lint_over([self.UNKNOWN])
+        message = str(caught.exception)
+        self.assertIn("1 install entry the catalog leg could not evaluate",
+                      message)
+        self.assertIn("node (nodejs_22@^20.0): the reason it gave", message)
+
+    def test_an_unknown_with_no_version_still_renders(self):
+        # `version` is None whenever no row was established as the one
+        # that applies -- the record deliberately does not name a row it
+        # only guessed at, and the render must not print a bare "@".
+        with self.assertRaises(AssertionError) as caught:
+            self._lint_over([{**self.UNKNOWN, "version": None}])
+        self.assertIn("node (nodejs_22): the reason it gave",
+                      str(caught.exception))
+        self.assertNotIn("@", str(caught.exception))
+
+    def test_the_plural_agrees(self):
+        with self.assertRaises(AssertionError) as caught:
+            self._lint_over([self.UNKNOWN, {**self.UNKNOWN,
+                                            "install_id": "pg"}])
+        self.assertIn("2 install entries the catalog leg could not evaluate",
+                      str(caught.exception))
 
 
 class TestAllowlistMatching(unittest.TestCase):
