@@ -9,7 +9,7 @@ trigger prompt file.
 Every command here was observed against a built image, not assumed:
 
     claude   -p "<prompt>" --output-format json   /  claude plugin list
-    codex    exec "<prompt>" --json               /  codex plugin list
+    codex    exec "<prompt>" --json               /  codex plugin list --json
     opencode run "<message>" --format json        /  no list subcommand exists,
                                                      so the load check is a
                                                      filesystem check
@@ -35,6 +35,32 @@ OPENCODE_LAUNCH = 'opencode run "$(cat {prompt})" --format json'
 CLAUDE_ARGS = '-p "$(cat {prompt})" --output-format json'
 CODEX_ARGS = 'exec "$(cat {prompt})" --json --skip-git-repo-check'
 OPENCODE_ARGS = 'run "$(cat {prompt})" --format json'
+
+# The exact token both CLIs print for an INSTALLED plugin, and the reason the
+# two native cells are the strongest in this matrix rather than the weakest.
+#
+# `expect="flox"` could not carry that claim on either of them. `claude plugin
+# list` prints installed plugins only, so the bare substring was merely loose
+# there — `flox` is inside `flox-skills` and inside the repo name. On
+# `codex-native` it was a live false pass: `codex plugin list` prints a
+# ``Marketplace `<name>` `` header AND a row per plugin with a `not installed`
+# status, and this repo's `.claude-plugin/marketplace.json` names the
+# marketplace `flox-skills` with plugin `flox` — so `codex plugin marketplace
+# add .` alone satisfies a `flox` match, and so does a `flox@flox-skills`
+# match, since that is the id the not-installed row prints too. Observed on
+# codex-cli 0.147.0:
+#
+#     PLUGIN            STATUS         VERSION  PATH
+#     flox@flox-skills  not installed           .../flox-plugin
+#
+# So the codex cell asks a different question instead. `codex plugin list
+# --json` reports `{"installed": [], "available": []}` for a registered but
+# uninstalled marketplace, and only `--available` — which this deliberately
+# omits — folds the marketplace's uninstalled plugins back in. After
+# `codex plugin add flox@flox-skills` the `installed` array carries
+# `"pluginId": "flox@flox-skills"`. Both states observed against 0.147.0.
+PLUGIN_ID = "flox@flox-skills"
+
 
 # skills.sh's own agent ids — NOT this matrix's agent names. `-a claude` is
 # rejected with "Invalid agents: claude"; the id is `claude-code`.
@@ -115,7 +141,7 @@ CELLS: tuple[Cell, ...] = (
     Cell(
         id="claude-native", agent="claude", install_method="native", image="base",
         install=f"claude plugin marketplace add {REPO} && claude plugin install flox@flox-skills",
-        list_cmd="claude plugin list", expect="flox",
+        list_cmd="claude plugin list", expect=PLUGIN_ID,
         launch=CLAUDE_LAUNCH,
     ),
     Cell(
@@ -135,7 +161,7 @@ CELLS: tuple[Cell, ...] = (
         install=(f"git clone --depth 1 https://github.com/{REPO}.git /work/flox-skills "
                  "&& cd /work/flox-skills && codex plugin marketplace add . "
                  "&& codex plugin add flox@flox-skills"),
-        list_cmd="codex plugin list", expect="flox",
+        list_cmd="codex plugin list --json", expect=PLUGIN_ID,
         launch=CODEX_LAUNCH,
     ),
     Cell(
