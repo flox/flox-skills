@@ -14,11 +14,13 @@ Two container facts shape this file, both observed against a built image:
     dies on any `$( )`, so each cell's script is written to a file and
     mounted.
 
-Exit status, highest number wins when several apply:
+Exit status. Only two of these can be true of one run at once — something the
+cleanup found, and whatever the run itself did — and 3 wins that, because it is
+the only outcome here with a security consequence:
     0  everything the run attempted came out green
     1  a cell did not
-    2  a bad `--cells` or `--version` argument
-    3  a credential copy survived cleanup
+    2  a bad `--cells`, `--version` or `--timeout` argument
+    3  a credential copy, or a container still holding one, survived cleanup
     4  every failing cell failed on credentials, not on the skill
     5  the run never started — an image build or credential read failed
 """
@@ -54,6 +56,9 @@ AUTH_MARKERS = ("/login", "invalid api key", "unauthorized", "not logged in",
 # Cleanup and image work must not hang a run: the sweep below is what deletes
 # the credential copies, and it runs in a `finally`.
 SWEEP_TIMEOUT = 120
+# Reclaiming a container is two `docker` calls plus an `inspect`, all of which
+# talk to a local daemon. Short, because they run in a `finally` too.
+KILL_TIMEOUT = 30
 # The verdict a row carries before either container has answered. Distinct from
 # "dry-run", which is a mode a run is deliberately in: the exception handlers
 # below use this to tell "the load half never ran" from "the load half ran and
@@ -67,7 +72,8 @@ VERSION_RE = re.compile(r"[0-9A-Za-z_][0-9A-Za-z._-]{0,127}")
 
 
 def docker_cmd(tag: str, creds_dir: Path, script: Path,
-               mount_credentials: bool) -> list[str]:
+               mount_credentials: bool, agent: str | None = None,
+               cidfile: Path | None = None) -> list[str]:
     """Build the `docker run` line for one cell.
 
     Credentials mount rw when they mount at all — these are OAuth tokens the
@@ -77,11 +83,33 @@ def docker_cmd(tag: str, creds_dir: Path, script: Path,
     `mount_credentials` is false for the load check, which is documented as
     credential-free and must not hand a live subscription token to `npx --yes
     skills add` — code fetched from the network at run time, running as root.
+
+    `agent` narrows the mount to that agent's own store. Every trigger
+    container used to receive both, so `npx --yes skills add` on a Codex cell
+    ran as root with the live Claude subscription token readable beside it for
+    no reason any cell needed. The premise for keeping it wide was that
+    "nothing prepares an OpenCode credential at all, yet both OpenCode cells
+    passed authenticated", so gating would redden them; a binary scan of the
+    shipped OpenCode (1.18.23) refutes it — its only credential resolver is
+    `$XDG_DATA_HOME/opencode/auth.json`, else
+    `~/.local/share/opencode/auth.json`, `claudeAiOauth` appears zero times,
+    and its only `/.claude` references are skill discovery. An OpenCode cell
+    therefore consumes neither mounted directory today, so gating leaves its
+    credential state exactly as it is. `agent=None` mounts every store, which
+    is what the load check would do if it mounted anything.
+
+    `cidfile` is how a timed-out container is reclaimed at all — see
+    `reclaim_containers`.
     """
     cmd = ["docker", "run", "--rm", "-e", f"HOME={CONTAINER_HOME}"]
+    if cidfile is not None:
+        cmd += ["--cidfile", str(cidfile)]
     if mount_credentials:
-        cmd += ["-v", f"{creds_dir}/claude:{CONTAINER_HOME}/.claude:rw",
-                "-v", f"{creds_dir}/codex:{CONTAINER_HOME}/.codex:rw"]
+        for store in creds.STORES:
+            if agent is not None and store.agent != agent:
+                continue
+            cmd += ["-v", f"{creds_dir}/{store.agent}:"
+                          f"{CONTAINER_HOME}/{store.container_dir}:rw"]
     cmd += ["-v", f"{PROMPT}:{CONTAINER_PROMPT}:ro",
             "-v", f"{script}:{CONTAINER_SCRIPT}:ro",
             tag, "bash", CONTAINER_SCRIPT]
@@ -139,9 +167,17 @@ def after_marker(text: str, marker: str) -> str:
     return text.split(marker, 1)[1]
 
 
-def list_output(stdout: str) -> str:
-    """The part of stdout the list command produced — nothing earlier."""
-    return after_marker(stdout, LIST_MARKER)
+def list_output(stdout: str, stderr: str = "") -> str:
+    """Both streams of the list command — never the install that preceded it.
+
+    It used to slice stdout alone while recording `stdout + stderr` beside the
+    verdict, so a `list_cmd` that renders on stderr produced a `fail` whose own
+    evidence field carried the expected token. `_emit` writes each marker to
+    both streams precisely so either can be sliced; the trigger half already
+    joined them.
+    """
+    return "\n".join((after_marker(stdout, LIST_MARKER),
+                      after_marker(stderr, LIST_MARKER)))
 
 
 def launch_output(stdout: str, stderr: str) -> str:
@@ -154,14 +190,36 @@ def _run(cell: Cell, tag: str, work: Path, include_launch: bool,
          timeout: int) -> subprocess.CompletedProcess:
     script = work / "cell.sh"
     script.write_text(cell_script(cell, include_launch))
-    return subprocess.run(
-        docker_cmd(tag, work, script, mount_credentials=include_launch),
-        capture_output=True, text=True, timeout=timeout)
+    # Docker refuses to start over a cidfile that already exists, and this
+    # path is reused when the trigger half follows the load half.
+    cidfile = work / ("trigger.cid" if include_launch else "load.cid")
+    cidfile.unlink(missing_ok=True)
+    try:
+        return subprocess.run(
+            docker_cmd(tag, work, script, mount_credentials=include_launch,
+                       agent=cell.agent, cidfile=cidfile),
+            capture_output=True, text=True, timeout=timeout)
+    except BaseException:
+        # A timeout — or a Ctrl-C — kills the docker CLI and leaves the
+        # container running. Reclaim it here rather than at the end of the
+        # run: the next cell mounts credentials of its own, and a root
+        # container still holding this one's is exactly what must not outlive
+        # the cell that started it. `cleanup_run_dir` sweeps again as a
+        # backstop, for the paths that never reach this handler.
+        reclaim_containers(work)
+        raise
 
 
 def _looks_like_auth_failure(text: str) -> bool:
     low = text.lower()
     return any(m in low for m in AUTH_MARKERS)
+
+
+def _halves(row: dict, verdict: str) -> tuple[str, str]:
+    """Apply `verdict` to the half that hit it, and name the other honestly."""
+    if row["load"] == NOT_RUN:
+        return verdict, "skipped"
+    return row["load"], verdict
 
 
 def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
@@ -174,7 +232,18 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
            "notes": ""}
     if dry_run:
         row["load"] = row["trigger"] = "dry-run"
-        row["notes"] = cell_script(cell, include_launch=False).replace("\n", " ; ")
+        # THE PLAN. Five surfaces promise a dry run prints what each cell would
+        # run — the module docstring, `--dry-run`'s help, the README, the
+        # "Adding a cell" checklist and the retained report — and until
+        # `summarize` rendered this field it was computed and thrown away. Both
+        # halves, because a full run starts two containers and checking a new
+        # cell's shell before spending one is the whole point.
+        plan = [("load", cell_script(cell, include_launch=False))]
+        if not load_only:
+            plan.append(("trigger", cell_script(cell, include_launch=True)))
+        row["notes"] = " | ".join(
+            f"{half}: {script.strip().replace(chr(10), ' ; ')}"
+            for half, script in plan)
         return row
 
     work.mkdir(parents=True, exist_ok=True)
@@ -184,7 +253,7 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
         # blocked, and it runs with none mounted.
         a = _run(cell, tag, work, include_launch=False, timeout=timeout)
         row["load_evidence"] = (a.stdout + a.stderr)[-2000:]
-        listed = list_output(a.stdout)
+        listed = list_output(a.stdout, a.stderr)
         row["load"] = "pass" if (a.returncode == 0 and cell.expect in listed) else "fail"
 
         if row["load"] != "pass":
@@ -229,14 +298,15 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
         # first and in its own container: when the trigger times out, the load
         # answer is already measured and throwing it away loses the half this
         # suite calls deterministic.
-        if row["load"] == NOT_RUN:
-            row["load"] = "timeout"
-        row["trigger"] = "timeout"
+        #
+        # And when the LOAD half is the one that timed out, the trigger was
+        # never launched — `skipped` is the word this file already owns for
+        # that, and recording `timeout` against a container that never started
+        # is a verdict about something that did not happen.
+        row["load"], row["trigger"] = _halves(row, "timeout")
         row["notes"] = f"exceeded {timeout}s for one container"
     except Exception as exc:  # a broken cell must not take the run down
-        if row["load"] == NOT_RUN:
-            row["load"] = "error"
-        row["trigger"] = "error"
+        row["load"], row["trigger"] = _halves(row, "error")
         row["notes"] = f"{type(exc).__name__}: {exc}"
     return row
 
@@ -282,6 +352,88 @@ def classify_trigger(text: str) -> str:
     return "weak"                      # ran, but nothing skill-specific surfaced
 
 
+def _container_gone(cid: str) -> bool:
+    """Is docker sure this container is no longer running?
+
+    Only an answer docker actually gave counts. A daemon that cannot be
+    reached, or a call that hangs, says nothing about whether a container is
+    still holding a credential mount — and this is the one alarm in the file
+    that must not fail open.
+    """
+    try:
+        proc = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", cid],
+            capture_output=True, text=True, timeout=KILL_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if proc.returncode != 0:
+        return True          # docker knows of no such container
+    return proc.stdout.strip() != "true"
+
+
+def reclaim_containers(root: Path) -> list[str]:
+    """Kill every container started under `root` that was not seen to exit.
+
+    `subprocess.run(timeout=)` SIGKILLs the docker CLI — but the container is
+    a child of the DAEMON, `--sig-proxy` cannot forward SIGKILL
+    (docker/cli#5489), and `--rm` fires only when the container exits. So a
+    cell that hit `--timeout` (600s by default, and a hung agent is the
+    ordinary reason to hit it) used to leave a root container running with the
+    OAuth directory bind-mounted read-write, while the run swept the host
+    directory, found it empty, and reported no leak. Nothing in the process
+    held a handle by which that container could even be named, which is why
+    every `docker run` here now writes a `--cidfile`.
+
+    Returns the ids that are still alive, in the words the leak alarm prints.
+    An id docker could not be asked about counts as alive: an unanswered
+    question is not an answer.
+    """
+    alive = []
+    for cidfile in sorted(_walk(root)[0]):
+        if cidfile.suffix != ".cid":
+            continue
+        try:
+            cid = cidfile.read_text().strip()
+        except OSError:
+            continue
+        if not cid:
+            continue
+        for argv in (["docker", "kill", cid], ["docker", "rm", "-f", cid]):
+            try:
+                subprocess.run(argv, capture_output=True, text=True,
+                               timeout=KILL_TIMEOUT)
+            except (OSError, subprocess.TimeoutExpired):
+                break
+        if not _container_gone(cid):
+            alive.append(f"container {cid} still holds this run's mounts")
+    return alive
+
+
+def _walk(root: Path) -> tuple[list[Path], list[Path]]:
+    """Every file under `root`, and every directory that could not be read.
+
+    `Path.rglob` silently skips the contents of a directory it cannot read
+    rather than raising: measured on CPython 3.14.4, `rglob("*")` over a tree
+    holding a mode-000 subdirectory containing `auth.json` returned the
+    directory, nothing inside it, and no exception. Containers write into
+    these trees as ROOT and root-owned residue is the expected case here, so
+    the credential alarm was failing open in precisely the state it exists
+    for. `os.walk(onerror=)` hands back the directory it could not descend,
+    and the caller counts that as a positive — the same absence-of-evidence
+    rule this runner already applies with `NOT_RUN` versus `dry-run`, and
+    `no-output` versus "never launched".
+    """
+    files: list[Path] = []
+    unreadable: list[Path] = []
+
+    def note(exc: OSError) -> None:
+        unreadable.append(Path(exc.filename or root))
+
+    for dirpath, _dirnames, filenames in os.walk(root, onerror=note):
+        files += [Path(dirpath) / name for name in filenames]
+    return files, unreadable
+
+
 def cleanup_run_dir(run_dir: Path, tag: str | None) -> list[str]:
     """Remove the run directory, including files the container wrote as root.
 
@@ -292,8 +444,11 @@ def cleanup_run_dir(run_dir: Path, tag: str | None) -> list[str]:
     things behind" is not a property this directory should have, so a
     container does the final sweep as root.
 
-    Returns any credential files that survived; a non-empty list is an alarm.
+    Returns everything that still holds a credential — surviving files, and
+    containers that could not be reclaimed. A non-empty list is an alarm.
     """
+    # Before the rmtree, which is what removes the cidfiles.
+    alive = reclaim_containers(run_dir)
     shutil.rmtree(run_dir, ignore_errors=True)
     if run_dir.exists() and tag:
         try:
@@ -301,20 +456,59 @@ def cleanup_run_dir(run_dir: Path, tag: str | None) -> list[str]:
                 ["docker", "run", "--rm", "-v", f"{run_dir}:/sweep", tag,
                  "bash", "-c", "rm -rf /sweep/* /sweep/.[!.]* 2>/dev/null || true"],
                 capture_output=True, text=True, timeout=SWEEP_TIMEOUT)
-        except subprocess.TimeoutExpired:
+        except (OSError, subprocess.TimeoutExpired):
             pass       # fall through to the scan: the alarm matters more
         shutil.rmtree(run_dir, ignore_errors=True)
     if not run_dir.exists():
-        return []
-    return [str(p) for p in run_dir.rglob("*")
-            if p.name in (".credentials.json", "auth.json")]
+        return alive
+    files, unreadable = _walk(run_dir)
+    return (alive
+            + [str(p) for p in files if p.name in creds.CREDENTIAL_FILENAMES]
+            + [f"{p} could not be read, so it may still hold a credential"
+               for p in unreadable])
+
+
+# Trigger verdicts a run records without having MEASURED anything. `NOT_RUN` is
+# the value a row is born with; `not-attempted` is what `--load-only` writes on
+# purpose. Neither is evidence about the trigger half, so neither may overwrite
+# a verdict some earlier run did measure.
+UNMEASURED_TRIGGER = (NOT_RUN, "not-attempted")
+# The three fields that carry the trigger half's answer.
+TRIGGER_FIELDS = ("trigger", "evidence_class", "trigger_evidence")
+
+
+def merge_row(prior: dict, new: dict) -> dict:
+    """`new` wins field by field, except where it measured nothing.
+
+    `--dry-run` is guarded a whole run at a time, one `if` in `main`; this is
+    the same rule per FIELD, for the half of a run that deliberately measures
+    nothing. A `--load-only` run used to replace the whole row by cell id, so
+    it turned an authenticated run's `trigger: pass` / `evidence_class:
+    answer-shaped` into `not-attempted` / `""` with the transcript emptied —
+    exit 0, no warning. `--version` defaults to today, so the `--load-only`
+    run the README recommends as the cheap next step was the run that
+    destroyed the evidence it would be checked against.
+    """
+    if not prior:
+        return dict(new)
+    merged = dict(new)
+    if (new.get("trigger") in UNMEASURED_TRIGGER
+            and prior.get("trigger") not in UNMEASURED_TRIGGER):
+        for field in TRIGGER_FIELDS:
+            if field in prior:
+                merged[field] = prior[field]
+        note = (f"trigger verdict '{prior.get('trigger')}' kept from an earlier "
+                f"run; this one did not attempt it")
+        merged["notes"] = f"{merged.get('notes', '')} {note}".strip()
+    return merged
 
 
 def write_results(path: Path, rows: list[dict]) -> None:
     """Merge `rows` into the day's results, keyed by cell id.
 
     A `--cells` subset run used to rewrite the file wholesale, silently
-    discarding every cell it did not run.
+    discarding every cell it did not run. Within a cell the merge is per
+    field — see `merge_row`.
 
     Written 0600 through a temp file: each row carries a transcript tail from a
     session that held live OAuth tokens, and a crash mid-write must not destroy
@@ -333,7 +527,11 @@ def write_results(path: Path, rows: list[dict]) -> None:
                 print(f"note: ignoring unreadable line {n} in {path}",
                       file=sys.stderr)
     for row in rows:
-        merged[row["cell"]] = row
+        prior = merged.get(row["cell"], {})
+        merged[row["cell"]] = merge_row(prior, row)
+        if merged[row["cell"]].get("trigger") != row.get("trigger"):
+            print(f"note: keeping the measured trigger verdict for "
+                  f"{row['cell']} from an earlier run", file=sys.stderr)
     order = {c.id: i for i, c in enumerate(CELLS)}
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -365,6 +563,9 @@ def summarize(rows: list[dict], load_only: bool = False,
     for r in rows:
         lines.append(f"{r['cell']:<20} {r['load']:<14} {r['trigger']:<14} "
                      f"{r.get('evidence_class', ''):<14}")
+        if dry_run and r.get("notes"):
+            # The plan `run_cell` computed. One line per half.
+            lines += [f"    {part}" for part in r["notes"].split(" | ")]
     lines.append("-" * 66)
     if dry_run:
         lines.append(f"{len(rows)} cells planned; nothing was run")
@@ -425,6 +626,12 @@ def main(argv: list[str] | None = None) -> int:
         # base:x` that lib/images.py's docstring exists to warn about.
         print(f"--version must match {VERSION_RE.pattern}", file=sys.stderr)
         return 2
+    if args.timeout <= 0:
+        # `--cells` and `--version` are both argument errors here; this was the
+        # odd one out. A non-positive budget turns every cell into a `timeout`
+        # verdict, indistinguishable in the results file from a real hang.
+        print("--timeout must be a positive number of seconds", file=sys.stderr)
+        return 2
     try:
         selected = select_cells(args.cells)
     except ValueError as exc:
@@ -436,9 +643,13 @@ def main(argv: list[str] | None = None) -> int:
         try:
             for name in sorted({c.image for c in selected}):
                 tags[name] = images.build(name, args.version, rebuild=args.rebuild)
-        except images.BuildError as exc:
+        except (images.BuildError, OSError) as exc:
             # "docker is not installed" and "the skill did not install" must not
             # be the same number now that the exit status is an interface.
+            # `lib/images.py` converts every launch failure into `BuildError`;
+            # `OSError` stays here so a future path that forgets cannot turn a
+            # missing binary back into exit 1. No run directory exists yet, so
+            # returning here cannot skip a leak check.
             print(f"image build failed: {exc}", file=sys.stderr)
             return 5
 
@@ -447,21 +658,30 @@ def main(argv: list[str] | None = None) -> int:
     # failure mode here with a security consequence — can still change it.
     rc = 0
     run_dir = Path(tempfile.mkdtemp(prefix="agent-compat-"))
+    results_file = RESULTS / f"{args.version}.jsonl"
     try:
+        started = True
         if not args.dry_run and not args.load_only:
             try:
                 creds.prepare(run_dir / "src")
             except creds.CredentialError as exc:
                 print(f"credentials unusable: {exc}", file=sys.stderr)
-                return 5
+                # ASSIGNED, not returned. `return 5` inside this `try` fixes
+                # the return value before the `finally` runs, which made the
+                # `rc = 3` below dead on the one path that reaches it most
+                # easily: `prepare` writes the Claude copy before it validates
+                # the Codex one, so a run that fails validation has already put
+                # a credential on disk. The leak alarm has to be able to
+                # outrank this.
+                rc, started = 5, False
         rows = []
-        for cell in selected:
+        for cell in selected if started else []:
             work = run_dir / cell.id
             if not args.dry_run:
-                for agent_dir in ("claude", "codex"):
-                    target = work / agent_dir
+                for store in creds.STORES:
+                    target = work / store.agent
                     target.mkdir(parents=True, exist_ok=True)
-                    src = run_dir / "src" / agent_dir
+                    src = run_dir / "src" / store.agent
                     if src.exists():
                         shutil.copytree(src, target, dirs_exist_ok=True)
             row = run_cell(cell, tags.get(cell.image, "dry-run"), work,
@@ -469,33 +689,39 @@ def main(argv: list[str] | None = None) -> int:
                            timeout=args.timeout)
             rows.append(row)
             print(f"{cell.id}: load {row['load']} / trigger {row['trigger']}")
-        # A dry run measured nothing, so it writes nothing. It used to stamp
-        # `dry-run` over every cell of an authenticated run from the same day —
-        # the data loss the merge-by-cell-id rule exists to prevent, arriving
-        # through the command the README recommends running first.
-        if args.dry_run:
-            print(f"(dry run: {RESULTS / f'{args.version}.jsonl'} not written)")
-        else:
-            write_results(RESULTS / f"{args.version}.jsonl", rows)
-        print(summarize(rows, load_only=args.load_only, dry_run=args.dry_run))
-        if not args.dry_run:
-            print(f"results: {RESULTS / f'{args.version}.jsonl'}")
-        # A dry run measured nothing, so it cannot be red.
-        if not args.dry_run:
-            bad = [r for r in rows if not is_green(r, args.load_only)]
-            if bad:
-                # `auth-error` is the one failure the runner separates from a
-                # skill failure on purpose, and collapsing it into the same
-                # exit code would undo that at the interface a release check
-                # actually reads.
-                rc = 4 if all(r["trigger"] == "auth-error" for r in bad) else 1
+            # Written per CELL, not once after the loop. A full authenticated
+            # run is sixteen containers over hours, and an interrupt at cell
+            # seven used to discard the six already paid for in rate limit.
+            # `write_results` merges by cell id, so one row at a time costs a
+            # rewrite of a file that holds at most eight.
+            if not args.dry_run:
+                write_results(results_file, [row])
+        if started:
+            if args.dry_run:
+                # A dry run measured nothing, so it writes nothing. It used to
+                # stamp `dry-run` over every cell of an authenticated run from
+                # the same day — the data loss the merge rules exist to
+                # prevent, arriving through the command the README recommends
+                # running first.
+                print(f"(dry run: {results_file} not written)")
+            print(summarize(rows, load_only=args.load_only, dry_run=args.dry_run))
+            if not args.dry_run:
+                print(f"results: {results_file}")
+                # A dry run measured nothing, so it cannot be red.
+                bad = [r for r in rows if not is_green(r, args.load_only)]
+                if bad:
+                    # `auth-error` is the one failure the runner separates from
+                    # a skill failure on purpose, and collapsing it into the
+                    # same exit code would undo that at the interface a release
+                    # check actually reads.
+                    rc = 4 if all(r["trigger"] == "auth-error" for r in bad) else 1
     finally:
         leaked = cleanup_run_dir(run_dir, next(iter(tags.values()), None))
         if leaked:
-            # Outranks every other outcome: it is the only one with a security
-            # consequence, so a wrapper branching on it must not be able to
-            # miss it behind a red cell.
-            print(f"WARNING: credential copies survived cleanup: {leaked}",
+            # Outranks every other outcome, code 5 included: it is the only one
+            # with a security consequence, so a wrapper branching on it must
+            # not be able to miss it behind a red cell or a failed start.
+            print(f"WARNING: credentials survived cleanup: {leaked}",
                   file=sys.stderr)
             rc = 3
         elif run_dir.exists():
