@@ -935,5 +935,212 @@ to flox activate -- bash. For now:
         self.assertFalse(run.CHECKS["ci_uses_activate_mechanism"](answer))
 
 
+class TestCiCheckRegressions(unittest.TestCase):
+    """AI-511 review (PR #100): shapes the first cut of these checks got wrong.
+
+    Every case here is one a reviewer demonstrated against the original
+    regexes. They are grouped by the defect class rather than by check,
+    because the two checks failed the same answers for related reasons.
+    """
+
+    # --- correct answers the checks must not red -----------------------------
+
+    def test_plain_run_activation_is_a_mechanism(self):
+        """`run: flox activate -- pytest` is the once-per-script form ci.md
+        teaches, and this suite's own SINGLE_ACTIVATE_OK calls it fine."""
+        answer = """```yaml
+- name: Test
+  run: flox activate -- pytest
+```
+"""
+        self.assertTrue(run.CHECKS["ci_uses_activate_mechanism"](answer))
+
+    def test_double_quoted_shell_scalar_is_a_mechanism(self):
+        answer = """```yaml
+- shell: "flox activate -- bash --noprofile --norc -e -o pipefail {0}"
+  run: |
+    pytest
+```
+"""
+        self.assertTrue(run.CHECKS["ci_uses_activate_mechanism"](answer))
+
+    def test_single_quoted_shell_scalar_is_a_mechanism(self):
+        answer = """```yaml
+- shell: 'flox activate -- bash -e -o pipefail {0}'
+  run: |
+    pytest
+```
+"""
+        self.assertTrue(run.CHECKS["ci_uses_activate_mechanism"](answer))
+
+    def test_job_level_defaults_shell_is_a_mechanism(self):
+        """ci.md recommends this form; it passed only incidentally before."""
+        answer = """```yaml
+jobs:
+  test:
+    defaults:
+      run:
+        shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
+    steps:
+      - run: pytest
+```
+"""
+        self.assertTrue(run.CHECKS["ci_uses_activate_mechanism"](answer))
+
+    def test_labeled_counter_example_does_not_red_a_correct_answer(self):
+        """evals/README.md: "A correct answer often illustrates the
+        anti-pattern as a labeled counter-example, so a negative or proximity
+        check false-fires on good answers." This is that case."""
+        answer = """Use one activation for the whole block:
+
+```yaml
+- name: Checks
+  shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
+  run: |
+    pytest
+    ruff check .
+```
+
+Do NOT repeat the activation per line:
+
+```yaml
+- name: Checks
+  run: |
+    flox activate -- pytest
+    flox activate -- ruff check .
+```
+"""
+        self.assertTrue(run.CHECKS["ci_no_repeated_activate"](answer))
+
+    def test_the_reference_itself_passes(self):
+        """`ci.md` is the answer shape the skill trains models to produce."""
+        doc = (run.PLUGIN_DIR / "skills" / "flox" / "references" / "ci.md").read_text()
+        self.assertTrue(run.CHECKS["ci_no_repeated_activate"](doc))
+        self.assertTrue(run.CHECKS["ci_uses_activate_mechanism"](doc))
+
+    # --- broken answers the checks must not green ----------------------------
+
+    def test_commented_out_action_is_not_a_mechanism(self):
+        """Relocating the prose case one line down, into the fence."""
+        answer = """```yaml
+- name: Test
+  # uses: flox/activate-action@7065dcbe5583b7b015f07a8ebd49d7266e3053e8
+  run: pytest
+```
+"""
+        self.assertFalse(run.CHECKS["ci_uses_activate_mechanism"](answer))
+
+    def test_commented_out_shell_is_not_a_mechanism(self):
+        answer = """```yaml
+- name: Test
+  # shell: flox activate -- bash -e -o pipefail {0}
+  run: pytest
+```
+"""
+        self.assertFalse(run.CHECKS["ci_uses_activate_mechanism"](answer))
+
+    # --- violations the line anchor let through ------------------------------
+
+    def test_activation_behind_cd_is_counted(self):
+        answer = """```yaml
+- run: |
+    cd api && flox activate -- pytest
+    cd web && flox activate -- npm test
+```
+"""
+        self.assertFalse(run.CHECKS["ci_no_repeated_activate"](answer))
+
+    def test_activation_behind_a_prefix_command_is_counted(self):
+        answer = """```yaml
+- run: |
+    time flox activate -- pytest
+    env CI=1 flox activate -- ruff check .
+```
+"""
+        self.assertFalse(run.CHECKS["ci_no_repeated_activate"](answer))
+
+    def test_two_activations_chained_on_one_line_are_counted(self):
+        answer = """```yaml
+- run: |
+    flox activate -- pytest && flox activate -- ruff check .
+```
+"""
+        self.assertFalse(run.CHECKS["ci_no_repeated_activate"](answer))
+
+    # --- fence shapes that yielded zero blocks -------------------------------
+
+    def test_crlf_answer_is_scanned(self):
+        answer = ("```yaml\r\n- name: Test\r\n  run: |\r\n"
+                  "    flox activate -- pytest\r\n"
+                  "    flox activate -- ruff check .\r\n```\r\n")
+        self.assertFalse(run.CHECKS["ci_no_repeated_activate"](answer))
+
+    def test_yml_fence_is_scanned(self):
+        answer = """```yml
+- shell: flox activate -- bash -e -o pipefail {0}
+  run: |
+    pytest
+```
+"""
+        self.assertTrue(run.CHECKS["ci_uses_activate_mechanism"](answer))
+
+    def test_attributed_info_string_is_scanned(self):
+        answer = """```yaml title="ci.yml"
+- shell: flox activate -- bash -e -o pipefail {0}
+  run: |
+    pytest
+```
+"""
+        self.assertTrue(run.CHECKS["ci_uses_activate_mechanism"](answer))
+
+    def test_answer_truncated_mid_fence_is_scanned(self):
+        answer = """```yaml
+- name: Test
+  run: |
+    flox activate -- pytest
+    flox activate -- ruff check ."""
+        self.assertFalse(run.CHECKS["ci_no_repeated_activate"](answer))
+
+    # --- shapes the code admits, pinned so a later tightening cannot drop them
+
+    def test_folded_run_scalar_is_scanned(self):
+        """`run: >` is the other block-scalar spelling _RUN_SCALAR admits."""
+        answer = """```yaml
+- name: Test
+  run: >
+    flox activate -- pytest
+    && flox activate -- ruff check .
+```
+"""
+        self.assertFalse(run.CHECKS["ci_no_repeated_activate"](answer))
+
+    def test_uppercase_fence_info_is_scanned(self):
+        answer = """```YAML
+- shell: flox activate -- bash -e -o pipefail {0}
+  run: |
+    pytest
+```
+"""
+        self.assertTrue(run.CHECKS["ci_uses_activate_mechanism"](answer))
+
+    def test_activate_action_in_a_uses_key_only(self):
+        """The action name in a `with:` value is not a mechanism."""
+        answer = """```yaml
+- uses: actions/github-script@v7
+  with:
+    script: console.log("see flox/activate-action for CI")
+```
+"""
+        self.assertFalse(run.CHECKS["ci_uses_activate_mechanism"](answer))
+
+    def test_a_bash_fence_is_not_mistaken_for_a_workflow(self):
+        answer = """```bash
+flox activate -- pytest
+flox activate -- ruff check .
+```
+"""
+        self.assertTrue(run.CHECKS["ci_no_repeated_activate"](answer))
+
+
 if __name__ == "__main__":
     unittest.main()
