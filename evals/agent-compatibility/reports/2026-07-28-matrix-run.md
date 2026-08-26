@@ -8,11 +8,18 @@ OpenCode and `npx skills add`.)
 **Run conditions:** images `hosts-base:20260728` / `hosts-withpkg:20260728`
 (the environments have since been renamed `agent-compat-*`), both built from
 `flox/skills-flox@1.0.0` as published. Claude Code 2.1.220, codex-cli 0.145.0,
-OpenCode 1.18.8. Full authenticated run, one prompt per cell.
+OpenCode 1.18.8. Full authenticated run, one prompt per cell. **Both credential
+directories were mounted into every container of this run, including the load
+half** — the runner mounts nothing into the load container now, and mounts only
+the cell's own agent's store into the trigger one, so the 8/8 load column here
+is not evidence that the two native cells install without a login. That is the
+caveat the README's *What leaves your machine* section raises about these
+numbers, and it belongs in the conditions rather than only beside them.
 
-**Conclusion:** 8/8 install, and 8/8 produced skill-shaped
-answers. No cell proves the model *invoked* the skill — see "What
-answer-shaped means" below — and that is not what AI-497 asked.
+**Conclusion:** 6/8 stand. 8/8 installed and 8/8 produced skill-shaped
+answers as recorded, but **the two OpenCode rows are unexplained** and should
+not be cited — see below. No cell proves the model *invoked* the skill — see
+"What answer-shaped means" below — and that is not what AI-497 asked.
 
 **Owner:** Bill LeVine (bill@flox.dev). **Lifecycle:** superseded by the next
 full authenticated run of the same matrix, at which point this file is deleted
@@ -26,15 +33,43 @@ rather than archived — see the README's *Retained evidence* section.
 | codex-native | pass | pass | answer-shaped | ✅ |
 | codex-npx | pass | pass | answer-shaped | ✅ |
 | codex-flox-ai | pass | pass | **not-injected** | ✅ false alarm — see below |
-| opencode-npx | pass | pass | answer-shaped | ✅ |
-| opencode-flox-ai | pass | pass | answer-shaped | ✅ |
+| opencode-npx | pass | pass | answer-shaped | ⚠️ unexplained — see below |
+| opencode-flox-ai | pass | pass | answer-shaped | ⚠️ unexplained — see below |
 
-**8/8 install. 8/8 produced skill-shaped answers** — the
+**8/8 install. 8/8 produced skill-shaped answers as recorded** — the
 lone `not-injected` flag proved to be a flox-ai reporting bug, not a failure.
+The two ⚠️ rows are a later finding about the *evidence*, not a re-scoring of
+the run: see below.
 
 The `not-injected` class no longer exists: that investigation is why the
 warning became a `notes` entry instead of a verdict, so a re-run of this matrix
 records `codex-flox-ai` as `answer-shaped` with the warning beside it.
+
+## The two OpenCode rows are unexplained
+
+Recorded 2026-08-26, while addressing review of the runner. **These two rows
+cannot be produced by any code on this branch, and this report should not be
+cited for OpenCode compatibility until a rerun explains them.**
+
+Nothing in the runner prepares or mounts an OpenCode credential: `creds.prepare`
+writes the Claude and Codex files only, and `docker_cmd` mounted only those two
+directories. A binary scan of the shipped OpenCode (1.18.23, `flox/opencode`)
+finds its sole credential resolver to be `$XDG_DATA_HOME/opencode/auth.json`,
+else `~/.local/share/opencode/auth.json`; `claudeAiOauth` and
+`.credentials.json` each appear zero times, and its only `/.claude` references
+are skill discovery. So the container OpenCode ran in had no login it could
+read, and an authenticated `trigger: pass` is not accounted for.
+
+The obvious alternative explanation is ruled out too: none of the five
+`FINGERPRINTS` tokens appears in `prompts/trigger.txt`, so an echoed prompt
+cannot reach the two-hit `answer-shaped` threshold.
+
+Since `trigger_evidence` was not retained for this run, the transcripts that
+would settle it are gone. **What would settle it:** a rerun of
+`--cells opencode-npx,opencode-flox-ai` that keeps `trigger_evidence` and
+records what OpenCode actually did. Until then the load column for those two
+cells stands on its own — it is a filesystem check and needs no credential —
+and the trigger column does not.
 
 ## What "answer-shaped" means, and what it does not
 
@@ -80,8 +115,10 @@ injected
 
 So all three Codex paths work. The defect is a cosmetic false alarm in
 flox-ai's patch detection, which should resolve the real binary (follow Nix
-wrapper indirection) before scanning. Worth an issue against flox-ai — not
-against this repo, and not a blocker for 1.0.
+wrapper indirection) before scanning. Worth an issue against
+[`flox/flox-agent`](https://github.com/flox/flox-agent) — where this code
+actually lives; `flox-ai` is not a repository — not against this repo, and not
+a blocker for 1.0. No issue has been filed yet.
 
 Background: flox-ai ADR-0011 ("Inject codex fragments via a downstream env-var
 patch") explains the seams. Codex exposes none of the injection flags flox-ai
