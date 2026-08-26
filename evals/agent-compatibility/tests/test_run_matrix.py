@@ -10,8 +10,12 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import run_matrix
-from lib import images
+from lib import creds, images
 from lib.cells import CELLS
+
+# Captured before any test patches `creds.prepare`: `run_matrix.creds` IS this
+# module object, so a test that wants the real function has to have kept it.
+REAL_PREPARE = creds.prepare
 
 
 def cell(cell_id):
@@ -145,7 +149,14 @@ class TestRunCell(unittest.TestCase):
         self.assertEqual(run_matrix.list_output(text).strip(), "real output")
 
     def test_list_output_is_empty_when_marker_missing(self):
-        self.assertEqual(run_matrix.list_output("flox everywhere"), "")
+        self.assertEqual(run_matrix.list_output("flox everywhere", "").strip(), "")
+
+    def test_list_output_reads_stderr_too(self):
+        """`_emit` writes the marker to BOTH streams so either can be sliced.
+        A `list_cmd` that renders on stderr used to record the expected token
+        in `load_evidence` and a `fail` beside it."""
+        out = run_matrix.list_output("", f"{run_matrix.LIST_MARKER}\nflox@flox-skills")
+        self.assertIn("flox@flox-skills", out)
 
     @patch("run_matrix.subprocess.run")
     def test_load_fails_when_expect_absent(self, run):
@@ -158,7 +169,7 @@ class TestRunCell(unittest.TestCase):
     @patch("run_matrix.subprocess.run")
     def test_auth_failure_is_reported_distinctly(self, run):
         run.side_effect = [
-            subprocess.CompletedProcess([], 0, stdout=run_matrix.LIST_MARKER + "\nflox",
+            subprocess.CompletedProcess([], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills",
                                         stderr=""),
             subprocess.CompletedProcess(
                 [], 1, stdout="",
@@ -184,7 +195,7 @@ class TestRunCell(unittest.TestCase):
     @patch("run_matrix.subprocess.run")
     def test_load_only_never_launches(self, run):
         run.return_value = subprocess.CompletedProcess(
-            [], 0, stdout=run_matrix.LIST_MARKER + "\nflox", stderr="")
+            [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr="")
         with TemporaryDirectory() as tmp:
             out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp), load_only=True)
         self.assertEqual(out["trigger"], "not-attempted")
@@ -195,7 +206,7 @@ class TestRunCell(unittest.TestCase):
     @patch("run_matrix.subprocess.run")
     def test_prompt_placeholder_is_substituted(self, run):
         run.return_value = subprocess.CompletedProcess(
-            [], 0, stdout=run_matrix.LIST_MARKER + "\nflox", stderr="")
+            [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr="")
         with TemporaryDirectory() as tmp:
             run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp))
             script = (Path(tmp) / "cell.sh").read_text()
@@ -258,7 +269,7 @@ class TestAuthDetection(unittest.TestCase):
         answer = ("PostgreSQL is socket-only and uses trust authentication, so "
                   "this is for local development. pkg-path python312 [services]")
         run.side_effect = [
-            subprocess.CompletedProcess([], 0, stdout=run_matrix.LIST_MARKER + "\nflox",
+            subprocess.CompletedProcess([], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills",
                                         stderr=""),
             subprocess.CompletedProcess(
                 [], 0, stdout=run_matrix.LAUNCH_MARKER + "\n" + answer, stderr=""),
@@ -270,7 +281,7 @@ class TestAuthDetection(unittest.TestCase):
     @patch("run_matrix.subprocess.run")
     def test_a_real_auth_failure_still_reports(self, run):
         run.side_effect = [
-            subprocess.CompletedProcess([], 0, stdout=run_matrix.LIST_MARKER + "\nflox",
+            subprocess.CompletedProcess([], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills",
                                         stderr=""),
             subprocess.CompletedProcess(
                 [], 1, stdout="",
@@ -346,7 +357,7 @@ class TestMarkerScoping(unittest.TestCase):
         with patch("run_matrix.subprocess.run") as run:
             run.side_effect = [
                 subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox", stderr=""),
+                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr=""),
                 # No launch marker: the script died in the install step.
                 subprocess.CompletedProcess([], 1, stdout="", stderr=install_failure),
             ]
@@ -358,7 +369,7 @@ class TestMarkerScoping(unittest.TestCase):
         with patch("run_matrix.subprocess.run") as run:
             run.side_effect = [
                 subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox", stderr=""),
+                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr=""),
                 subprocess.CompletedProcess(
                     [], 1, stdout="", stderr=run_matrix.LAUNCH_MARKER + "\nPlease run /login"),
             ]
@@ -371,7 +382,7 @@ class TestMarkerScoping(unittest.TestCase):
         with patch("run_matrix.subprocess.run") as run:
             run.side_effect = [
                 subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox", stderr=""),
+                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr=""),
                 subprocess.CompletedProcess(
                     [], 0, stdout=chatter + run_matrix.LAUNCH_MARKER + "\nhello", stderr=""),
             ]
@@ -390,7 +401,7 @@ class TestVerdictsSurviveEachOther(unittest.TestCase):
         with patch("run_matrix.subprocess.run") as run:
             run.side_effect = [
                 subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox", stderr=""),
+                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr=""),
                 subprocess.TimeoutExpired(cmd="docker", timeout=600),
             ]
             with TemporaryDirectory() as tmp:
@@ -405,11 +416,29 @@ class TestVerdictsSurviveEachOther(unittest.TestCase):
                 out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp))
         self.assertEqual(out["load"], "timeout")
 
+    def test_a_load_timeout_does_not_claim_the_trigger_timed_out(self):
+        """The trigger container never started, so `timeout` was a verdict
+        about something that did not happen. `skipped` is the word this file
+        already owns for "the load half did not pass, so the trigger was not
+        attempted"."""
+        with patch("run_matrix.subprocess.run",
+                   side_effect=subprocess.TimeoutExpired(cmd="docker", timeout=600)):
+            with TemporaryDirectory() as tmp:
+                out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp))
+        self.assertEqual(out["trigger"], "skipped")
+
+    def test_a_load_crash_does_not_claim_the_trigger_errored(self):
+        with patch("run_matrix.subprocess.run", side_effect=RuntimeError("boom")):
+            with TemporaryDirectory() as tmp:
+                out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp))
+        self.assertEqual(out["load"], "error")
+        self.assertEqual(out["trigger"], "skipped")
+
     def test_a_trigger_crash_keeps_a_load_pass(self):
         with patch("run_matrix.subprocess.run") as run:
             run.side_effect = [
                 subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox", stderr=""),
+                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr=""),
                 RuntimeError("boom"),
             ]
             with TemporaryDirectory() as tmp:
@@ -421,7 +450,7 @@ class TestVerdictsSurviveEachOther(unittest.TestCase):
         with patch("run_matrix.subprocess.run") as run:
             run.side_effect = [
                 subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox plugin listed", stderr=""),
+                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills plugin listed", stderr=""),
                 subprocess.CompletedProcess(
                     [], 0, stdout=run_matrix.LAUNCH_MARKER + "\npkg-path [services]", stderr=""),
             ]
@@ -452,7 +481,7 @@ class TestCredentialMounts(unittest.TestCase):
     def test_run_cell_mounts_credentials_only_for_the_launch(self):
         with patch("run_matrix.subprocess.run") as run:
             run.return_value = subprocess.CompletedProcess(
-                [], 0, stdout=run_matrix.LIST_MARKER + "\nflox", stderr="")
+                [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr="")
             with TemporaryDirectory() as tmp:
                 run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp),
                                     load_only=True)
@@ -535,22 +564,32 @@ class TestMain(unittest.TestCase):
         self.assertEqual(self._main(["--dry-run", "--version", "20260813"]), 0)
         self.assertEqual(self._main(["--dry-run", "--version", "v1.2_rc-3"]), 0)
 
-    def _run_main_with(self, rows, argv, leaked=None, build=None):
+    def _run_main_with(self, rows, argv, leaked=None, build=None, prepare=None,
+                       results_dir=None):
         """Drive `main` with the containers mocked out.
 
         `cleanup_run_dir` is stubbed, and it is the only thing that removes
         `main`'s `mkdtemp` — so the run directory is redirected into the test's
         own temp tree rather than abandoned under /tmp.
+
+        `prepare` is a side effect for `creds.prepare`, and it is why several
+        of this file's blocking defects survived a 97-test suite: the harness
+        always stubbed it to a no-op, so no test here could express "credential
+        preparation failed", and the only reachable image failure was the
+        synthetic `BuildError` the code already caught. A mock that can only
+        produce the exception the code handles can never fail.
+
+        `results_dir` lets a caller seed and then read the day's results file.
         """
         with TemporaryDirectory() as tmp:
-            results = Path(tmp) / "results"
+            results = Path(results_dir) if results_dir else Path(tmp) / "results"
             runs = Path(tmp) / "run"
             runs.mkdir()
             with patch("run_matrix.RESULTS", results), \
                  patch("run_matrix.tempfile.mkdtemp", return_value=str(runs)), \
                  patch("run_matrix.images.build",
                        side_effect=build, return_value="img:1"), \
-                 patch("run_matrix.creds.prepare"), \
+                 patch("run_matrix.creds.prepare", side_effect=prepare), \
                  patch("run_matrix.cleanup_run_dir", return_value=leaked or []), \
                  patch("run_matrix.run_cell", side_effect=rows):
                 return self._main(argv)
@@ -601,6 +640,150 @@ class TestMain(unittest.TestCase):
         rc = self._run_main_with(self._green(), [],
                                  build=run_matrix.images.BuildError("no docker"))
         self.assertEqual(rc, 5)
+
+    def test_a_missing_docker_binary_exits_5_not_1(self):
+        """`subprocess.run` raises before any `CompletedProcess` exists, so
+        `build()` never got to construct a `BuildError` and this tracebacked
+        out of `main` with 1 — "a cell did not come out green" — on a machine
+        that had simply never installed docker."""
+        rc = self._run_main_with(
+            self._green(), [],
+            build=FileNotFoundError(2, "No such file or directory", "docker"))
+        self.assertEqual(rc, 5)
+
+    @staticmethod
+    def _real_prepare(claude_src, codex_src):
+        """A side effect that runs the REAL `creds.prepare` on given sources.
+
+        Handing `main` a pre-cooked exception would only test the `except`
+        clause it already had. These two cases are about what `prepare` itself
+        lets escape, so the real function has to run.
+        """
+        return lambda dest: REAL_PREPARE(dest, claude_src, codex_src)
+
+    def test_a_malformed_credential_file_exits_5_not_1(self):
+        """A half-written `~/.claude/.credentials.json` is a realistic state on
+        a machine where Claude Code is refreshing tokens concurrently, which is
+        exactly when someone runs this. `JSONDecodeError` is not
+        `CredentialError`, so it used to escape `prepare` and traceback out."""
+        with TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "claude.json"
+            bad.write_text('{"claudeAiOauth": ')       # truncated mid-refresh
+            ok = Path(tmp) / "codex.json"
+            ok.write_text('{"auth_mode": "chatgpt"}')
+            rc = self._run_main_with(self._green(), [],
+                                     prepare=self._real_prepare(bad, ok))
+        self.assertEqual(rc, 5)
+
+    def test_an_unreadable_credential_file_exits_5_not_1(self):
+        with TemporaryDirectory() as tmp:
+            locked = Path(tmp) / "claude.json"
+            locked.write_text("{}")
+            os.chmod(locked, 0)
+            ok = Path(tmp) / "codex.json"
+            ok.write_text('{"auth_mode": "chatgpt"}')
+            try:
+                rc = self._run_main_with(self._green(), [],
+                                         prepare=self._real_prepare(locked, ok))
+            finally:
+                os.chmod(locked, 0o600)
+        self.assertEqual(rc, 5)
+
+    def test_a_credential_file_that_is_not_an_object_exits_5(self):
+        with TemporaryDirectory() as tmp:
+            wrong = Path(tmp) / "claude.json"
+            wrong.write_text('["not", "an", "object"]')
+            ok = Path(tmp) / "codex.json"
+            ok.write_text('{"auth_mode": "chatgpt"}')
+            rc = self._run_main_with(self._green(), [],
+                                     prepare=self._real_prepare(wrong, ok))
+        self.assertEqual(rc, 5)
+
+    def test_a_credential_leak_outranks_an_all_auth_error_run(self):
+        """3-over-1 was pinned; 3-over-4 was not, and 4 is the code an
+        all-credentials run reaches."""
+        rows = [dict(r, trigger="auth-error") for r in self._green()]
+        rc = self._run_main_with(rows, [], leaked=["/tmp/x/codex/auth.json"])
+        self.assertEqual(rc, 3)
+
+    def test_a_credential_leak_outranks_a_failed_start(self):
+        """`return 5` fixed the return value before the `finally` ran, so the
+        `rc = 3` assignment after `cleanup_run_dir` was dead on this path —
+        and it is the easiest path to reach: `prepare` writes the Claude copy
+        BEFORE it validates the Codex one, so a run that fails validation has
+        already put a credential on disk. The run printed the WARNING and
+        exited 5: human-visible, and not machine-readable."""
+        rc = self._run_main_with(
+            self._green(), [],
+            prepare=run_matrix.creds.CredentialError("carries OPENAI_API_KEY"),
+            leaked=["/tmp/x/claude/.credentials.json"])
+        self.assertEqual(rc, 3)
+
+    def test_a_failed_credential_prepare_runs_no_cell(self):
+        """`side_effect` is a one-shot list: a cell that ran would consume it
+        and this would raise StopIteration rather than return."""
+        rc = self._run_main_with(
+            [], [], prepare=run_matrix.creds.CredentialError("no login"))
+        self.assertEqual(rc, 5)
+
+    def test_a_load_only_run_does_not_destroy_a_measured_trigger(self):
+        """The blocking case: `--version` defaults to today, so the
+        `--load-only` run the README recommends as the cheap next step was the
+        run that erased the authenticated evidence it would be checked
+        against."""
+        with TemporaryDirectory() as tmp:
+            results = Path(tmp) / "results"
+            out = results / "20260826.jsonl"
+            run_matrix.write_results(out, [{
+                "cell": "claude-native", "load": "pass", "trigger": "pass",
+                "evidence_class": "answer-shaped",
+                "trigger_evidence": "MEASURED", "notes": ""}])
+            row = dict(self._green()[0], trigger="not-attempted",
+                       evidence_class="", trigger_evidence="",
+                       notes="--load-only")
+            rc = self._run_main_with(
+                [row], ["--load-only", "--cells", "claude-native",
+                        "--version", "20260826"], results_dir=results)
+            kept = json.loads(out.read_text().splitlines()[0])
+        self.assertEqual(rc, 0)
+        self.assertEqual(kept["trigger"], "pass")
+        self.assertEqual(kept["evidence_class"], "answer-shaped")
+        self.assertEqual(kept["trigger_evidence"], "MEASURED")
+        self.assertEqual(kept["load"], "pass")   # this run DID measure the load half
+
+    def test_every_finished_cell_is_on_disk_before_the_next_one_starts(self):
+        """A full authenticated run is sixteen containers over hours. Writing
+        once after the loop meant an interrupt at cell three discarded the two
+        already paid for in rate limit."""
+        rows = self._green()
+        boom = RuntimeError("interrupted")
+        with TemporaryDirectory() as tmp:
+            results = Path(tmp) / "results"
+            with self.assertRaises(RuntimeError):
+                self._run_main_with(rows[:2] + [boom], [], results_dir=results)
+            written = [json.loads(x)["cell"]
+                       for x in (results / f"{run_matrix.datetime.now(run_matrix.timezone.utc).strftime('%Y%m%d')}.jsonl").read_text().splitlines()]
+        self.assertEqual(written, [rows[0]["cell"], rows[1]["cell"]])
+
+    def test_a_non_positive_timeout_is_an_argument_error(self):
+        """`--cells` and `--version` are both exit 2 in this function; a
+        `--timeout 0` turned every cell into a `timeout` verdict instead,
+        indistinguishable in the results file from a real hang."""
+        self.assertEqual(self._main(["--dry-run", "--timeout", "0"]), 2)
+        self.assertEqual(self._main(["--dry-run", "--timeout", "-5"]), 2)
+
+    def test_a_dry_run_prints_the_plan(self):
+        """Five surfaces promise it and nothing rendered it: the shell was
+        computed into `row["notes"]` and `summarize` printed four columns.
+        `test_a_dry_run_writes_no_results` pins the absence of the file; this
+        pins the presence of the plan."""
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), \
+                contextlib.redirect_stderr(io.StringIO()):
+            run_matrix.main(["--dry-run", "--cells", "claude-native"])
+        out = buf.getvalue()
+        self.assertIn("claude plugin list", out)
+        self.assertIn("claude -p", out)          # the trigger half too
 
 
 class TestSummarize(unittest.TestCase):
@@ -654,7 +837,7 @@ class TestRowContract(unittest.TestCase):
         with patch("run_matrix.subprocess.run") as run:
             run.side_effect = [
                 subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox", stderr=""),
+                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr=""),
                 subprocess.CompletedProcess(
                     [], 0, stdout=run_matrix.LAUNCH_MARKER + "\npkg-path [services]",
                     stderr=""),
@@ -687,6 +870,190 @@ class TestSweepTimeout(unittest.TestCase):
                 leaked = run_matrix.cleanup_run_dir(run_dir, "img:1")
         self.assertEqual(len(leaked), 1)
         self.assertTrue(leaked[0].endswith("auth.json"))
+
+
+class TestContainerReclamation(unittest.TestCase):
+    """A timeout must not leave a root container holding the OAuth mounts.
+
+    `subprocess.run(timeout=)` SIGKILLs the docker CLI; the container is a
+    child of the daemon, `--sig-proxy` cannot forward SIGKILL, and `--rm` fires
+    only when the container exits. The run then swept the host directory, found
+    it empty, and reported no leak while the tokens were still readable inside
+    a live container.
+    """
+
+    def test_every_run_names_its_container(self):
+        cmd = run_matrix.docker_cmd("img:1", Path("/tmp/run"),
+                                    Path("/tmp/run/cell.sh"),
+                                    mount_credentials=True,
+                                    cidfile=Path("/tmp/run/trigger.cid"))
+        self.assertIn("--cidfile", cmd)
+        self.assertIn("/tmp/run/trigger.cid", cmd)
+
+    def test_a_timeout_kills_the_container_it_started(self):
+        with TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            def fake_run(argv, **kw):
+                if argv[:2] == ["docker", "run"]:
+                    # docker writes the cidfile before the container starts.
+                    Path(argv[argv.index("--cidfile") + 1]).write_text("deadbeef")
+                    raise subprocess.TimeoutExpired(cmd="docker", timeout=1)
+                return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+            with patch("run_matrix.subprocess.run", side_effect=fake_run) as run:
+                out = run_matrix.run_cell(cell("claude-native"), "img:1", work)
+            killed = [a[0][0] for a in run.call_args_list
+                      if a[0][0][:2] in (["docker", "kill"], ["docker", "rm"])]
+        self.assertEqual(out["load"], "timeout")
+        self.assertTrue(any("deadbeef" in c for c in killed), killed)
+
+    def test_a_container_that_cannot_be_reclaimed_is_a_leak(self):
+        """`cleanup_run_dir` returning `[]` is an assertion about the host
+        filesystem only. A container docker still reports as running holds the
+        mount, so it belongs in the same alarm."""
+        with TemporaryDirectory() as tmp:
+            work = Path(tmp) / "cell"
+            work.mkdir()
+            (work / "trigger.cid").write_text("cafe1234")
+            def fake_run(argv, **kw):
+                if argv[:2] == ["docker", "inspect"]:
+                    return subprocess.CompletedProcess(argv, 0, stdout="true\n", stderr="")
+                return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+            with patch("run_matrix.subprocess.run", side_effect=fake_run):
+                alive = run_matrix.reclaim_containers(Path(tmp))
+        self.assertEqual(len(alive), 1)
+        self.assertIn("cafe1234", alive[0])
+
+    def test_a_daemon_that_cannot_be_asked_is_not_a_clean_bill(self):
+        """An unanswered question is not an answer — the same rule the runner
+        applies with `NOT_RUN` versus `dry-run`."""
+        with TemporaryDirectory() as tmp:
+            work = Path(tmp) / "cell"
+            work.mkdir()
+            (work / "load.cid").write_text("beef5678")
+            with patch("run_matrix.subprocess.run",
+                       side_effect=OSError("daemon gone")):
+                alive = run_matrix.reclaim_containers(Path(tmp))
+        self.assertEqual(len(alive), 1)
+
+    def test_a_container_docker_says_is_gone_is_not_a_leak(self):
+        with TemporaryDirectory() as tmp:
+            work = Path(tmp) / "cell"
+            work.mkdir()
+            (work / "load.cid").write_text("abc999")
+            def fake_run(argv, **kw):
+                if argv[:2] == ["docker", "inspect"]:
+                    return subprocess.CompletedProcess(argv, 1, stdout="", stderr="No such object")
+                return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+            with patch("run_matrix.subprocess.run", side_effect=fake_run):
+                alive = run_matrix.reclaim_containers(Path(tmp))
+        self.assertEqual(alive, [])
+
+
+class TestLeakScan(unittest.TestCase):
+    def test_an_unreadable_directory_is_a_positive(self):
+        """`Path.rglob` silently skips the contents of a directory it cannot
+        read — measured on CPython 3.14.4 — and containers write into these
+        trees as root, so the alarm was failing open in exactly the state it
+        exists for."""
+        with TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            hidden = run_dir / "cell" / "claude"
+            hidden.mkdir(parents=True)
+            (hidden / ".credentials.json").write_text("{}")
+            os.chmod(hidden, 0)
+            try:
+                with patch("run_matrix.shutil.rmtree"), \
+                     patch("run_matrix.subprocess.run",
+                           return_value=subprocess.CompletedProcess([], 0, stdout="", stderr="")):
+                    leaked = run_matrix.cleanup_run_dir(run_dir, "img:1")
+            finally:
+                os.chmod(hidden, 0o700)
+        self.assertTrue(leaked, "an unreadable directory must not read as clean")
+
+    def test_the_filename_allowlist_comes_from_creds(self):
+        """It used to be a literal tuple four sites away from the module that
+        owns the names, and this is the site whose failure mode is exit 0."""
+        self.assertEqual(creds.CREDENTIAL_FILENAMES,
+                         frozenset(s.filename for s in creds.STORES))
+
+
+class TestMergeRow(unittest.TestCase):
+    def test_an_unattempted_trigger_does_not_overwrite_a_measured_one(self):
+        prior = {"cell": "a", "load": "pass", "trigger": "pass",
+                 "evidence_class": "answer-shaped", "trigger_evidence": "MEASURED"}
+        new = {"cell": "a", "load": "pass", "trigger": "not-attempted",
+               "evidence_class": "", "trigger_evidence": "", "notes": "--load-only"}
+        merged = run_matrix.merge_row(prior, new)
+        self.assertEqual(merged["trigger"], "pass")
+        self.assertEqual(merged["evidence_class"], "answer-shaped")
+        self.assertEqual(merged["trigger_evidence"], "MEASURED")
+
+    def test_a_measured_load_still_overwrites(self):
+        """The load half is what a `--load-only` run went to measure."""
+        prior = {"cell": "a", "load": "pass", "trigger": "pass"}
+        new = {"cell": "a", "load": "fail", "trigger": "not-attempted"}
+        self.assertEqual(run_matrix.merge_row(prior, new)["load"], "fail")
+
+    def test_a_measured_trigger_overwrites_a_measured_trigger(self):
+        prior = {"cell": "a", "load": "pass", "trigger": "pass",
+                 "evidence_class": "answer-shaped"}
+        new = {"cell": "a", "load": "pass", "trigger": "fail",
+               "evidence_class": "weak"}
+        merged = run_matrix.merge_row(prior, new)
+        self.assertEqual(merged["trigger"], "fail")
+        self.assertEqual(merged["evidence_class"], "weak")
+
+    def test_a_never_run_trigger_does_not_overwrite_either(self):
+        prior = {"cell": "a", "trigger": "pass"}
+        new = {"cell": "a", "trigger": run_matrix.NOT_RUN}
+        self.assertEqual(run_matrix.merge_row(prior, new)["trigger"], "pass")
+
+    def test_the_first_row_for_a_cell_is_kept_whole(self):
+        new = {"cell": "a", "trigger": "not-attempted"}
+        self.assertEqual(run_matrix.merge_row({}, new)["trigger"], "not-attempted")
+
+
+class TestPerAgentMounts(unittest.TestCase):
+    """Every trigger container used to get BOTH OAuth stores, so `npx --yes
+    skills add` on a Codex cell ran as root with the live Claude subscription
+    token readable beside it."""
+
+    def test_a_codex_cell_does_not_receive_the_claude_token(self):
+        cmd = run_matrix.docker_cmd("img:1", Path("/tmp/run"),
+                                    Path("/tmp/run/cell.sh"),
+                                    mount_credentials=True, agent="codex")
+        joined = " ".join(cmd)
+        self.assertIn("/tmp/run/codex:/root/.codex:rw", cmd)
+        self.assertNotIn("/root/.claude", joined)
+
+    def test_an_opencode_cell_receives_neither(self):
+        """The shipped OpenCode resolves credentials only from
+        `$XDG_DATA_HOME/opencode/auth.json` (else
+        `~/.local/share/opencode/auth.json`) — verified by binary scan against
+        1.18.23, where `claudeAiOauth` appears zero times — so it consumed
+        neither mounted directory even when both were handed to it."""
+        cmd = run_matrix.docker_cmd("img:1", Path("/tmp/run"),
+                                    Path("/tmp/run/cell.sh"),
+                                    mount_credentials=True, agent="opencode")
+        joined = " ".join(cmd)
+        self.assertNotIn("/root/.claude", joined)
+        self.assertNotIn("/root/.codex", joined)
+        self.assertIn("/prompt.txt", joined)
+
+    def test_run_cell_gates_the_mount_on_the_cells_own_agent(self):
+        with patch("run_matrix.subprocess.run") as run:
+            run.side_effect = [
+                subprocess.CompletedProcess(
+                    [], 0, stdout=run_matrix.LIST_MARKER + "\nfloxify", stderr=""),
+                subprocess.CompletedProcess(
+                    [], 0, stdout=run_matrix.LAUNCH_MARKER + "\npkg-path [services]",
+                    stderr=""),
+            ]
+            with TemporaryDirectory() as tmp:
+                run_matrix.run_cell(cell("codex-npx"), "img:1", Path(tmp))
+            launch_argv = " ".join(run.call_args_list[1][0][0])
+        self.assertIn("/root/.codex", launch_argv)
+        self.assertNotIn("/root/.claude", launch_argv)
 
 
 if __name__ == "__main__":

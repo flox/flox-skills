@@ -2,6 +2,8 @@
 
 Reads the manifests as text — no `flox` call, no build, nothing to mock.
 """
+import json
+import re
 import unittest
 from pathlib import Path
 
@@ -40,6 +42,29 @@ class TestEnvironments(unittest.TestCase):
         added = {line.split(".")[0] for line in withpkg - base}
         self.assertEqual(added, {"flox-ai", "skills-flox"},
                          "the two images must differ in exactly one dimension")
+
+
+class TestPinnedPackage(unittest.TestCase):
+    """`withpkg` exists to exercise the PUBLISHED artifact, so its pin has to be
+    the version the image will really contain.
+
+    Editing the manifest without re-locking is silent: `--rebuild` re-runs
+    `flox containerize` against the unchanged lock and produces a byte-identical
+    image, so the cells would keep exercising the old package while the README
+    says they exercise the pinned one.
+    """
+
+    ENV = Path(__file__).resolve().parent.parent / "environments" / "withpkg"
+
+    def test_the_pin_and_the_lock_agree(self):
+        toml = (self.ENV / ".flox/env/manifest.toml").read_text()
+        declared = re.search(r'^skills-flox\.version = "([^"]+)"', toml, re.M)
+        self.assertIsNotNone(declared, "no skills-flox pin in the manifest")
+        lock = json.loads((self.ENV / ".flox/env/manifest.lock").read_text())
+        locked = {p["version"] for p in lock["packages"]
+                  if p.get("install_id") == "skills-flox"}
+        self.assertEqual(locked, {declared.group(1)},
+                         "manifest.toml was edited without re-locking")
 
 
 if __name__ == "__main__":

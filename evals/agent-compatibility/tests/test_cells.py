@@ -1,4 +1,5 @@
 """The matrix definition is data, so the tests are structural."""
+import dataclasses
 import unittest
 
 from lib.cells import CELLS, Cell
@@ -63,11 +64,17 @@ class TestMatrix(unittest.TestCase):
                 self.assertNotIn("-a claude ", c.install, c.id)
 
     def test_npx_cells_are_non_interactive(self):
-        """Without -s/-y the installer renders a picker and blocks."""
+        """Without -s/-y the installer renders a picker and blocks.
+
+        On whitespace-split tokens, not substrings: `npx --yes` CONTAINS `-y`,
+        so deleting the real ` -y ` flag left this assertion green and only the
+        `-s` half was enforced.
+        """
         for c in CELLS:
             if c.install_method == "npx":
-                self.assertIn("-y", c.install, c.id)
-                self.assertIn("-s ", c.install, c.id)
+                tokens = c.install.split()
+                self.assertIn("-y", tokens, c.id)
+                self.assertIn("-s", tokens, c.id)
 
     def test_npx_cells_assert_the_shared_skills_tree(self):
         """A skill is not a plugin: `codex plugin list` is empty after a
@@ -104,7 +111,10 @@ class TestMatrix(unittest.TestCase):
                 self.fail(f"{c.id}: launch breaks .format() — {exc!r}")
 
     def test_cells_are_frozen(self):
-        with self.assertRaises(Exception):
+        """`assertRaises(Exception)` was satisfied by the `IndexError` of an
+        empty `CELLS` and by the `AttributeError` of a renamed field, so it
+        could pass without a frozen dataclass anywhere in the file."""
+        with self.assertRaises(dataclasses.FrozenInstanceError):
             CELLS[0].id = "mutated"
 
 
