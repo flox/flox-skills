@@ -12,8 +12,16 @@ nodejs.pkg-path = "nodejs"
 git.pkg-path = "git"
 jq.pkg-path = "jq"
 flox-ai.pkg-path = "flox/flox-ai"
+# PINNED, and it does not follow the catalog on its own. `--rebuild` re-runs
+# `flox containerize` against this lock and produces a byte-identical image, so
+# a new published `skills-flox` means editing this line and re-locking
+# (`flox edit -d environments/withpkg -f <manifest>`) — otherwise the three
+# flox-ai cells keep exercising the superseded artifact while the README says
+# they exercise the one a consumer installs. Check with
+# `flox show flox/skills-flox`; tests/test_environments.py pins that this
+# version and the lock's agree.
 skills-flox.pkg-path = "flox/skills-flox"
-skills-flox.version = "1.0.0"
+skills-flox.version = "1.1.0"
 
 [options]
 systems = ["x86_64-linux"]
