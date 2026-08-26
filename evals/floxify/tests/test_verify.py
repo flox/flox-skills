@@ -15,6 +15,7 @@ Run from the suite root (`evals/floxify/`) — that is what puts
     python3 -m tests.test_verify               # same, via the __main__ block
     pytest tests/test_verify.py                # each test_* method is a pytest case
 """
+import contextlib
 import io
 import json
 import tempfile
@@ -1690,6 +1691,54 @@ Outputs: out* (* installed by default)
 Systems: aarch64-darwin, aarch64-linux, x86_64-darwin, x86_64-linux
 """
 
+# A one-row package with a real platform gap: `len(candidates) > 1` is
+# false here, so this is the shape that lost the "at ANY version"
+# wording.
+SINGLE_ROW_GAP_SHOW = """only-one-pkg - one version, linux only
+Catalog: nixpkgs
+Latest:  only-one-pkg@1.0.0
+Systems: aarch64-linux, x86_64-linux
+"""
+
+
+# Every row linux-only, so `never_built` over the whole listing is
+# {aarch64-darwin, x86_64-darwin} whichever subset a constraint picks.
+LINUX_ONLY_SHOW = """linux-only-pkg - built for linux only
+Catalog: nixpkgs
+Latest:  linux-only-pkg@3.0.0
+Systems: aarch64-linux, x86_64-linux
+
+Other versions:
+    linux-only-pkg@3.0.0 (aarch64-linux, x86_64-linux only)
+    linux-only-pkg@2.0.0 (aarch64-linux, x86_64-linux only)
+"""
+
+# `flox show` answered, and this parser recovered nothing from its text --
+# the shape a renamed header or a moved output format produces. Not a
+# package with no versions, and the two must not read the same.
+RENAMED_HEADERS_SHOW = """renamed-pkg - output format moved
+Catalog: nixpkgs
+Newest:  renamed-pkg@1.2.3
+Platforms: aarch64-linux, x86_64-linux
+
+Additional versions:
+    renamed-pkg@1.2.3 (aarch64-linux, x86_64-linux only)
+"""
+
+# The second shape, and the one `not rows` alone does not catch: `Latest:`
+# still parses, so a row survives, but the "Other versions" block lost its
+# indentation and ends at its first line -- every version below the latest
+# silently vanished with `unparsed_rows` at zero.
+UNINDENTED_BLOCK_SHOW = """flat-pkg - version rows stopped being indented
+Catalog: nixpkgs
+Latest:  flat-pkg@18
+Systems: aarch64-linux, x86_64-linux
+
+Other versions:
+flat-pkg@18.4 (aarch64-linux, x86_64-linux only)
+flat-pkg@18 (aarch64-linux, x86_64-linux only)
+"""
+
 
 def _mock_show(pkg_path, flox_bin, timeout):
     if pkg_path == "postgresql":
@@ -1718,6 +1767,14 @@ def _mock_show(pkg_path, flox_bin, timeout):
         return _FakeProc(stdout=SPLIT_COVERAGE_SHOW)
     if pkg_path == "settled-pkg":
         return _FakeProc(stdout=COVERING_ABOVE_UNREADABLE_SHOW)
+    if pkg_path == "linux-only-pkg":
+        return _FakeProc(stdout=LINUX_ONLY_SHOW)
+    if pkg_path == "renamed-pkg":
+        return _FakeProc(stdout=RENAMED_HEADERS_SHOW)
+    if pkg_path == "flat-pkg":
+        return _FakeProc(stdout=UNINDENTED_BLOCK_SHOW)
+    if pkg_path == "only-one-pkg":
+        return _FakeProc(stdout=SINGLE_ROW_GAP_SHOW)
     return _FakeProc(returncode=1, stderr=f"✘ ERROR: no packages matched this pkg-path: '{pkg_path}'")
 
 
@@ -2061,16 +2118,22 @@ systems = ["x86_64-linux", "aarch64-linux"]
 
     @patch("shutil.which", return_value="/usr/bin/flox")
     @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
-    def test_an_unreadable_row_does_not_suppress_an_exact_pin_finding(
+    def test_an_unreadable_row_suppresses_even_an_exact_pin_finding(
         self, mock_run, mock_which,
     ):
-        # The other side of the incomplete-reading rule, and it has to be
-        # asymmetric. `flox show` emits one row per distinct version, so
-        # when the pinned version is among the rows that DID parse, the
-        # unreadable row is some other version and cannot be the one
-        # asked for -- treating the reading as incomplete here would
-        # throw away a finding established on a row nothing was wrong
-        # with. torn-pkg@3.0.0 parsed cleanly and builds neither darwin.
+        # The incomplete-reading rule is NOT asymmetric, and the reprieve
+        # this test used to assert rested on a step that does not
+        # follow. `flox show` emits one row per distinct version, so an
+        # unreadable row does carry a DIFFERENT version string than the
+        # `3.0.0` that parsed -- but a different version string can
+        # still be a candidate, because `_version_constraint_matches`
+        # truncates the catalog version to the declared length: "3.0.0"
+        # matches "3.0.0.1" exactly as "18.4" matches "18.4.1". Nothing
+        # reachable from `flox show`'s text says how many segments this
+        # package's scheme uses, so this module cannot establish that a
+        # declaration is full-length, which is the only thing that would
+        # have made equality with one readable row decisive. Both pins
+        # therefore route to `unknown`.
         manifest = '''
 [install]
 torn.pkg-path = "torn-pkg"
@@ -2080,13 +2143,12 @@ torn.version = "3.0.0"
 systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
 '''
         result = verify({}, manifest, check_catalog_live=True)
-        self.assertEqual(result["catalog_unknown"], [])
-        v = result["violations"]
-        self.assertEqual(_rules(v), {"catalog-systems-mismatch"})
-        self.assertIn("version 3.0.0", v[0]["message"])
+        self.assertEqual(result["violations"], [])
+        self.assertEqual(len(result["catalog_unknown"]), 1)
+        self.assertEqual(result["catalog_unknown"][0]["version"], "3.0.0")
 
-        # A PREFIX pin gets no such reprieve: an unreadable row could be
-        # 3.1.0, so it really could be a candidate the walk never saw.
+        # A PREFIX pin behaves identically, for the reason that was
+        # already stated: an unreadable row could be 3.1.0.
         result = verify({}, manifest.replace('"3.0.0"', '"3"'),
                         check_catalog_live=True)
         self.assertEqual(result["violations"], [])
@@ -2642,6 +2704,234 @@ systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
         manifest = '[install]\npg.pkg-path = "postgresql"\npg.systems = []\n'
         v = verify({}, manifest, check_catalog_live=True)["violations"]
         self.assertNotIn("malformed-systems", _rules(v))
+
+
+ALL_FOUR = ('[options]\n'
+            'systems = ["aarch64-darwin", "aarch64-linux", '
+            '"x86_64-darwin", "x86_64-linux"]\n')
+
+
+class TestCatalogUnknownIsScopedToWhatIsBlocked(unittest.TestCase):
+    """What an unresolved reading may still conclude, and what it may not.
+
+    Every case here is one where `unknown` was previously wider than the
+    thing that could not be established -- the checker retreating from a
+    conclusion it had, or asserting one it did not.
+    """
+
+    def setUp(self):
+        verify_mod._SHOW_CACHE.clear()
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_a_range_still_reports_a_platform_no_row_builds(
+        self, mock_run, mock_which,
+    ):
+        # A range narrows the candidate rows; it cannot widen them. So
+        # `never_built` -- a union over the WHOLE listing -- is the same
+        # set for every subset the range could select, and reporting it
+        # needs no operator interpreted. Declining to report it cleared a
+        # manifest declaring a platform nothing is ever built for, on
+        # nothing but the shape of the version string.
+        manifest = ('[install]\n'
+                    'p.pkg-path = "linux-only-pkg"\n'
+                    'p.version = "^3.0"\n' + ALL_FOUR)
+        result = verify({}, manifest, check_catalog_live=True)
+        self.assertEqual(_rules(result["violations"]),
+                         {"catalog-systems-mismatch"})
+        # ...and the message is the one an unpinned entry gets, word for
+        # word: the claim is over every version, because that is what was
+        # actually walked.
+        unpinned = verify({}, manifest.replace('p.version = "^3.0"\n', ''),
+                          check_catalog_live=True)
+        self.assertEqual(result["violations"][0]["message"],
+                         unpinned["violations"][0]["message"])
+        self.assertIn("at ANY version (newest is 3.0.0)",
+                      result["violations"][0]["message"])
+        # The co-resolution half IS blocked, and is still recorded.
+        self.assertEqual(len(result["catalog_unknown"]), 1)
+        self.assertEqual(result["catalog_unknown"][0]["version"], "^3.0")
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_a_range_over_a_covered_package_reports_nothing_hard(
+        self, mock_run, mock_which,
+    ):
+        # The other direction: when some row builds every declared
+        # system, `never_built` is empty and there is nothing the union
+        # establishes. Only the unknown record.
+        manifest = ('[install]\np.pkg-path = "linux-only-pkg"\n'
+                    'p.version = "^3.0"\n'
+                    '[options]\nsystems = ["x86_64-linux"]\n')
+        result = verify({}, manifest, check_catalog_live=True)
+        self.assertEqual(result["violations"], [])
+        self.assertEqual(len(result["catalog_unknown"]), 1)
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_a_range_never_gets_the_co_resolution_clause(
+        self, mock_run, mock_which,
+    ):
+        # split-pkg builds every declared system somewhere but never all
+        # on one row, so `never_built` is empty and the only clause
+        # `_uncovered_msg` could offer is the co-resolution one -- which
+        # names "the newest" and would be asserting which row applies.
+        manifest = ('[install]\np.pkg-path = "split-pkg"\n'
+                    'p.version = "^1.0"\n' + ALL_FOUR)
+        result = verify({}, manifest, check_catalog_live=True)
+        self.assertEqual(result["violations"], [])
+        self.assertEqual(len(result["catalog_unknown"]), 1)
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_a_reading_that_recovered_no_row_never_accuses_a_pin(
+        self, mock_run, mock_which,
+    ):
+        # "No versions" and "no versions I could find" are the same empty
+        # list and only the first supports "this version does not exist".
+        # `unparsed_rows` cannot tell them apart -- it counts INDENTED
+        # rows inside an `Other versions:` block, and this listing never
+        # produced that block, so it is zero.
+        result = verify({}, '[install]\np.pkg-path = "renamed-pkg"\n'
+                            'p.version = "1.2.3"\n', check_catalog_live=True)
+        self.assertEqual(result["violations"], [])
+        self.assertEqual(len(result["catalog_unknown"]), 1)
+        self.assertEqual(result["catalog_unknown"][0]["version"], "1.2.3")
+        self.assertEqual(
+            verify_mod._parse_flox_show(RENAMED_HEADERS_SHOW)["unparsed_rows"],
+            0)
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_an_other_versions_block_that_read_nothing_is_incomplete(
+        self, mock_run, mock_which,
+    ):
+        # The second shape, and the one the empty-list guard misses:
+        # `Latest:` still parses, so `rows` is non-empty and looks like a
+        # single-version package. The `Other versions:` HEADER is the
+        # evidence that it is not -- `flox show` does not print it
+        # otherwise -- so the shortfall is recorded at the parser.
+        parsed = verify_mod._parse_flox_show(UNINDENTED_BLOCK_SHOW)
+        self.assertEqual(parsed["unparsed_rows"], 0)
+        self.assertTrue(parsed["version_block_unreadable"])
+        result = verify({}, '[install]\np.pkg-path = "flat-pkg"\n'
+                            'p.version = "18.4"\n', check_catalog_live=True)
+        self.assertEqual(result["violations"], [])
+        self.assertEqual(len(result["catalog_unknown"]), 1)
+
+    def test_a_readable_block_is_not_flagged_incomplete(self):
+        # The guard must not fire on the ordinary listing, or it would
+        # turn every catalog check into a permanent `unknown` -- the same
+        # failure direction `unparsed_rows` is careful about for footers.
+        for text in (POSTGRESQL_SHOW, SINGLE_ROW_SHOW, TRAILING_LINE_SHOW):
+            self.assertFalse(
+                verify_mod._parse_flox_show(text)["version_block_unreadable"])
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_a_non_string_version_is_recorded_and_serializable(
+        self, mock_run, mock_which,
+    ):
+        # TOML accepts `version = 2020-01-01` and hands back a
+        # `datetime.date`. Storing the raw value made `verify.py --json`
+        # raise on a manifest the checker had otherwise handled.
+        manifest = ('[install]\np.pkg-path = "linux-only-pkg"\n'
+                    'p.version = 2020-01-01\n')
+        result = verify({}, manifest, check_catalog_live=True)
+        self.assertEqual(result["catalog_unknown"][0]["version"], "2020-01-01")
+        self.assertIn("not a string", result["catalog_unknown"][0]["reason"])
+        json.dumps(result)
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_a_falsy_non_string_version_is_a_declaration(
+        self, mock_run, mock_which,
+    ):
+        # `version = 0` and `version = false` are declarations, and a
+        # truthiness gate routed them to the unpinned walk -- checking a
+        # manifest against a constraint it does not contain and clearing
+        # it. `version = ""` really is unconstrained and keeps that walk.
+        for literal in ("0", "false"):
+            result = verify({}, '[install]\np.pkg-path = "linux-only-pkg"\n'
+                                f'p.version = {literal}\n',
+                            check_catalog_live=True)
+            self.assertEqual(len(result["catalog_unknown"]), 1, literal)
+            self.assertIn("not a string",
+                          result["catalog_unknown"][0]["reason"])
+        empty = verify({}, '[install]\np.pkg-path = "linux-only-pkg"\n'
+                           'p.version = ""\n', check_catalog_live=True)
+        self.assertEqual(empty["catalog_unknown"], [])
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_an_empty_version_never_renders_as_a_constraint(
+        self, mock_run, mock_which,
+    ):
+        # `flox` reads `version = ""` as unconstrained, so the message
+        # must be the unpinned one -- `at ANY version matching ""` names
+        # a constraint nobody wrote.
+        manifest = ('[install]\np.pkg-path = "linux-only-pkg"\n'
+                    'p.version = ""\n' + ALL_FOUR)
+        v = verify({}, manifest, check_catalog_live=True)["violations"]
+        self.assertNotIn('matching ""', v[0]["message"])
+        self.assertIn("at ANY version (newest is 3.0.0)", v[0]["message"])
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_a_single_row_package_still_says_at_any_version(
+        self, mock_run, mock_which,
+    ):
+        # `len(candidates) > 1` stood in for "a descent happened", so an
+        # unpinned entry against a one-row package fell through to the
+        # single-row message and lost the wording that says the platform
+        # is unavailable everywhere.
+        manifest = '[install]\np.pkg-path = "only-one-pkg"\n'
+        v = verify({}, manifest, check_catalog_live=True)["violations"]
+        self.assertEqual(_rules(v), {"catalog-systems-mismatch"})
+        self.assertIn(
+            "has no catalog build for aarch64-darwin, x86_64-darwin at ANY "
+            "version (newest is 1.0.0)", v[0]["message"])
+
+    def test_both_spellings_of_the_v_prefix_are_non_literal(self):
+        # Whether `flox edit` accepts `V18.4` was never established, and
+        # only "a literal the catalog does not hold" licenses a hard
+        # `catalog-version-missing`. Excluding both spellings routes the
+        # unestablished case to `unknown`.
+        self.assertFalse(verify_mod._is_version_literal("v18.4"))
+        self.assertFalse(verify_mod._is_version_literal("V18.4"))
+        self.assertTrue(verify_mod._is_version_literal("18.4"))
+        self.assertTrue(verify_mod._is_version_literal("vips-8.15"))
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_a_discarded_systems_declaration_is_named_as_discarded(
+        self, mock_run, mock_which,
+    ):
+        # "no systems declared anywhere" over a malformed `[options]
+        # .systems` sends the reader looking for a line that IS there and
+        # is wrong -- the mirror image of blaming a default on
+        # `[options]`.
+        manifest = ('[install]\nnodejs.pkg-path = "nodejs_24"\n'
+                    'nodejs.systems = [1]\n[options]\nsystems = [2]\n')
+        v = verify({}, manifest, check_catalog_live=True)["violations"]
+        mismatch = [x for x in v if x["rule"] == "catalog-systems-mismatch"][0]
+        self.assertIn("malformed and discarded", mismatch["message"])
+        self.assertNotIn("no systems declared anywhere", mismatch["message"])
+
+    @patch("shutil.which", return_value="/usr/bin/flox")
+    @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
+    def test_the_unknown_note_names_the_pkg_path_and_version(
+        self, mock_run, mock_which,
+    ):
+        # The one surface aimed at a human dropped both -- and for an
+        # unresolvable spec the version IS the finding.
+        manifest = ('[install]\np.pkg-path = "linux-only-pkg"\n'
+                    'p.version = "^3.0"\n')
+        result = verify({}, manifest, check_catalog_live=True)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            verify_mod._print_report(result)
+        self.assertIn("p (linux-only-pkg@^3.0):", buf.getvalue())
 
 
 # ---------------------------------------------------------------------------
