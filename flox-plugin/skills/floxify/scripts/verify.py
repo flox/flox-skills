@@ -1016,7 +1016,18 @@ _VERSION_LITERAL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 # version: a `v`-prefixed semver (`v18.4`) and an `x`/`X` wildcard
 # segment (`X`, `18.x`). Both are accepted by `flox edit` and both
 # resolve to something other than themselves.
-_VERSION_V_PREFIX_RE = re.compile(r"^v[0-9]")
+#
+# BOTH spellings of the `v` prefix are excluded, and the case is the one
+# thing on this line that is not confirmed live: `v18.4` was checked
+# against `flox edit` and resolves, `V18.4` was NOT checked, and no
+# catalog version seen so far begins with a bare `V` followed by a
+# digit. The two readings of `V18.4` are therefore "range syntax nobody
+# here confirmed" and "a literal the catalog does not hold" -- and only
+# the second licenses a hard `catalog-version-missing`. Excluding it
+# routes the case to `unknown`, which is what the rest of this module
+# does when it cannot establish something; the wildcard pattern below
+# already treats `X` and `x` alike, for the same reason.
+_VERSION_V_PREFIX_RE = re.compile(r"^[vV][0-9]")
 _VERSION_WILDCARD_RE = re.compile(r"(^|\.)[xX](\.|$)")
 
 
@@ -1095,18 +1106,30 @@ def _version_constraint_matches(declared, catalog_version):
     `_resolve_rows` documents the real resolution that proves it. `flox
     show`'s newest-first order still matters — it is what makes the
     caller's walk over the matching rows a newest-first walk.
+
+    What this CANNOT tell a caller: whether a given declaration is
+    full-length for the catalog it is being matched against. The
+    truncation is applied to the CATALOG version, so "18.4" matches
+    "18.4.1" and "18" matches "18.5" — a declaration is only
+    "segment-for-segment" against a row that happens to carry the same
+    number of segments, and nothing reachable from `flox show`'s text
+    says how many segments this package's scheme uses. So a caller may
+    never read "the declared version appeared verbatim among the rows I
+    could read" as "no row I could NOT read is a candidate": every
+    longer version string is a candidate too.
     """
     declared_parts = declared.split(".")
     return catalog_version.split(".")[:len(declared_parts)] == declared_parts
 
 
-# Why an install entry landed in `catalog_unknown`. Three distinct
-# causes reach that one list and they are not interchangeable: two are
-# facts about `flox show`'s output and the third is a limit of this
-# checker. Every consumer that renders the list -- this module's own
-# report and the eval harness's judge note -- reads the reason off the
-# record rather than asserting one, because a single sentence covering
-# all three was already false for the range case.
+# Why an install entry landed in `catalog_unknown`. Four distinct causes
+# reach that one list and they are not interchangeable: two are facts
+# about `flox show`'s output, one is a limit of this checker, and one is
+# a manifest `flox edit` rejects outright. Every consumer that renders
+# the list -- this module's own report and the eval harness's judge note
+# -- reads the reason off the record rather than asserting one, because
+# a single sentence covering all of them was already false for the range
+# case.
 UNKNOWN_REASONS = {
     "range": ("declares a version spec this checker cannot resolve to a "
               "literal catalog version -- a range, a wildcard, or a "
@@ -1117,7 +1140,40 @@ UNKNOWN_REASONS = {
                            "be ruled out as missing"),
     "unestablished": ("`flox show`'s own text did not establish which "
                       "version row applies, or what systems it builds"),
+    "non_string": ("declares a `version` that is not a string -- TOML "
+                   "parsed it as a number, date or boolean, and `18.10` "
+                   "parses as 18.1, so its text does not name the version "
+                   "the manifest meant; `flox edit` rejects such a "
+                   "manifest outright"),
 }
+
+
+def _unresolvable_spec_reason(version):
+    """Why a declared `version` cannot be looked up in the catalog's own
+    version list — or None when it can.
+
+    Split out from `_is_version_literal` because the two non-literal
+    cases are different facts and the record has to say WHICH: a range
+    or an unrecognized spelling is a limit of this checker, while a
+    non-string is a manifest `flox edit` rejects outright. Filing the
+    second under the first sent a reader off to check a version spec
+    that is not one.
+
+    An ABSENT version and an EMPTY one are neither case: `flox` treats
+    `version = ""` as unconstrained, so both take the ordinary
+    no-version walk. The test for that is an explicit `None`/`""`
+    comparison rather than truthiness, because a FALSY NON-STRING
+    (`version = 0`, `version = false`) is a declaration — routing it to
+    the unpinned walk cleared a manifest against a constraint the
+    manifest does not contain.
+    """
+    if version is None or version == "":
+        return None
+    if not isinstance(version, str):
+        return UNKNOWN_REASONS["non_string"]
+    if not _is_version_literal(version):
+        return UNKNOWN_REASONS["range"]
+    return None
 
 
 def _usable_systems(value):
@@ -1128,6 +1184,15 @@ def _usable_systems(value):
     """
     return (isinstance(value, list) and bool(value)
             and all(isinstance(s, str) for s in value))
+
+
+def _declared_but_unusable(value):
+    """Was this `systems` value WRITTEN in the manifest and then thrown
+    away? The exact condition `_coerce_systems` calls `on_malformed` for
+    — present and non-empty, but not a list of strings. `None` and `[]`
+    are "not declared", which is not an error and not this.
+    """
+    return bool(value) and not _usable_systems(value)
 
 
 def _coerce_systems(value, default, on_malformed=None):
@@ -1225,10 +1290,12 @@ def _parse_flox_show(text):
     versions = {}
     unparsed_rows = 0
     in_other = False
+    saw_other_header = False
     for line in text.splitlines():
         stripped = line.strip()
         if stripped == "Other versions:":
             in_other = True
+            saw_other_header = True
             continue
         if not in_other or not stripped:
             continue
@@ -1261,8 +1328,18 @@ def _parse_flox_show(text):
         else:
             systems = None
         versions[ver] = systems
+    # An `Other versions:` header whose block yielded no readable row is
+    # a third way the reading can be thin, and `unparsed_rows` does not
+    # see it: the block ends at the first UNINDENTED line, so a listing
+    # that stopped indenting its rows produces zero unreadable rows and
+    # zero versions while looking, to every downstream caller, exactly
+    # like a package that genuinely has no other versions. The header is
+    # the evidence that it does have them — `flox show` does not print
+    # it otherwise — so record the shortfall instead of concluding an
+    # absence over it.
     return {"latest": latest, "latest_systems": latest_systems,
-            "versions": versions, "unparsed_rows": unparsed_rows}
+            "versions": versions, "unparsed_rows": unparsed_rows,
+            "version_block_unreadable": saw_other_header and not versions}
 
 
 def _catalog_version_rows(show):
@@ -1429,16 +1506,29 @@ def _systems_source(install_id, raw_entry_systems, raw_default_systems):
     value was thrown away sends the reader to a line that does not
     contain the system being complained about, which is the same failure
     as blaming a default on `[options]`.
+
+    A THIRD variant for the same reason the second exists. When a
+    `systems` key is present on both the entry and `[options]` but
+    malformed, both are discarded and the default is what is really
+    being complained about — but "no systems declared anywhere" then
+    sends the reader looking for a line that IS there and is wrong,
+    which is the mirror image of the failure above. A malformed
+    `[install]` entry value gets a `malformed-systems` violation
+    alongside; a malformed `[options].systems` gets one too, so the
+    parenthetical is the reader's pointer either way.
     """
     if _usable_systems(raw_entry_systems):
         return f"{install_id}.systems"
     if _usable_systems(raw_default_systems):
         return "options.systems"
+    if _declared_but_unusable(raw_entry_systems) or _declared_but_unusable(raw_default_systems):
+        return ("the all-systems default (the declared `systems` value was "
+                "malformed and discarded)")
     return "the all-systems default (no systems declared anywhere)"
 
 
 def _uncovered_msg(install_id, pkg_path, declared_systems, resolution,
-                   systems_source, constraint=None):
+                   systems_source, constraint=None, co_resolution=True):
     """The catalog-systems-mismatch message for an entry no version row
     can serve. Two clauses, because the two failures have different
     fixes: a system nothing is ever built for has to be dropped from the
@@ -1453,10 +1543,18 @@ def _uncovered_msg(install_id, pkg_path, declared_systems, resolution,
     everything. Strings are reproduced verbatim from check_catalog's call
     site; test_verify.py asserts the exact text, same convention as
     `_leaf_msg`.
+
+    `co_resolution=False` emits the `never` clause ALONE. The caller for
+    that is the entry whose `version` spec this module cannot resolve:
+    which rows are candidates was never established, so which row is
+    "the newest" is not a fact about that entry and the split clause
+    would be asserting one. The never clause survives because it is a
+    union over every row — any constraint can only narrow that set, so a
+    system no row builds is a system no candidate builds.
     """
     never = resolution["never_built"]
     missing_newest = sorted(declared_systems - (resolution["systems"] or set()))
-    split = [s for s in missing_newest if s not in never]
+    split = [s for s in missing_newest if s not in never] if co_resolution else []
 
     # Every "any version" claim is scoped to the versions actually
     # walked. For an unconstrained entry that is the whole list; for a
@@ -1525,18 +1623,28 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
         non-covering 15.3.0 that its constraint also matches (confirmed
         by real resolution). An exact pin matches one row and this
         degenerates to checking that row, as it always did.
-      - A `version` that is neither — a semver range (`^1.2`, `>=2.0`).
-        Resolving one needs full semver solving, which is out of scope
-        here. Neither branch above can answer for it: comparing it
-        against catalog version strings has no range semantics, and
-        walking every row would ignore the constraint entirely and clear
-        the entry on a version the range forbids. Recorded as `unknown`
-        — which is what this module says everywhere else when it cannot
-        establish something. `_is_version_literal` decides which case an
-        entry is in, and it decides POSITIVELY: anything not recognizable
-        as a plain catalog version string lands here, including range
-        spellings nobody has enumerated. That direction is the point —
-        the alternative accuses a spec flox accepts of not existing.
+      - A `version` that is neither — a semver range (`^1.2`, `>=2.0`),
+        or a non-string TOML scalar. Resolving a range needs full semver
+        solving, which is out of scope here. Neither branch above can
+        answer for it: comparing it against catalog version strings has
+        no range semantics, and walking every row would ignore the
+        constraint entirely and clear the entry on a version the range
+        forbids. WHICH version applies is recorded as `unknown` — what
+        this module says everywhere else when it cannot establish
+        something. `_unresolvable_spec_reason` decides which case an
+        entry is in, over `_is_version_literal`, which decides
+        POSITIVELY: anything not recognizable as a plain catalog version
+        string lands here, including range spellings nobody has
+        enumerated. That direction is the point — the alternative
+        accuses a spec flox accepts of not existing.
+
+        The retreat is scoped to what the constraint actually blocks. A
+        declared system NO catalog row builds is still reported as a
+        hard `catalog-systems-mismatch`, because that conclusion is a
+        union over the whole listing and a constraint can only ever
+        narrow the candidate set — the check never needed the range
+        resolved. Only the co-resolution question, which needs a row
+        named, goes to `unknown`.
 
     Only when no candidate covers the declared set, over a complete
     reading, is there a real mismatch.
@@ -1607,24 +1715,78 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
             )),
         )
 
-        if version and not _is_version_literal(version):
-            # A range, a wildcard, or a spelling this module does not
-            # recognize. Not resolvable here and not resolvable by
-            # walking every row either — that would ignore the constraint
-            # and clear the entry on a version the range forbids. Say so
-            # instead of guessing in either direction.
-            unknown.append({"install_id": install_id, "pkg_path": pkg_path,
-                            "version": version,
-                            "reason": UNKNOWN_REASONS["range"]})
-            continue
-
         rows = _catalog_version_rows(show)
-        incomplete = bool(show.get("unparsed_rows"))
+        # Three shapes of thin reading, and they license exactly the same
+        # conclusion, which is none. An indented row `_parse_flox_show`
+        # could not read; an `Other versions:` block that yielded no
+        # readable row; and a listing that yielded NO version rows at all
+        # — the shape a renamed header or a moved output format produces,
+        # where every parse simply comes back empty. The third was
+        # previously treated as a complete reading of a package holding
+        # no versions, which is how a format change would have turned
+        # every pinned entry in every manifest into "this version does
+        # not exist in the catalog" rather than into "not checked".
+        incomplete = (bool(show.get("unparsed_rows"))
+                      or bool(show.get("version_block_unreadable"))
+                      or not rows)
+
+        spec_reason = _unresolvable_spec_reason(version)
+        if spec_reason:
+            # WHICH version applies was never established. What that
+            # blocks is narrower than it looks: a constraint can only
+            # ever select a SUBSET of these rows, so a declared system
+            # NO row builds is a system no candidate builds either, and
+            # reporting it needs no operator interpreted. Retreating
+            # from that conclusion cleared a manifest declaring a
+            # platform the package has never been built for, on nothing
+            # but the shape of its version string — `^20.0` is the form
+            # flox's own SKILL.md recommends. The `never` clause is
+            # therefore still emitted, over the WHOLE listing and under
+            # the same completeness guard the other two absence claims
+            # carry: a union over a reading that lost a row is not a
+            # warrant for "no version builds this".
+            #
+            # The co-resolution half — whether the version that really
+            # applies builds every declared system TOGETHER — is the
+            # half the unresolved spec genuinely blocks, and that is
+            # what the `unknown` record is for. Both are recorded when
+            # both apply; they are independent facts about one entry.
+            coverage = _resolve_rows(rows, entry_systems,
+                                     incomplete=incomplete)
+            if coverage["status"] == "uncovered" and coverage["never_built"]:
+                violations.append(violation(
+                    "catalog-systems-mismatch",
+                    _uncovered_msg(
+                        install_id, pkg_path, entry_systems, coverage,
+                        _systems_source(install_id, raw_entry_systems,
+                                        raw_default_systems),
+                        constraint=None, co_resolution=False,
+                    ),
+                    pkg_path=pkg_path, install_id=install_id,
+                ))
+            # `str()`, because a non-string version reaches this record
+            # and `--json` has to be able to serialize it: TOML's
+            # `version = 2020-01-01` parses to a `datetime.date`, which
+            # `json.dumps` refuses.
+            unknown.append({"install_id": install_id, "pkg_path": pkg_path,
+                            "version": str(version),
+                            "reason": spec_reason})
+            continue
 
         if version:
             candidates = [(v, s) for v, s in rows
                           if _version_constraint_matches(version, v)]
             if not candidates:
+                if not rows:
+                    # No version row was recovered at all. "No versions"
+                    # and "no versions I could find" are the same empty
+                    # list, and only the first supports an absence claim
+                    # — so this is a fact about the READING, reported as
+                    # one, rather than an accusation against the pin.
+                    unknown.append({"install_id": install_id,
+                                    "pkg_path": pkg_path, "version": version,
+                                    "reason": UNKNOWN_REASONS["unestablished"]})
+                    continue
                 if incomplete:
                     # "This version does not exist" is an absence claim,
                     # and a row this parser could not read carries no
@@ -1646,32 +1808,46 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
         else:
             candidates = rows
 
-        # An unreadable row bears on this entry only if it could have
-        # been a candidate. `flox show` emits one row per distinct
-        # version, so when the declared version appears verbatim among
-        # the rows that DID parse, the unreadable row is some other
-        # version and cannot be the one asked for -- carrying
-        # `incomplete` into that walk would suppress a fully established
-        # finding on a row nothing was wrong with. A partial pin ("18")
-        # gets no such reprieve: an unreadable row could be 18.5.
-        exact_row_read = any(v == version for v, _ in candidates)
+        # An unreadable row bears on EVERY pinned entry, exact pins
+        # included. There used to be a reprieve here for a declared
+        # version that appeared verbatim among the rows that parsed, on
+        # the reasoning that `flox show` emits one row per distinct
+        # version so the unreadable row must be some other version. The
+        # second half does not follow from the first:
+        # `_version_constraint_matches` truncates the CATALOG version to
+        # the declared length, so "18.4" also matches "18.4.1" and "18"
+        # also matches "18.5" — a different version string can still be
+        # a candidate, and nothing reachable from `flox show`'s text
+        # says how many segments this package's scheme uses, so this
+        # module cannot tell a full-length declaration from a partial
+        # one. Equality with one readable row therefore proves nothing
+        # about the row that was lost, and erring toward silence is the
+        # direction the rest of this module takes.
         resolution = _resolve_rows(candidates, entry_systems,
-                                   incomplete=incomplete and not exact_row_read)
+                                   incomplete=incomplete)
         version_label = resolution["version"]
         available = resolution["systems"]
 
-        if resolution["status"] == "uncovered" and len(candidates) > 1:
-            # More than one candidate was walked, so the single-row
-            # message below would name the newest and imply it is the one
-            # that applies. `_uncovered_msg` says what was actually
-            # established across the range.
+        if resolution["status"] == "uncovered" and (not version
+                                                    or len(candidates) > 1):
+            # A descent happened — either no constraint narrowed the
+            # rows, or more than one candidate was walked — so the
+            # single-row message below would name the newest and imply
+            # it is the one that applies. `_uncovered_msg` says what was
+            # actually established across the range. `len(candidates)`
+            # alone stood in for this and lost the wording on a
+            # single-row package, where an unpinned entry stopped being
+            # told the platform is unavailable at ANY version.
             violations.append(violation(
                 "catalog-systems-mismatch",
                 _uncovered_msg(
                     install_id, pkg_path, entry_systems, resolution,
                     _systems_source(install_id, raw_entry_systems,
                                     raw_default_systems),
-                    constraint=version,
+                    # An empty `version` is unconstrained, not a
+                    # constraint spelled "" — passing it through
+                    # rendered `at ANY version matching ""`.
+                    constraint=version or None,
                 ),
                 pkg_path=pkg_path, install_id=install_id,
             ))
@@ -1686,7 +1862,7 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
             # version it asked for, which is the thing the reader has to
             # go and check.
             unknown.append({"install_id": install_id, "pkg_path": pkg_path,
-                            "version": version_label or version,
+                            "version": version_label or version or None,
                             "reason": UNKNOWN_REASONS["unestablished"]})
             continue
 
@@ -2023,7 +2199,14 @@ def _print_report(result):
             f"against the catalog — neither confirmed nor flagged:"
         )
         for u in unknown:
-            print(f"  {u['install_id']}: {u.get('reason', UNKNOWN_REASONS['unestablished'])}")
+            # pkg-path and version are what check_catalog's own docstring
+            # calls "the thing the reader has to go and check", and for
+            # an unresolvable spec the version IS the whole finding --
+            # so the one surface aimed at a human renders them, in the
+            # same shape the golden lint uses for the same record.
+            at = f"@{u['version']}" if u.get("version") else ""
+            print(f"  {u['install_id']} ({u.get('pkg_path')}{at}): "
+                  f"{u.get('reason', UNKNOWN_REASONS['unestablished'])}")
 
 
 def main(argv):
