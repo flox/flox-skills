@@ -217,7 +217,12 @@ group. It does not run the two stretch modules — see [CI](#ci).
 
 Results land in `results/` as JSON with a per-entry record and a summary
 (hard-pass rate, avg judge score, activation counts, `verify_checked` /
-`verify_clean` / `verify_hard_violation_rate`). `results/` is **gitignored**;
+`verify_clean` / `verify_unknown` / `verify_unknown_entries` /
+`verify_hard_violation_rate`). Read `verify_unknown` beside `verify_clean`
+whenever the checker itself has changed: `verify_clean` is "checked and no
+hard violation", an entry the catalog leg DECLINED to check contributes
+zero violations, and so a checker that checks less moves `verify_clean`
+up on its own. `results/` is **gitignored**;
 committed comparison points live in `baselines/`, which no run writes by
 default — `synthetic.json` is read by `run_floxify.py --baseline`, and
 `real-world.json` is read by nothing (`real_world.py` has no `--baseline` flag).

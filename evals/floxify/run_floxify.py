@@ -557,6 +557,25 @@ def _run_judge(prompt, timeout=120):
         return None, str(exc), dict(ZERO_META)
 
 
+_CATALOG_NOTE_LIST_CAP = 5
+
+
+def _truncated_listing(items, cap=_CATALOG_NOTE_LIST_CAP):
+    """`items` joined for the judge note, capped — and SAYING it was
+    capped, with the full count.
+
+    The cap exists because an unknown reason runs 90-190 characters and a
+    manifest can hold a dozen entries. Announcing the truncation is not a
+    nicety: this note ends by claiming every entry it did not name was
+    CONFIRMED to resolve, so an item dropped in silence is not merely
+    missing, it is swept into a positive claim that is false about it.
+    """
+    shown = "; ".join(items[:cap])
+    if len(items) <= cap:
+        return shown
+    return f"{shown} (first {cap} of {len(items)} shown)"
+
+
 def _catalog_note(verify_result):
     """Render verify.py's catalog leg into a prompt note for the judge —
     AI-451: the judge has graded catalog facts from memory and accused a
@@ -581,44 +600,56 @@ def _catalog_note(verify_result):
         if v["rule"].startswith("catalog-")
     ]
     unknown = verify_result.get("catalog_unknown") or []
+    # The two are INDEPENDENT, and reporting them exclusively told the
+    # judge about the violation and nothing about the entry beside it
+    # that was never checked — the "unknown quietly reads as fine" shape
+    # this note exists to close, one branch over. A manifest can easily
+    # carry both: one entry with a confirmed platform gap and another
+    # whose version spec verify.py cannot resolve.
+    clauses = []
     if catalog_hard:
-        listing = "; ".join(v["message"] for v in catalog_hard[:5])
-        note = (
-            f"\nDETERMINISTIC CATALOG CHECK (verify.py, via `flox show`): "
+        clauses.append(
             f"{len(catalog_hard)} pkg-path/version/system violation(s) "
-            f"CONFIRMED against the live catalog: {listing}\n"
+            f"CONFIRMED against the live catalog: "
+            f"{_truncated_listing([v['message'] for v in catalog_hard])}"
         )
-    elif unknown:
-        # verify.py excludes these from its confirmed table (check_catalog's
-        # `available is None` path) — the judge note must too, rather than
-        # rounding "no violation" up to "confirmed clean" for entries the
-        # catalog leg genuinely could not evaluate.
-        # Each entry carries its own reason: verify.py has three distinct
-        # ways of failing to conclude (an unreadable version row, an
-        # unestablished systems annotation, a semver range it does not
-        # resolve) and a single sentence covering all three was false for
-        # the range case.
-        listing = "; ".join(
-            f"{u['install_id']} ({u.get('reason', 'not established')})"
-            for u in unknown
-        )
-        note = (
-            f"\nDETERMINISTIC CATALOG CHECK (verify.py, via `flox show`): no "
-            f"violations found, but {len(unknown)} install entr"
+    if unknown:
+        # verify.py excludes these from its confirmed table — the judge
+        # note must too, rather than rounding "no violation" up to
+        # "confirmed clean" for entries the catalog leg genuinely could
+        # not evaluate. Each entry carries its OWN reason, because
+        # verify.py has several distinct ways of failing to conclude
+        # (see its UNKNOWN_REASONS) and a single sentence covering all
+        # of them was already false for the range case.
+        clauses.append(
+            f"{len(unknown)} install entr"
             f"{'y' if len(unknown) == 1 else 'ies'} could NOT be evaluated "
-            f"and were not confirmed either way — {listing}. Do not assert "
-            f"catalog facts about those specific entries from memory. All "
-            f"other installed pkg-path/version/system combinations were "
-            f"CONFIRMED to resolve.\n"
+            f"and {'was' if len(unknown) == 1 else 'were'} not confirmed "
+            f"either way: "
+            + _truncated_listing([
+                f"{u['install_id']} ({u.get('reason', 'not established')})"
+                for u in unknown
+            ])
+            + ". Do not assert catalog facts about those specific entries "
+              "from memory"
         )
-    else:
-        note = (
+    if not clauses:
+        return (
             "\nDETERMINISTIC CATALOG CHECK (verify.py, via `flox show`): every "
             "installed pkg-path/version/system combination was CONFIRMED to "
             "resolve in the live catalog. Do not second-guess this from memory "
             "— e.g. do not flag a pin as hallucinated on this basis.\n"
         )
-    return note
+    # The "all other" sentence is only earned once both lists are on the
+    # page: it is what makes the note's silence about every remaining
+    # entry a positive claim, and an unreported unknown would fall
+    # straight into it.
+    return (
+        "\nDETERMINISTIC CATALOG CHECK (verify.py, via `flox show`): "
+        + ". ".join(clauses)
+        + ". All other installed pkg-path/version/system combinations were "
+          "CONFIRMED to resolve.\n"
+    )
 
 
 def _judge(task, produced_toml, verify_result=None):
@@ -1149,6 +1180,15 @@ def process_task(task, skill_dir, skip_activation=False,
                 "hard_count": len(verify_hard),
                 "advisory_count": len(verify_advisory),
                 "catalog_checked": verify_result.get("catalog_checked", False),
+                # An entry the catalog leg declined to check is neither a
+                # violation nor a confirmation, and until this was
+                # persisted `_stats` could not tell the two apart: a
+                # manifest whose entries all went unchecked scored
+                # exactly like one whose entries all resolved. That
+                # matters most across a change to the checker itself,
+                # where a rise in `verify_clean` can be the checker
+                # checking less rather than the skill doing better.
+                "catalog_unknown": verify_result.get("catalog_unknown") or [],
             },
             "judge": verdict,
             "verified": verified,
@@ -1271,6 +1311,20 @@ def _stats(results):
         r for r in results
         if "verify" in r and r["verify"]["catalog_checked"] and r["verify"]["hard_count"] == 0
     ]
+    # `verify_clean` is "checked and no hard violation", which quietly
+    # includes a fixture whose entries the catalog leg DECLINED to check
+    # — zero violations is what an unchecked entry and a confirmed-good
+    # entry both look like from here. This is the count that separates
+    # them, and it is the number to read beside `verify_clean` whenever
+    # the checker itself has changed: a checker that checks less moves
+    # `verify_clean` up on its own.
+    verify_unknown = [
+        r for r in results if r.get("verify", {}).get("catalog_unknown")
+    ]
+    verify_unknown_entries = sum(
+        len(r["verify"]["catalog_unknown"])
+        for r in results if r.get("verify", {}).get("catalog_unknown")
+    )
     # Over ALL fixtures with a verify result, not just catalog_checked ones
     # — the network-free invariants (runtime installed, leaf-datastore
     # served, vars literal, hook non-mutation) run regardless of catalog
@@ -1298,6 +1352,8 @@ def _stats(results):
         # nothing here gates the build.
         "verify_checked": len(verify_checked),
         "verify_clean": len(verify_clean),
+        "verify_unknown": len(verify_unknown),
+        "verify_unknown_entries": verify_unknown_entries,
         "verify_hard_violation_rate": verify_hard_violation_rate,
     }
 
