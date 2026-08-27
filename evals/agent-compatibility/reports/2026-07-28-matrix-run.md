@@ -145,7 +145,8 @@ The free provider above cannot be held to anything: it is unpinned, it answers
 about half the time, and nothing in a row said which model produced it. So the
 runner grew `--opencode-model`, an opt-in that gives the OpenCode cells an
 OpenRouter key (`~/.env-open-router`, minimized to
-`~/.local/share/opencode/auth.json`) and a named model. **Off by default** —
+`~/.local/share/opencode/auth.json`) and a named model — **GLM 5.3 Flash**,
+`openrouter/z-ai/glm-5.3-flash`, for this run. **Off by default** —
 without the flag the OpenCode cells run exactly as they did above, and the
 file is never read.
 
@@ -160,7 +161,7 @@ from the pinned environments:
 Exit 0, four containers, 6m03s including both image rebuilds — against four
 hangs in eight launches on the free provider. Two things had to change for the
 verdict to mean anything: OpenCode 1.18.8 bakes its model catalogue in at build
-time and stops at `z-ai/glm-5.2`, so an unregistered id fails with
+time and stops at GLM 5.2 (`z-ai/glm-5.2`), so an unregistered id fails with
 `UnknownError: Unexpected server error` that reads as a provider outage — the
 cell now mounts an `opencode.json` registering the model under its provider.
 And the results row now carries `model`, because without it a free run and a
@@ -170,7 +171,7 @@ merge-by-cell-id would let either stand in for the other.
 ### The control arm, run at last — and `answer-shaped` does not survive it
 
 A pinned model made the control arm cheap, so it was run. Same prompt, same
-model, **no skill installed**:
+model (GLM 5.3 Flash), **no skill installed**:
 
 | arm | tools | fingerprints | class |
 |---|---|---|---|

@@ -76,9 +76,9 @@ suspected.** The prompt asks for a Flox manifest for a project that pins Python
 3.12 and needs PostgreSQL, and `pkg-path`, `[services]` and `python312` are
 mandatory syntax or supplied by the prompt — so any answer that produces a
 valid manifest at all tends to clear the two-hit threshold. The control arm
-this README used to call for was run on 2026-08-27, against
-`openrouter/z-ai/glm-5.3-flash` so the model was pinned, with **no skill
-installed**:
+this README used to call for was run on 2026-08-27, against GLM 5.3 Flash
+(`openrouter/z-ai/glm-5.3-flash`, via OpenRouter) so the model was pinned, with
+**no skill installed**:
 
 | arm | tools | fingerprints | class |
 |---|---|---|---|
@@ -162,6 +162,10 @@ python3 run_matrix.py --timeout 900          # seconds per container (default 60
 python3 run_matrix.py --opencode-model openrouter/z-ai/glm-5.3-flash
 ```
 
+The last line is the pinned-model run: it gives the two OpenCode cells **GLM
+5.3 Flash** through OpenRouter, in place of the free no-login provider the
+shipped build falls back to.
+
 A cell runs up to two containers, each on its own `--timeout` budget, so a
 full run's worst case is sixteen of them.
 
@@ -184,10 +188,13 @@ run.
 The merge is by cell id **and then by field**: a run that did not measure the
 trigger half cannot overwrite one that did. `--version` defaults to today, so
 without that rule the `--load-only` run recommended above would blank the
-`trigger`, `evidence_class` and `trigger_evidence` of an authenticated run made
-the same morning — exit 0, no warning. A preserved verdict says so in `notes`
-and on stderr. Each cell is written as it finishes, so an interrupt during a
-full run keeps every cell already paid for in rate limit.
+`trigger`, `evidence_class`, `trigger_evidence` and `model` of an authenticated
+run made the same morning — exit 0, no warning. `model` travels with the
+verdict for the same reason it is recorded at all: a `--load-only` rerun names
+no model, and dropping it would relabel a pinned GLM 5.3 Flash `pass` as one
+the free provider produced. A preserved verdict says so in `notes` and on
+stderr. Each cell is written as it finishes, so an interrupt during a full run
+keeps every cell already paid for in rate limit.
 
 The exit status says what happened, so a release check does not have to parse
 the table. **The codes are not disjoint: 3 outranks every other code here**, so
@@ -221,8 +228,9 @@ argument started nothing — so 3-over-everything is the whole ranking rule:
 - **Optional: an OpenRouter key at `~/.env-open-router`**, in dotenv form
   (`OPENROUTER_API_KEY=sk-or-...`), and only when you pass `--opencode-model`.
   This one *is* billed per token, unlike the two OAuth logins — a two-cell run
-  on `z-ai/glm-5.3-flash` costs well under a cent. Without the flag the file is
-  never read and the OpenCode cells run exactly as they always have.
+  on GLM 5.3 Flash (`z-ai/glm-5.3-flash`) costs well under a cent. Without the
+  flag the file is never read and the OpenCode cells run exactly as they always
+  have.
 
 If a cell reports `auth-error`, that is a credential problem — a stale copy or a
 logged-out CLI — not a skill failure. The runner separates the two on purpose,
