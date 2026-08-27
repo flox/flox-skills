@@ -16,10 +16,14 @@ is not evidence that the two native cells install without a login. That is the
 caveat the README's *What leaves your machine* section raises about these
 numbers, and it belongs in the conditions rather than only beside them.
 
-**Conclusion:** 6/8 stand. 8/8 installed and 8/8 produced skill-shaped
-answers as recorded, but **the two OpenCode rows are unexplained** and should
-not be cited — see below. No cell proves the model *invoked* the skill — see
-"What answer-shaped means" below — and that is not what AI-497 asked.
+**Conclusion:** 8/8 stand. 8/8 installed and 8/8 produced skill-shaped
+answers as recorded. The two OpenCode rows were flagged unexplained on
+2026-08-26 and were **settled by rerun on 2026-08-27**: OpenCode needs no login
+to answer, so those two cells were never authenticated passes and nothing on the
+credential path is unaccounted for. What they may and may not be cited for
+is narrower than the other six — see below. No cell proves the model
+*invoked* the skill — see "What answer-shaped means" below — and that is not
+what AI-497 asked.
 
 **Owner:** Bill LeVine (bill@flox.dev). **Lifecycle:** superseded by the next
 full authenticated run of the same matrix, at which point this file is deleted
@@ -33,53 +37,119 @@ rather than archived — see the README's *Retained evidence* section.
 | codex-native | pass | pass | answer-shaped | ✅ |
 | codex-npx | pass | pass | answer-shaped | ✅ |
 | codex-flox-ai | pass | pass | **not-injected** | ✅ false alarm — see below |
-| opencode-npx | pass | pass | answer-shaped | ⚠️ unexplained — see below |
-| opencode-flox-ai | pass | pass | answer-shaped | ⚠️ unexplained — see below |
+| opencode-npx | pass | pass | answer-shaped | ✅ unauthenticated — see below |
+| opencode-flox-ai | pass | pass | answer-shaped | ✅ unauthenticated — see below |
 
 **8/8 install. 8/8 produced skill-shaped answers as recorded** — the
 lone `not-injected` flag proved to be a flox-ai reporting bug, not a failure.
-The two ⚠️ rows are a later finding about the *evidence*, not a re-scoring of
-the run: see below.
+The two OpenCode rows carry a narrower meaning than the other six, established
+by rerun rather than re-scored: see below.
 
 The `not-injected` class no longer exists: that investigation is why the
 warning became a `notes` entry instead of a verdict, so a re-run of this matrix
 records `codex-flox-ai` as `answer-shaped` with the warning beside it.
 
-## The two OpenCode rows are unexplained
+## The two OpenCode rows — settled by rerun, 2026-08-27
 
-Recorded 2026-08-26, while addressing review of the runner. **These two rows
-cannot be produced by any code on this branch, and this report should not be
-cited for OpenCode compatibility until a rerun explains them.**
+Flagged unexplained 2026-08-26 while addressing review of the runner. **Rerun
+on 2026-08-27; the flag is cleared.** The finding that raised it was correct
+about the code and wrong about what followed from it.
 
-Nothing in the runner prepares or mounts an OpenCode credential: `creds.prepare`
-writes the Claude and Codex files only, and `docker_cmd` mounted only those two
-directories. A binary scan of the shipped OpenCode (1.18.23, `flox/opencode`)
-finds its sole credential resolver to be `$XDG_DATA_HOME/opencode/auth.json`,
-else `~/.local/share/opencode/auth.json`; `claudeAiOauth` and
-`.credentials.json` each appear zero times, and its only `/.claude` references
-are skill discovery. So the container OpenCode ran in had no login it could
-read, and an authenticated `trigger: pass` is not accounted for.
+What still holds, unchanged: nothing in the runner prepares or mounts an
+OpenCode credential. `creds.prepare` writes the Claude and Codex files only,
+and `docker_cmd` mounts only the cell's own agent's store — which for an
+OpenCode cell is nothing at all. The binary scan stands too: the shipped
+OpenCode resolves credentials solely from `$XDG_DATA_HOME/opencode/auth.json`,
+else `~/.local/share/opencode/auth.json`.
 
-The obvious alternative explanation is ruled out too: none of the five
-`FINGERPRINTS` tokens appears in `prompts/trigger.txt`, so an echoed prompt
-cannot reach the two-hit `answer-shaped` threshold.
+What does not hold is the inference: that an exit-0 trigger therefore recorded
+an *authenticated* pass on a path this repository does not implement.
+**OpenCode does not need a login to answer.** It looks for a credential exactly
+where the scan said it would, finds none, and serves the prompt from its own
+built-in provider regardless.
 
-Since `trigger_evidence` was not retained for this run, the transcripts that
-would settle it are gone. **What would settle it:** a rerun of
-`--cells opencode-npx,opencode-flox-ai` that keeps `trigger_evidence` and
-records what OpenCode actually did. Until then the load column for those two
-cells stands on its own — it is a filesystem check and needs no credential —
-and the trigger column does not.
+**Rerun conditions.** `--cells opencode-npx,opencode-flox-ai` on this branch,
+images `agent-compat-base:20260827` / `agent-compat-withpkg:20260827` rebuilt
+from the pinned environments — OpenCode 1.18.8, flox-ai 0.8.0,
+`flox/skills-flox@1.1.0`. No credential directory mounted into either trigger
+container, and none on the host to mount: `~/.local/share/opencode/auth.json`
+does not exist on the machine that ran this.
+
+| observation | result |
+|---|---|
+| `opencode auth list` inside the container | `0 credentials` |
+| `~/.local/share/opencode/auth.json` | absent before and after |
+| `opencode models` | 7 models, all provider `opencode`, five suffixed `-free` |
+| bare `opencode run <prompt> --format json`, nothing mounted | exit 0, 21,201 bytes |
+| every `step_finish` in every transcript | `"cost":0` |
+
+So the two rows record OpenCode answering on its free built-in provider. They
+are not authenticated passes, they never were, and no credential is
+unaccounted for. **The rows stand with their meaning corrected:** they
+establish that the skill installed and that OpenCode reached *a* model. They do
+**not** establish that a developer's own OpenCode login works — no run in this
+file has ever exercised one, and none can until the runner grows a third
+credential store.
+
+This also settles the deferred per-agent credential gate in its favour. It was
+held back on the premise that gating would redden two cells; with nothing
+mounted, both cells pass. The premise is refuted by execution now, not only by
+a binary scan.
+
+### The free provider is bimodal, and that is the live risk to these two cells
+
+Not a credential problem. Eight OpenCode launches were observed on 2026-08-27,
+all with zero credentials, across both images and both the bare and `flox-ai`
+launch paths:
+
+- **Four answered**, each well inside two minutes — the whole second matrix
+  run, both cells and all four containers, took 3m38s.
+- **Four produced zero bytes** and had to be killed, at caps of 240s, 600s,
+  600s and 900s.
+
+A hung attempt emits *nothing*, not a slow stream, so **a larger `--timeout`
+does not buy a verdict** — the 900s attempt was as empty as the 240s one. That
+makes the first attempt's `opencode-npx` timeout a property of the provider,
+not of the skill or the installation method, and it means a `timeout` on either
+OpenCode cell should be read as free-tier queueing before it is read as a
+failure. A bounded retry is the shape that would fix it; a bigger budget is
+not. Neither is done here.
+
+### OpenCode can prove invocation, and the window discards the proof
+
+`opencode run --format json` emits skill use as a tool call, observed in a full
+transcript captured from these images:
+
+```json
+{"type":"tool_use","part":{"tool":"skill",
+  "state":{"status":"completed","input":{"name":"customize-opencode"}}}}
+```
+
+So the blanket claim in the next section — that no cell proves the model
+*invoked* the skill — is true of Claude Code and Codex but **not** of
+OpenCode. A `"tool":"skill"` part naming `flox` would be direct proof,
+strictly stronger than `answer-shaped`.
+
+The runner cannot see it. `trigger_evidence` keeps the last 4000 characters,
+and OpenCode calls its tools early and answers at length, so the tool call is
+precisely what the window truncates away: both rerun rows retain the
+fingerprints (five of five for `opencode-npx`, four of five for
+`opencode-flox-ai`) and zero tool calls. Scoring an OpenCode cell on invocation
+needs the head of the transcript, not the tail.
 
 ## What "answer-shaped" means, and what it does not
 
 None of the three agent applications enumerates its loaded skills in headless
-mode. So no cell here proves the model *invoked* the skill. What a green cell
-establishes is: the plugin installed by that installation method, the agent
-started, the prompt reached the model, and the answer carried guidance the
-skill teaches (versioned
-`pkg-path`s, `[services]` wiring) rather than the bare `python`/`postgres` an
-unguided model tends to emit.
+mode. So no cell here proves the model *invoked* the skill — with one
+exception the runner does not yet exploit: OpenCode reports tool calls, so a
+`"tool":"skill"` part naming `flox` would be proof, and the 4000-character
+evidence window truncates it away. See the rerun section above.
+
+What a green cell establishes is: the plugin installed by that installation
+method, the agent started, the prompt reached the model, and the answer
+carried guidance the skill teaches (versioned `pkg-path`s, `[services]`
+wiring) rather than the bare `python`/`postgres` an unguided model tends to
+emit.
 
 That is good enough to close "does it load and work in this agent", which is
 what AI-497 asks. It is **not** a trigger rate, and it should not be quoted as
@@ -156,6 +226,7 @@ cd evals/agent-compatibility
 python3 run_matrix.py --dry-run     # plan only, no containers, no spend
 python3 run_matrix.py --load-only   # load half, no credentials needed
 python3 run_matrix.py               # full run
+python3 run_matrix.py --cells opencode-npx,opencode-flox-ai --timeout 1200
 ```
 
 The flag was `--tier-a-only` and the results keys were `tier_a` / `tier_b` when

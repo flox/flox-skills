@@ -241,8 +241,11 @@ resolves credentials only from `$XDG_DATA_HOME/opencode/auth.json`, else
 `~/.local/share/opencode/auth.json`, and a binary scan of 1.18.23 finds
 `claudeAiOauth` zero times and no reference to either mounted path outside skill
 discovery. Those cells consumed neither directory, so gating leaves their
-credential state exactly as it was. **How the retained report's two OpenCode
-rows passed authenticated is therefore an open question** — see
+credential state exactly as it was. **The retained report's two OpenCode rows
+were never authenticated passes**: OpenCode serves the prompt from a built-in
+provider that needs no login, so both cells pass with nothing mounted. Settled
+by rerunning them on 2026-08-27 — `opencode auth list` reports `0 credentials`
+inside the container and every step records `"cost":0` — see
 [`reports/`](reports/).
 
 The run directory is swept at the end — including files the container wrote as
