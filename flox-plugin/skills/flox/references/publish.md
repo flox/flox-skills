@@ -67,6 +67,27 @@ Before publishing:
 - Current commit pushed to remote
 - All build files tracked by Git
 - At least one package installed in `[install]`
+- **A full clone, not a shallow one** — see below
+
+**Never publish from a shallow clone.** `flox publish` records the repository's
+commit count as build provenance, taken from `git rev-list --count`. In a
+`--depth 1` clone that command returns `1` and exits 0, so a repository with
+five hundred commits publishes as though it had one.
+
+Nothing catches this. There is no shallow-clone check in the publish path, the
+command succeeds, and the wrong number is what lands in the catalog. That makes
+it worse than an error, not better: a failed publish is visible, and this one
+looks exactly like a good publish until someone reads the provenance back.
+
+Check before you publish, and unshallow if needed:
+
+```bash
+git rev-parse --is-shallow-repository   # must print false
+git fetch --unshallow                   # if it printed true
+```
+
+CI is where this bites most, because shallow is the default there rather than
+something you asked for. See the GitHub Actions and GitLab examples below.
 
 ### Authentication
 
@@ -433,9 +454,13 @@ Check out a branch before publishing: `git checkout -b <branch-name>`
 ```
 
 There is nothing a tag-triggered job can do about that, so trigger on the push
-to your release branch instead. `fetch-depth: 0` is still worth setting: under
-the default depth-1 checkout the publish records a commit count of 1 rather
-than the repository's real one.
+to your release branch instead.
+
+`fetch-depth: 0` is not optional here. `actions/checkout` clones at depth 1 by
+default, and a depth-1 clone publishes successfully with a commit count of `1`
+regardless of the repository's real history, silently, as described under
+[Prerequisites](#prerequisites). Every publish from that workflow carries the
+same wrong provenance, and the job stays green while it happens.
 
 `install-flox-action` installs the CLI; it does not activate an environment.
 This job does not need one: `flox publish` acts on the environment directory,
@@ -449,14 +474,19 @@ something the environment *provides* — see `references/ci.md`.
 publish:
   stage: deploy
   # Flox is provided by the runner image; see flox.dev/download
+  variables:
+    GIT_DEPTH: 0        # GitLab shallow-clones by default; see Prerequisites
   only:
     - main
   script:
     - flox publish -o myorg mypackage
 ```
 
-The branch-not-tag constraint above applies here too: a GitLab tag pipeline
-also checks out a detached HEAD, which `flox publish` refuses.
+Both constraints from the GitHub example carry over. A GitLab tag pipeline also
+checks out a detached HEAD, which `flox publish` refuses. And GitLab clones
+shallow by default, so `GIT_DEPTH: 0` is the counterpart of `fetch-depth: 0`:
+without it every publish from this job records the same wrong commit count,
+without failing.
 
 Set `FLOX_FLOXHUB_TOKEN` as a masked CI/CD variable; GitLab exports it into the
 job, so `flox publish` picks it up with no separate login step. Provide Flox in
