@@ -599,7 +599,7 @@ class TestMain(unittest.TestCase):
         """Rows in the shape `run_cell` really returns — see the contract test."""
         return [{"cell": c.id, "agent": c.agent,
                  "install_method": c.install_method, "image": c.image,
-                 "load": "pass", "trigger": "pass",
+                 "load": "pass", "trigger": "pass", "model": "",
                  "evidence_class": "answer-shaped", "load_evidence": "",
                  "trigger_evidence": "", "notes": ""} for c in CELLS]
 
@@ -659,7 +659,7 @@ class TestMain(unittest.TestCase):
         clause it already had. These two cases are about what `prepare` itself
         lets escape, so the real function has to run.
         """
-        return lambda dest: REAL_PREPARE(dest, claude_src, codex_src)
+        return lambda dest, **kw: REAL_PREPARE(dest, claude_src, codex_src)
 
     def test_a_malformed_credential_file_exits_5_not_1(self):
         """A half-written `~/.claude/.credentials.json` is a realistic state on
@@ -827,7 +827,8 @@ class TestRowContract(unittest.TestCase):
     """`main`'s tests fabricate rows, so something has to pin the real shape."""
 
     ROW_KEYS = {"cell", "agent", "install_method", "image", "load", "trigger",
-                "evidence_class", "load_evidence", "trigger_evidence", "notes"}
+                "model", "evidence_class", "load_evidence", "trigger_evidence",
+                "notes"}
 
     def test_run_cell_returns_the_documented_keys(self):
         # These are the keys the README lists as the results-file contract.
@@ -981,6 +982,117 @@ class TestLeakScan(unittest.TestCase):
         owns the names, and this is the site whose failure mode is exit 0."""
         self.assertEqual(creds.CREDENTIAL_FILENAMES,
                          frozenset(s.filename for s in creds.STORES))
+
+
+class TestOpenCodeModel(unittest.TestCase):
+    """`--opencode-model`: the opt-in that gives the OpenCode cells a model
+    they can be held to, instead of the no-login provider the shipped build
+    falls back to — which answers about half the time and cannot be pinned."""
+
+    def test_the_flag_reaches_only_opencode_cells(self):
+        """Claude Code and Codex take `--model` with a different vocabulary,
+        so one flag must not become three silently different meanings."""
+        model = "openrouter/z-ai/glm-5.3-flash"
+        self.assertEqual(run_matrix.model_flag(cell("opencode-npx"), model),
+                         f" --model {model}")
+        for cid in ("claude-npx", "codex-native", "claude-flox-ai"):
+            self.assertEqual(run_matrix.model_flag(cell(cid), model), "")
+
+    def test_no_flag_leaves_every_launch_as_it_was(self):
+        for c in CELLS:
+            self.assertEqual(run_matrix.model_flag(c, None), "")
+            self.assertNotIn("--model",
+                             run_matrix.cell_script(c, include_launch=True))
+
+    def test_an_opencode_launch_carries_the_model(self):
+        script = run_matrix.cell_script(cell("opencode-flox-ai"),
+                                        include_launch=True,
+                                        model="openrouter/z-ai/glm-5.3-flash")
+        self.assertIn("--model openrouter/z-ai/glm-5.3-flash", script)
+
+    def test_the_config_registers_the_model_under_its_provider(self):
+        """OpenCode 1.18.8 bakes its catalogue in at build time and stops at
+        `z-ai/glm-5.2`; an unregistered id fails with `UnknownError:
+        Unexpected server error`, which reads as a provider outage. The
+        provider is the first path segment and the model keeps the rest —
+        OpenRouter ids carry a slash of their own."""
+        cfg = run_matrix.opencode_config("openrouter/z-ai/glm-5.3-flash")
+        self.assertEqual(cfg["model"], "openrouter/z-ai/glm-5.3-flash")
+        self.assertIn("z-ai/glm-5.3-flash", cfg["provider"]["openrouter"]["models"])
+
+    def test_a_model_without_a_provider_is_rejected(self):
+        self.assertEqual(self._main(["--dry-run", "--opencode-model",
+                                     "glm-5.3-flash"]), 2)
+
+    def test_a_valid_model_is_accepted(self):
+        self.assertEqual(self._main(["--dry-run", "--cells", "opencode-npx",
+                                     "--opencode-model",
+                                     "openrouter/z-ai/glm-5.3-flash"]), 0)
+
+    @staticmethod
+    def _main(argv):
+        with patch("sys.stderr", new=io.StringIO()), \
+             patch("sys.stdout", new=io.StringIO()):
+            return run_matrix.main(argv)
+
+    def test_the_dry_run_plan_names_the_model(self):
+        """Five surfaces promise a dry run prints what each cell would run,
+        and the model is the part that costs money."""
+        row = run_matrix.run_cell(cell("opencode-npx"), "img:1", Path("/tmp/x"),
+                                  dry_run=True,
+                                  model="openrouter/z-ai/glm-5.3-flash")
+        self.assertIn("--model openrouter/z-ai/glm-5.3-flash", row["notes"])
+
+    def test_the_row_records_which_model_answered(self):
+        """Same cell id and same `answer-shaped` either way; without this the
+        free run and the paid one are indistinguishable on disk, and
+        merge-by-cell-id lets either stand in for the other."""
+        paid = run_matrix.run_cell(cell("opencode-npx"), "img:1", Path("/tmp/x"),
+                                   dry_run=True,
+                                   model="openrouter/z-ai/glm-5.3-flash")
+        free = run_matrix.run_cell(cell("opencode-npx"), "img:1", Path("/tmp/x"),
+                                   dry_run=True)
+        other = run_matrix.run_cell(cell("claude-npx"), "img:1", Path("/tmp/x"),
+                                    dry_run=True,
+                                    model="openrouter/z-ai/glm-5.3-flash")
+        self.assertEqual(paid["model"], "openrouter/z-ai/glm-5.3-flash")
+        self.assertEqual(free["model"], "")
+        self.assertEqual(other["model"], "")
+
+    def test_the_credential_mounts_where_opencode_reads(self):
+        cmd = run_matrix.docker_cmd("img:1", Path("/tmp/run"),
+                                    Path("/tmp/run/cell.sh"),
+                                    mount_credentials=True, agent="opencode",
+                                    stores=creds.active_stores(True))
+        self.assertIn("/tmp/run/opencode:/root/.local/share/opencode:rw", cmd)
+
+    def test_without_the_flag_an_opencode_cell_still_receives_nothing(self):
+        """The default path is unchanged, and this is the assertion that says
+        so: the opt-in store must not arrive because it merely exists."""
+        cmd = run_matrix.docker_cmd("img:1", Path("/tmp/run"),
+                                    Path("/tmp/run/cell.sh"),
+                                    mount_credentials=True, agent="opencode")
+        joined = " ".join(cmd)
+        self.assertNotIn("/root/.local/share/opencode", joined)
+        self.assertNotIn("/root/.claude", joined)
+        self.assertNotIn("/root/.codex", joined)
+
+    def test_the_config_mounts_read_only_and_only_on_the_trigger(self):
+        """Nothing in the container has business editing which model the run
+        is measuring, and the load half does not launch an agent at all."""
+        with patch("run_matrix.subprocess.run") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+            with TemporaryDirectory() as tmp:
+                run_matrix._run(cell("opencode-npx"), "img:1", Path(tmp),
+                                include_launch=True, timeout=1,
+                                model="openrouter/z-ai/glm-5.3-flash")
+                launch = " ".join(run.call_args[0][0])
+                run_matrix._run(cell("opencode-npx"), "img:1", Path(tmp),
+                                include_launch=False, timeout=1,
+                                model="openrouter/z-ai/glm-5.3-flash")
+                load = " ".join(run.call_args[0][0])
+        self.assertIn(f"{run_matrix.CONTAINER_OPENCODE_CONFIG}:ro", launch)
+        self.assertNotIn(run_matrix.CONTAINER_OPENCODE_CONFIG, load)
 
 
 class TestMergeRow(unittest.TestCase):

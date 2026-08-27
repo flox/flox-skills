@@ -27,14 +27,19 @@ REPO = "flox/flox-skills"
 # mounted script, where command substitution is safe.
 CLAUDE_LAUNCH = 'claude -p "$(cat {prompt})" --output-format json'
 CODEX_LAUNCH = 'codex exec "$(cat {prompt})" --json --skip-git-repo-check'
-OPENCODE_LAUNCH = 'opencode run "$(cat {prompt})" --format json'
+# `{model_flag}` is empty on a default run and ` --model <provider>/<model>`
+# when `--opencode-model` is passed. It is a CLI flag rather than config alone
+# so that `--dry-run` PRINTS which model a cell would spend on: the mounted
+# `opencode.json` also names it, but a plan the reader cannot see the model in
+# is the same class of quiet surface this file's other comments keep closing.
+OPENCODE_LAUNCH = 'opencode run "$(cat {prompt})" --format json{model_flag}'
 
 # flox-ai forwards args after `--` VERBATIM to the agent, so these omit the
 # binary name. Repeating it runs `claude claude -p ...`, which exits 0 while
 # silently dropping the prompt — a false pass.
 CLAUDE_ARGS = '-p "$(cat {prompt})" --output-format json'
 CODEX_ARGS = 'exec "$(cat {prompt})" --json --skip-git-repo-check'
-OPENCODE_ARGS = 'run "$(cat {prompt})" --format json'
+OPENCODE_ARGS = 'run "$(cat {prompt})" --format json{model_flag}'
 
 # The exact token both CLIs print for an INSTALLED plugin, and the reason the
 # two native cells are the strongest in this matrix rather than the weakest.

@@ -101,14 +101,18 @@ class TestMatrix(unittest.TestCase):
                                  f"{c.id}: launch repeats the binary name after `--`")
 
     def test_every_launch_survives_prompt_substitution(self):
-        """`run_matrix` does `cell.launch.format(prompt=...)`, so a literal
-        brace — a jq filter, a shell brace expansion — raises at run time.
-        `jq` is in both images, so this is a realistic way to add a cell."""
+        """`run_matrix` does `cell.launch.format(prompt=..., model_flag=...)`,
+        so a literal brace — a jq filter, a shell brace expansion — raises at
+        run time. `jq` is in both images, so this is a realistic way to add a
+        cell. Both substitutions are supplied on every cell, because `format`
+        ignores unused keywords but raises on a missing one: a launch that
+        names a placeholder this call does not is the failure being caught."""
         for c in CELLS:
-            try:
-                c.launch.format(prompt="/prompt.txt")
-            except (KeyError, IndexError, ValueError) as exc:
-                self.fail(f"{c.id}: launch breaks .format() — {exc!r}")
+            for flag in ("", " --model openrouter/z-ai/glm-5.3-flash"):
+                try:
+                    c.launch.format(prompt="/prompt.txt", model_flag=flag)
+                except (KeyError, IndexError, ValueError) as exc:
+                    self.fail(f"{c.id}: launch breaks .format() — {exc!r}")
 
     def test_cells_are_frozen(self):
         """`assertRaises(Exception)` was satisfied by the `IndexError` of an
