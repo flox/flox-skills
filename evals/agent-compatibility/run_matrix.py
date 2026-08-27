@@ -541,8 +541,14 @@ def cleanup_run_dir(run_dir: Path, tag: str | None) -> list[str]:
 # purpose. Neither is evidence about the trigger half, so neither may overwrite
 # a verdict some earlier run did measure.
 UNMEASURED_TRIGGER = (NOT_RUN, "not-attempted")
-# The three fields that carry the trigger half's answer.
-TRIGGER_FIELDS = ("trigger", "evidence_class", "trigger_evidence")
+# The four fields that carry the trigger half's answer. `model` is one of them
+# because it names WHICH model gave that answer: a same-day `--load-only` rerun
+# is run without `--opencode-model` and records the empty string — the agent's
+# own default, which for OpenCode is the free no-login provider. Keeping the
+# measured verdict while letting the new row's `model` through would relabel a
+# pinned-model `pass` as one the free provider produced, which is precisely the
+# confusion the field exists to prevent.
+TRIGGER_FIELDS = ("trigger", "evidence_class", "trigger_evidence", "model")
 
 
 def merge_row(prior: dict, new: dict) -> dict:
