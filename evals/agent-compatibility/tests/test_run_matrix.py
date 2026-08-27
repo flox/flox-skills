@@ -1106,6 +1106,35 @@ class TestMergeRow(unittest.TestCase):
         self.assertEqual(merged["evidence_class"], "answer-shaped")
         self.assertEqual(merged["trigger_evidence"], "MEASURED")
 
+    def test_the_kept_verdict_keeps_the_model_that_produced_it(self):
+        """`model` says which model answered, so it travels with the verdict.
+
+        A same-day `--load-only` rerun is run without `--opencode-model` and
+        so records `""` — the agent's own default, which for OpenCode is the
+        free no-login provider. Left out of `TRIGGER_FIELDS`, the merge kept
+        the pinned run's `pass`/`answer-shaped` and took the rerun's empty
+        `model` beside it, relabelling a paid, reproducible verdict as one the
+        free provider produced.
+        """
+        prior = {"cell": "opencode-npx", "load": "pass", "trigger": "pass",
+                 "evidence_class": "answer-shaped",
+                 "trigger_evidence": "MEASURED",
+                 "model": "openrouter/z-ai/glm-5.3-flash"}
+        new = {"cell": "opencode-npx", "load": "pass",
+               "trigger": "not-attempted", "evidence_class": "",
+               "trigger_evidence": "", "model": "", "notes": "--load-only"}
+        merged = run_matrix.merge_row(prior, new)
+        self.assertEqual(merged["model"], "openrouter/z-ai/glm-5.3-flash")
+
+    def test_a_measured_trigger_overwrites_the_model_too(self):
+        """The other direction: a run that DID measure names its own model."""
+        prior = {"cell": "opencode-npx", "load": "pass", "trigger": "pass",
+                 "evidence_class": "answer-shaped",
+                 "model": "openrouter/z-ai/glm-5.3-flash"}
+        new = {"cell": "opencode-npx", "load": "pass", "trigger": "pass",
+               "evidence_class": "answer-shaped", "model": ""}
+        self.assertEqual(run_matrix.merge_row(prior, new)["model"], "")
+
     def test_a_measured_load_still_overwrites(self):
         """The load half is what a `--load-only` run went to measure."""
         prior = {"cell": "a", "load": "pass", "trigger": "pass"}
