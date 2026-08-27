@@ -95,5 +95,96 @@ class TestPrepare(unittest.TestCase):
                 creds.prepare(Path(tmp) / "run", c, Path(tmp) / "nope.json")
 
 
+class TestOpenRouterStore(unittest.TestCase):
+    """The third store: optional, dotenv-sourced, and off unless asked for.
+
+    It is the only credential here minted for the suite rather than copied
+    from an agent application's own session, and the only one whose SOURCE has
+    no schema — a shell env file may hold anything at all.
+    """
+
+    def _env(self, tmp, text):
+        f = Path(tmp) / ".env-open-router"
+        f.write_text(text)
+        return f
+
+    def test_dotenv_parses_key_and_value(self):
+        with TemporaryDirectory() as tmp:
+            f = self._env(tmp, "OPENROUTER_API_KEY=sk-or-v1-test\n")
+            self.assertEqual(creds.read_dotenv(f),
+                             {"OPENROUTER_API_KEY": "sk-or-v1-test"})
+
+    def test_dotenv_ignores_comments_blanks_and_quotes(self):
+        with TemporaryDirectory() as tmp:
+            f = self._env(tmp, '# a comment\n\nOPENROUTER_API_KEY="sk-quoted"\n')
+            self.assertEqual(creds.read_dotenv(f),
+                             {"OPENROUTER_API_KEY": "sk-quoted"})
+
+    def test_dotenv_on_a_missing_file_is_a_credential_error(self):
+        """Not an OSError: exit 5 ("the run never started") is reachable only
+        for exceptions this module owns."""
+        with TemporaryDirectory() as tmp:
+            with self.assertRaises(creds.CredentialError):
+                creds.read_dotenv(Path(tmp) / "nope")
+
+    def test_minimize_is_an_allowlist_not_a_denylist(self):
+        """The Codex path is a denylist and is documented as the weaker
+        shape. A shell env file can carry anything, so nothing but the one
+        named key may travel."""
+        out = creds.minimize_openrouter(
+            {"OPENROUTER_API_KEY": "sk-keep", "ANTHROPIC_API_KEY": "MUST-NOT-LEAK",
+             "AWS_SECRET_ACCESS_KEY": "MUST-NOT-LEAK"})
+        self.assertNotIn("MUST-NOT-LEAK", json.dumps(out))
+        self.assertEqual(out, {"openrouter": {"type": "api", "key": "sk-keep"}})
+
+    def test_minimize_rejects_a_missing_or_empty_key(self):
+        for raw in ({}, {"OPENROUTER_API_KEY": ""}, {"OTHER": "x"}):
+            with self.assertRaises(creds.CredentialError):
+                creds.minimize_openrouter(raw)
+
+    def test_the_store_is_off_by_default(self):
+        """Preparing it whenever the key file happens to exist would redefine
+        what the two OpenCode cells measure with nothing in the run saying so."""
+        self.assertNotIn("opencode", [s.agent for s in creds.active_stores()])
+        self.assertIn("opencode", [s.agent for s in creds.active_stores(True)])
+
+    def test_prepare_skips_it_unless_asked(self):
+        """A missing key file must not fail a default run."""
+        with TemporaryDirectory() as tmp:
+            c = Path(tmp) / "c.json"; c.write_text(json.dumps(FULL_CLAUDE))
+            x = Path(tmp) / "x.json"; x.write_text(json.dumps(CODEX))
+            dest = Path(tmp) / "run"
+            creds.prepare(dest, c, x, Path(tmp) / "absent")
+            self.assertFalse((dest / "opencode").exists())
+
+    def test_prepare_writes_the_shape_opencode_reads(self):
+        """`{"openrouter": {"type": "api", "key": ...}}` at
+        `.local/share/opencode/auth.json` — the layout `opencode auth list`
+        reports as "OpenRouter api, 1 credentials" with no env var set."""
+        with TemporaryDirectory() as tmp:
+            c = Path(tmp) / "c.json"; c.write_text(json.dumps(FULL_CLAUDE))
+            x = Path(tmp) / "x.json"; x.write_text(json.dumps(CODEX))
+            e = self._env(tmp, "OPENROUTER_API_KEY=sk-or-v1-test\n")
+            dest = Path(tmp) / "run"
+            creds.prepare(dest, c, x, e, stores=creds.active_stores(True))
+            written = json.loads((dest / "opencode" / "auth.json").read_text())
+            self.assertEqual(written,
+                             {"openrouter": {"type": "api", "key": "sk-or-v1-test"}})
+            self.assertEqual(os.stat(dest / "opencode" / "auth.json").st_mode & 0o777,
+                             0o600)
+
+    def test_the_mount_point_is_where_opencode_looks(self):
+        store, = [s for s in creds.STORES if s.agent == "opencode"]
+        self.assertEqual(store.container_dir, ".local/share/opencode")
+        self.assertEqual(store.filename, "auth.json")
+
+    def test_a_fat_written_file_is_refused(self):
+        with TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "auth.json"
+            bad.write_text(json.dumps({"openrouter": {}, "anthropic": {}}))
+            with self.assertRaises(creds.CredentialError):
+                creds.assert_only_openrouter(bad)
+
+
 if __name__ == "__main__":
     unittest.main()

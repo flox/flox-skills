@@ -71,13 +71,35 @@ before the answer is judged. A cell whose trigger passes on exit status but
 classifies below `answer-shaped` is flagged in its `notes`, because exit 0 is
 not evidence.
 
-**`answer-shaped` is a weaker signal than it looks.** The prompt asks for a Flox
-manifest for a project that pins Python 3.12 and needs PostgreSQL, and
-`pkg-path`, `[services]` and `python312` are mandatory syntax or supplied by the
-prompt — so any answer that produces a valid manifest at all tends to clear the
-two-hit threshold. What would make the class discriminating is a control arm
-(the same prompt with no skill installed), which this suite does not run.
-Treat `answer-shaped` as "did not obviously fail", not as evidence of skill use.
+**`answer-shaped` does not discriminate, and that is now measured rather than
+suspected.** The prompt asks for a Flox manifest for a project that pins Python
+3.12 and needs PostgreSQL, and `pkg-path`, `[services]` and `python312` are
+mandatory syntax or supplied by the prompt — so any answer that produces a
+valid manifest at all tends to clear the two-hit threshold. The control arm
+this README used to call for was run on 2026-08-27, against
+`openrouter/z-ai/glm-5.3-flash` so the model was pinned, with **no skill
+installed**:
+
+| arm | tools | fingerprints | class |
+|---|---|---|---|
+| control, no skill | webfetch available | 4 of 5 | `answer-shaped` |
+| control, no skill | webfetch disabled | 4 of 5 | `answer-shaped` |
+| `opencode-npx`, skill installed | full | 5 of 5 | `answer-shaped` |
+| `opencode-flox-ai`, skill installed | full | 5 of 5 | `answer-shaped` |
+
+Both controls clear the bar, so the class separates nothing. Worse, the
+web-enabled control fetched `raw.githubusercontent.com/flox/flox-skills` — it
+answered by downloading the very skill whose installation the cell is supposed
+to be testing. The offline control shows the bar is cleared without any
+retrieval at all, on the model's own knowledge.
+
+The one fingerprint the controls missed is `[services]`, and not for a reason
+worth keeping: both wrote `[services.postgres]` without a bare `[services]`
+table, so the miss is substring matching, not evidence of guidance. Raising the
+threshold would move the numbers without making them mean more.
+
+Treat `answer-shaped` as "did not obviously fail". It is not evidence of skill
+use, and the two green columns above are the demonstration.
 
 Harness noise is recorded in `notes` and never becomes the verdict. flox-ai
 prints `not the flox-patched build` against a Flox-packaged Codex that *is*
@@ -137,6 +159,7 @@ python3 run_matrix.py --cells claude-native  # one cell
 python3 run_matrix.py --rebuild              # force the images to rebuild
 python3 run_matrix.py --version 20260813     # name the results file and image tag
 python3 run_matrix.py --timeout 900          # seconds per container (default 600)
+python3 run_matrix.py --opencode-model openrouter/z-ai/glm-5.3-flash
 ```
 
 A cell runs up to two containers, each on its own `--timeout` budget, so a
@@ -149,11 +172,14 @@ compatibility for every cell without a credential or a token.
 
 Results are merged into `results/<version>.jsonl` (gitignored, mode 600,
 `--version` defaults to today in UTC), one JSON object per cell — `cell`,
-`agent`, `install_method`, `image`, `load`, `trigger`, `evidence_class`,
-`load_evidence` and `trigger_evidence` transcript tails, and `notes` — plus a
-summary table on stdout. A `--cells` subset run updates only the cells it ran;
-the rest of the day's file survives, and an unknown cell id is an error rather
-than a silent smaller run.
+`agent`, `install_method`, `image`, `load`, `trigger`, `model`,
+`evidence_class`, `load_evidence` and `trigger_evidence` transcript tails, and
+`notes` — plus a summary table on stdout. `model` is empty unless
+`--opencode-model` was passed, and empty means the agent's own default.
+
+A `--cells` subset run updates only the cells it ran; the rest of the day's
+file survives, and an unknown cell id is an error rather than a silent smaller
+run.
 
 The merge is by cell id **and then by field**: a run that did not measure the
 trigger half cannot overwrite one that did. `--version` defaults to today, so
@@ -192,6 +218,11 @@ argument started nothing — so 3-over-everything is the whole ranking rule:
   `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` is involved and nothing is billed per
   token. Eight prompts is negligible against the limits.
 - **Network**, for the image build and for the native/skills.sh installs.
+- **Optional: an OpenRouter key at `~/.env-open-router`**, in dotenv form
+  (`OPENROUTER_API_KEY=sk-or-...`), and only when you pass `--opencode-model`.
+  This one *is* billed per token, unlike the two OAuth logins — a two-cell run
+  on `z-ai/glm-5.3-flash` costs well under a cent. Without the flag the file is
+  never read and the OpenCode cells run exactly as they always have.
 
 If a cell reports `auth-error`, that is a credential problem — a stale copy or a
 logged-out CLI — not a skill failure. The runner separates the two on purpose,
@@ -201,7 +232,9 @@ reads.
 ## What leaves your machine
 
 Only your **Claude subscription token** and your **Codex login**, copied into a
-temp directory that is deleted when the run ends.
+temp directory that is deleted when the run ends — plus, when and only when
+`--opencode-model` is passed, an **OpenRouter key** read from
+`~/.env-open-router`.
 
 **Credential minimization is enforced in code, not by convention.**
 `~/.claude/.credentials.json` holds more than your Claude login — it also
@@ -213,6 +246,16 @@ Notion, Slack, Sentry, and friends). None of that is needed here, so
   file it wrote has exactly that one top-level key;
 - drops `OPENAI_API_KEY` from the Codex copy and refuses to mount one that
   still carries it, so a per-token-billed key can never reach a container;
+- names `OPENROUTER_API_KEY` and nothing else out of the OpenRouter env file,
+  and refuses to mount a written file whose top-level keys are not exactly
+  `["openrouter"]`. An allowlist rather than the Codex denylist, deliberately:
+  that source is a shell env file with no schema, so anything at all could be
+  sitting beside the key. It travels as a JSON file at
+  `~/.local/share/opencode/auth.json` — the path the shipped OpenCode resolves
+  from — rather than as `-e OPENROUTER_API_KEY`, which OpenCode also accepts:
+  an env var is readable by every process in the container and shows up in
+  `docker inspect`, while a mounted file is exactly the shape the leak scan,
+  the mode-600 write and the end-of-run sweep already police;
 - writes both copies mode 600, gives each cell its own copy (OAuth tokens are
   refreshed in place; mounting your live files would let a container race your
   own session), and **never** bakes a credential into an image layer;

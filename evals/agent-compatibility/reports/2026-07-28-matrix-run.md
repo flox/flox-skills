@@ -22,8 +22,10 @@ answers as recorded. The two OpenCode rows were flagged unexplained on
 to answer, so those two cells were never authenticated passes and nothing on the
 credential path is unaccounted for. What they may and may not be cited for
 is narrower than the other six — see below. No cell proves the model
-*invoked* the skill — see "What answer-shaped means" below — and that is not
-what AI-497 asked.
+*invoked* the skill — and a control arm run on 2026-08-27 shows the trigger
+column's evidence class does not establish installation either, which is
+weaker than this file originally claimed. The `load` column is unaffected and
+still carries 8/8. See "A pinned model for OpenCode" below.
 
 **Owner:** Bill LeVine (bill@flox.dev). **Lifecycle:** superseded by the next
 full authenticated run of the same matrix, at which point this file is deleted
@@ -137,6 +139,66 @@ fingerprints (five of five for `opencode-npx`, four of five for
 `opencode-flox-ai`) and zero tool calls. Scoring an OpenCode cell on invocation
 needs the head of the transcript, not the tail.
 
+## A pinned model for OpenCode, and what it exposed — 2026-08-27
+
+The free provider above cannot be held to anything: it is unpinned, it answers
+about half the time, and nothing in a row said which model produced it. So the
+runner grew `--opencode-model`, an opt-in that gives the OpenCode cells an
+OpenRouter key (`~/.env-open-router`, minimized to
+`~/.local/share/opencode/auth.json`) and a named model. **Off by default** —
+without the flag the OpenCode cells run exactly as they did above, and the
+file is never read.
+
+Both cells, `--opencode-model openrouter/z-ai/glm-5.3-flash`, images rebuilt
+from the pinned environments:
+
+| cell | load | trigger | evidence | model recorded |
+|---|---|---|---|---|
+| opencode-npx | pass | pass | answer-shaped (5/5) | `openrouter/z-ai/glm-5.3-flash` |
+| opencode-flox-ai | pass | pass | answer-shaped (5/5) | `openrouter/z-ai/glm-5.3-flash` |
+
+Exit 0, four containers, 6m03s including both image rebuilds — against four
+hangs in eight launches on the free provider. Two things had to change for the
+verdict to mean anything: OpenCode 1.18.8 bakes its model catalogue in at build
+time and stops at `z-ai/glm-5.2`, so an unregistered id fails with
+`UnknownError: Unexpected server error` that reads as a provider outage — the
+cell now mounts an `opencode.json` registering the model under its provider.
+And the results row now carries `model`, because without it a free run and a
+paid one are the same cell id with the same `answer-shaped` on disk, and
+merge-by-cell-id would let either stand in for the other.
+
+### The control arm, run at last — and `answer-shaped` does not survive it
+
+A pinned model made the control arm cheap, so it was run. Same prompt, same
+model, **no skill installed**:
+
+| arm | tools | fingerprints | class |
+|---|---|---|---|
+| control, no skill | webfetch available | 4 of 5 | answer-shaped |
+| control, no skill | webfetch disabled | 4 of 5 | answer-shaped |
+| opencode-npx, skill installed | full | 5 of 5 | answer-shaped |
+| opencode-flox-ai, skill installed | full | 5 of 5 | answer-shaped |
+
+**Both controls clear the bar.** The class separates nothing, and the section
+below understates the problem: it says `answer-shaped` is not proof of
+invocation, and the truth is that it is not evidence of installation either.
+
+Two details make it worse rather than better. The web-enabled control answered
+by fetching `raw.githubusercontent.com/flox/flox-skills` — it went and
+downloaded the very skill whose installation the cell exists to test, after
+reading five pages of `flox.dev/docs`. And the offline control, with webfetch
+turned off and nothing but the model's own knowledge, still cleared the bar
+with the same four fingerprints. The one fingerprint both controls missed is
+`[services]`, and not for a reason worth keeping: each wrote
+`[services.postgres]` without a bare `[services]` table, so the miss is
+substring matching rather than an absence of guidance. Raising the threshold to
+5/5 would move the numbers without making them mean more.
+
+What this does **not** overturn: the `load` column, which is a filesystem check
+and answers a different question. All eight cells still install. What it
+overturns is the trigger column's evidence class as a signal about the skill —
+it says the agent started and produced a plausible manifest, and no more.
+
 ## What "answer-shaped" means, and what it does not
 
 None of the three agent applications enumerates its loaded skills in headless
@@ -151,10 +213,13 @@ carried guidance the skill teaches (versioned `pkg-path`s, `[services]`
 wiring) rather than the bare `python`/`postgres` an unguided model tends to
 emit.
 
-That is good enough to close "does it load and work in this agent", which is
-what AI-497 asks. It is **not** a trigger rate, and it should not be quoted as
-one — measuring reliability needs many repetitions and belongs in the
-screening tier.
+That was taken as good enough to close "does it load and work in this agent",
+which is what AI-497 asks. Half of it no longer holds: the control arm above
+clears the same bar with no skill installed at all, so what closes the
+installation question is the `load` column — a filesystem check, and
+unaffected — not this class. It is also **not** a trigger rate, and should
+not be quoted as one: measuring reliability needs many repetitions and belongs
+in the screening tier.
 
 ## The one flagged cell — the warning is a false alarm
 

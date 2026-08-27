@@ -46,6 +46,9 @@ RESULTS = HERE / "results"
 CONTAINER_PROMPT = "/prompt.txt"
 CONTAINER_SCRIPT = "/cell.sh"
 CONTAINER_HOME = "/root"
+# Where OpenCode reads its config, relative to the container HOME. Only an
+# OpenCode cell running under `--opencode-model` gets one.
+CONTAINER_OPENCODE_CONFIG = ".config/opencode/opencode.json"
 # Precise phrases only. A bare "authentication"/"expired" matched Codex
 # answers describing PostgreSQL "trust authentication" and flagged two good
 # runs as credential failures — a false negative in the other direction from
@@ -69,11 +72,36 @@ NOT_RUN = "not-run"
 # are legal inside but not first, so a bare `.` or `-x` passes a naive
 # `[0-9A-Za-z._-]+` and then fails in `docker build` instead.
 VERSION_RE = re.compile(r"[0-9A-Za-z_][0-9A-Za-z._-]{0,127}")
+# `<provider>/<model>`, where the model half may itself contain slashes —
+# OpenRouter ids do (`openrouter/z-ai/glm-5.3-flash`). Both halves must be
+# non-empty: a bare `glm-5.3-flash` names no provider, and OpenCode answers a
+# model it cannot resolve with `UnknownError: Unexpected server error`, which
+# is indistinguishable from a provider outage in the transcript.
+MODEL_RE = re.compile(r"[^/\s]+/[^\s]+")
+
+
+def opencode_config(model: str) -> dict:
+    """The `opencode.json` an OpenCode cell runs under, for one model.
+
+    Two jobs, and the first is not optional. OpenCode ships a model catalogue
+    baked in at build time, and 1.18.8 — the version these images pin — stops
+    at `z-ai/glm-5.2`; asking it for `z-ai/glm-5.3-flash` on the command line
+    alone fails with `UnknownError`. Registering the model under its provider
+    makes it resolvable. The second job is to name it as the default, so the
+    `flox-ai` cell gets the same model as the bare one without depending on
+    how `flox-ai launch` forwards flags.
+    """
+    provider, _, name = model.partition("/")
+    return {"$schema": "https://opencode.ai/config.json",
+            "provider": {provider: {"models": {name: {}}}},
+            "model": model}
 
 
 def docker_cmd(tag: str, creds_dir: Path, script: Path,
                mount_credentials: bool, agent: str | None = None,
-               cidfile: Path | None = None) -> list[str]:
+               cidfile: Path | None = None,
+               stores: tuple[creds.Store, ...] | None = None,
+               config: Path | None = None) -> list[str]:
     """Build the `docker run` line for one cell.
 
     Credentials mount rw when they mount at all — these are OAuth tokens the
@@ -105,11 +133,15 @@ def docker_cmd(tag: str, creds_dir: Path, script: Path,
     if cidfile is not None:
         cmd += ["--cidfile", str(cidfile)]
     if mount_credentials:
-        for store in creds.STORES:
+        for store in (creds.active_stores() if stores is None else stores):
             if agent is not None and store.agent != agent:
                 continue
             cmd += ["-v", f"{creds_dir}/{store.agent}:"
                           f"{CONTAINER_HOME}/{store.container_dir}:rw"]
+    if config is not None:
+        # ro, unlike the credential mounts: nothing in the container has any
+        # business editing which model the run is measuring.
+        cmd += ["-v", f"{config}:{CONTAINER_HOME}/{CONTAINER_OPENCODE_CONFIG}:ro"]
     cmd += ["-v", f"{PROMPT}:{CONTAINER_PROMPT}:ro",
             "-v", f"{script}:{CONTAINER_SCRIPT}:ro",
             tag, "bash", CONTAINER_SCRIPT]
@@ -146,14 +178,29 @@ def _emit(marker: str) -> str:
     return f"echo {marker}; echo {marker} >&2"
 
 
-def cell_script(cell: Cell, include_launch: bool) -> str:
+def model_flag(cell: Cell, model: str | None) -> str:
+    """The ` --model ...` fragment this cell's launch carries, if any.
+
+    Gated on the cell's own agent, not just on the flag: `--opencode-model`
+    names a model only OpenCode can resolve, and Claude Code and Codex take
+    `--model` with a different vocabulary entirely, so handing it to them
+    would turn one flag into three silently different meanings.
+    """
+    if model is None or cell.agent != "opencode":
+        return ""
+    return f" --model {model}"
+
+
+def cell_script(cell: Cell, include_launch: bool,
+                model: str | None = None) -> str:
     """Assemble the shell a cell runs inside the container."""
     parts = ["set -euo pipefail", ENV_SHIM]
     if cell.install:
         parts.append(cell.install)
     if include_launch:
         parts.append(_emit(LAUNCH_MARKER))
-        parts.append(cell.launch.format(prompt=CONTAINER_PROMPT))
+        parts.append(cell.launch.format(prompt=CONTAINER_PROMPT,
+                                        model_flag=model_flag(cell, model)))
     else:
         parts.append(_emit(LIST_MARKER))
         parts.append(cell.list_cmd)
@@ -187,9 +234,17 @@ def launch_output(stdout: str, stderr: str) -> str:
 
 
 def _run(cell: Cell, tag: str, work: Path, include_launch: bool,
-         timeout: int) -> subprocess.CompletedProcess:
+         timeout: int, model: str | None = None,
+         stores: tuple[creds.Store, ...] | None = None
+         ) -> subprocess.CompletedProcess:
     script = work / "cell.sh"
-    script.write_text(cell_script(cell, include_launch))
+    script.write_text(cell_script(cell, include_launch, model))
+    # Written beside the script, never inside a credential mount, and only for
+    # the agent whose catalogue needs it.
+    config = None
+    if model is not None and cell.agent == "opencode":
+        config = work / "opencode.json"
+        config.write_text(json.dumps(opencode_config(model)))
     # Docker refuses to start over a cidfile that already exists, and this
     # path is reused when the trigger half follows the load half.
     cidfile = work / ("trigger.cid" if include_launch else "load.cid")
@@ -197,7 +252,8 @@ def _run(cell: Cell, tag: str, work: Path, include_launch: bool,
     try:
         return subprocess.run(
             docker_cmd(tag, work, script, mount_credentials=include_launch,
-                       agent=cell.agent, cidfile=cidfile),
+                       agent=cell.agent, cidfile=cidfile, stores=stores,
+                       config=config if include_launch else None),
             capture_output=True, text=True, timeout=timeout)
     except BaseException:
         # A timeout — or a Ctrl-C — kills the docker CLI and leaves the
@@ -223,11 +279,20 @@ def _halves(row: dict, verdict: str) -> tuple[str, str]:
 
 
 def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
-             load_only: bool = False, timeout: int = 600) -> dict:
+             load_only: bool = False, timeout: int = 600,
+             model: str | None = None,
+             stores: tuple[creds.Store, ...] | None = None) -> dict:
     """Run one cell. Never raises: every failure becomes a recorded verdict."""
     row = {"cell": cell.id, "agent": cell.agent,
            "install_method": cell.install_method,
            "image": cell.image, "load": NOT_RUN, "trigger": NOT_RUN,
+           # WHICH model answered. Empty means the agent's own default — for
+           # OpenCode, the no-login provider the shipped build falls back to.
+           # Without this the two runs are indistinguishable on disk: same
+           # cell id, same `answer-shaped`, one free and unpinnable and one
+           # paid and reproducible, and merge-by-cell-id would let either
+           # silently stand in for the other.
+           "model": model_flag(cell, model).replace(" --model ", ""),
            "evidence_class": "", "load_evidence": "", "trigger_evidence": "",
            "notes": ""}
     if dry_run:
@@ -238,9 +303,10 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
         # `summarize` rendered this field it was computed and thrown away. Both
         # halves, because a full run starts two containers and checking a new
         # cell's shell before spending one is the whole point.
-        plan = [("load", cell_script(cell, include_launch=False))]
+        plan = [("load", cell_script(cell, include_launch=False, model=model))]
         if not load_only:
-            plan.append(("trigger", cell_script(cell, include_launch=True)))
+            plan.append(("trigger",
+                         cell_script(cell, include_launch=True, model=model)))
         row["notes"] = " | ".join(
             f"{half}: {script.strip().replace(chr(10), ' ; ')}"
             for half, script in plan)
@@ -251,7 +317,8 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
         # Load — install, then prove the agent application can see the skill.
         # Needs no credentials, so it still answers when the trigger half is
         # blocked, and it runs with none mounted.
-        a = _run(cell, tag, work, include_launch=False, timeout=timeout)
+        a = _run(cell, tag, work, include_launch=False, timeout=timeout,
+                 model=model, stores=stores)
         row["load_evidence"] = (a.stdout + a.stderr)[-2000:]
         listed = list_output(a.stdout, a.stderr)
         row["load"] = "pass" if (a.returncode == 0 and cell.expect in listed) else "fail"
@@ -269,7 +336,8 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
             return row
 
         # Trigger — one prompt, in a fresh container that re-runs the install.
-        b = _run(cell, tag, work, include_launch=True, timeout=timeout)
+        b = _run(cell, tag, work, include_launch=True, timeout=timeout,
+                 model=model, stores=stores)
         row["trigger_evidence"] = (b.stdout + b.stderr)[-4000:]
         agent_out = launch_output(b.stdout, b.stderr)
         # A successful exit is never an auth failure, whatever the prose says,
@@ -612,6 +680,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--load-only", action="store_true",
                     help="load check only; skip the authenticated trigger half "
                          "(no credentials needed)")
+    ap.add_argument("--opencode-model", metavar="PROVIDER/MODEL",
+                    help="run the OpenCode cells against this model, using the "
+                         "OpenRouter key at ~/.env-open-router "
+                         "(e.g. openrouter/z-ai/glm-5.3-flash). Off by "
+                         "default: without it the OpenCode cells run on the "
+                         "no-login provider the shipped build falls back to, "
+                         "which costs nothing and answers about half the time")
     ap.add_argument("--timeout", type=int, default=600,
                     help="seconds per container; a cell runs up to two "
                          "(default: 600)")
@@ -625,6 +700,13 @@ def main(argv: list[str] | None = None) -> int:
         # results/ and a colon yields the invalid reference `agent-compat-base:
         # base:x` that lib/images.py's docstring exists to warn about.
         print(f"--version must match {VERSION_RE.pattern}", file=sys.stderr)
+        return 2
+    if args.opencode_model is not None and not MODEL_RE.fullmatch(args.opencode_model):
+        # Same class as `--version`: an argument that is wrong here is cheap to
+        # reject and expensive to discover from a transcript, where an
+        # unresolvable model reads as `UnknownError` and looks like an outage.
+        print(f"--opencode-model must match {MODEL_RE.pattern} "
+              f"(e.g. openrouter/z-ai/glm-5.3-flash)", file=sys.stderr)
         return 2
     if args.timeout <= 0:
         # `--cells` and `--version` are both argument errors here; this was the
@@ -656,6 +738,9 @@ def main(argv: list[str] | None = None) -> int:
     # Computed inside the `try` but returned after the `finally`, so that a
     # surviving credential copy — discovered during cleanup, and the one
     # failure mode here with a security consequence — can still change it.
+    # One decision, read by `prepare`, the copy loop and `docker_cmd` alike.
+    stores = creds.active_stores(opencode=args.opencode_model is not None)
+
     rc = 0
     run_dir = Path(tempfile.mkdtemp(prefix="agent-compat-"))
     results_file = RESULTS / f"{args.version}.jsonl"
@@ -663,7 +748,7 @@ def main(argv: list[str] | None = None) -> int:
         started = True
         if not args.dry_run and not args.load_only:
             try:
-                creds.prepare(run_dir / "src")
+                creds.prepare(run_dir / "src", stores=stores)
             except creds.CredentialError as exc:
                 print(f"credentials unusable: {exc}", file=sys.stderr)
                 # ASSIGNED, not returned. `return 5` inside this `try` fixes
@@ -678,7 +763,7 @@ def main(argv: list[str] | None = None) -> int:
         for cell in selected if started else []:
             work = run_dir / cell.id
             if not args.dry_run:
-                for store in creds.STORES:
+                for store in stores:
                     target = work / store.agent
                     target.mkdir(parents=True, exist_ok=True)
                     src = run_dir / "src" / store.agent
@@ -686,7 +771,8 @@ def main(argv: list[str] | None = None) -> int:
                         shutil.copytree(src, target, dirs_exist_ok=True)
             row = run_cell(cell, tags.get(cell.image, "dry-run"), work,
                            dry_run=args.dry_run, load_only=args.load_only,
-                           timeout=args.timeout)
+                           timeout=args.timeout, model=args.opencode_model,
+                           stores=stores)
             rows.append(row)
             print(f"{cell.id}: load {row['load']} / trigger {row['trigger']}")
             # Written per CELL, not once after the loop. A full authenticated
