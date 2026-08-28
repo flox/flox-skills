@@ -94,6 +94,12 @@ authoritative; use them inline without opening a reference file.
   the recipe: `.flox/pkgs/<name>/default.nix` with `<pkg>.overrideAttrs` to bump
   `version`/`src`, then `flox build` (`hash = ""` → build prints the real hash)
   and `flox publish` to make it available everywhere. Depth in `builds.md`.
+- **Never `flox publish` from a shallow clone.** It succeeds and records the
+  wrong commit count as build provenance, with no warning: `git rev-list
+  --count` returns the shallow depth and exits 0, and nothing in the publish
+  path checks. `git rev-parse --is-shallow-repository` must print `false`;
+  `git fetch --unshallow` if it does not. In CI this is the default, so set
+  `fetch-depth: 0` (Actions) or `GIT_DEPTH: 0` (GitLab). Depth in `publish.md`.
 
 **C / C++**
 - ALWAYS add `gcc-unwrapped` alongside `gcc` for the C++ stdlib headers/libs —
