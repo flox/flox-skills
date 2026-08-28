@@ -232,8 +232,25 @@ class TestProvenanceIsGeneratedFromTheRun(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmp.cleanup()
 
+    # The registry total is read from `screening.jsonl` rather than frozen as a
+    # literal. Adding a candidate is a documented, encouraged act (README,
+    # "Adding or updating an eval"), and a hardcoded total turns every such
+    # addition into a spurious failure here. What this test owes the report is
+    # that its provenance line is TRUE of the registry, not that the registry
+    # never grows. SCREENED stays literal: it is a property of the committed
+    # baselines, which do change deliberately.
+    SCREENED = 19
+
+    @property
+    def registry_total(self):
+        path = HERE / "tasks" / "screening.jsonl"
+        return len([l for l in path.read_text().splitlines() if l.strip()])
+
     def test_names_the_screened_subset_against_the_registry_total(self):
-        self.assertIn("Screened **19 of the 51** entries", self.OUT)
+        self.assertIn(
+            f"Screened **{self.SCREENED} of the {self.registry_total}** entries",
+            self.OUT,
+        )
 
     def test_names_the_delta_the_reproduce_recipe_adds(self):
         # The recipe's `--area freshness --area triggering` selects 20, one more
@@ -257,7 +274,9 @@ class TestProvenanceIsGeneratedFromTheRun(unittest.TestCase):
     def test_unscreened_registry_entries_are_named_in_the_report(self):
         line = next(l for l in self.OUT.splitlines()
                     if l.startswith("- **Not screened"))
-        self.assertIn("(32)", line)
+        # Same reasoning as the registry total above: unscreened is whatever
+        # the registry holds minus what the committed baselines measured.
+        self.assertIn(f"({self.registry_total - self.SCREENED})", line)
         self.assertIn("trap-hook-return-not-exit", line)
 
     def test_no_signal_bucket_is_the_six_measured_ones(self):

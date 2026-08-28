@@ -1,7 +1,7 @@
 {
   "name": "flox",
   "version": "1.1.0",
-  "description": "Flox development environment and deployment plugin. Includes expert guidance for package management, services, builds and package distribution, containerization, environment composition and layering.",
+  "description": "Flox development environment and deployment plugin. Includes expert guidance for package management, services, builds and package distribution, containerization, environment composition and layering, and CI integration.",
   "author": {
     "name": "Flox",
     "url": "https://flox.dev/"
@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "Flox",
     "shortDescription": "Build and manage reproducible Flox development environments.",
-    "longDescription": "Use Flox skills to create reproducible environments, manage packages and services, build and publish packages, containerize environments, share environment layers, and configure CUDA workflows.",
+    "longDescription": "Use Flox skills to create reproducible environments, manage packages and services, build and publish packages, containerize environments, share environment layers, run CI steps inside an activated environment, and configure CUDA workflows.",
     "developerName": "Flox",
     "category": "Developer Tools",
     "capabilities": [

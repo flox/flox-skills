@@ -1,0 +1,94 @@
+{
+  "summary": {
+    "model": "claude-haiku-4-5-20251001",
+    "reps": 5,
+    "setting_sources": "project,local",
+    "mean_baseline_hard_pass_rate": 0.0,
+    "mean_skills_hard_pass_rate": 0.4,
+    "total_cost_usd": 0.6473,
+    "total": 2,
+    "errors": 0,
+    "discriminators": 1,
+    "skill_gaps": 1,
+    "no_signals": 0,
+    "mean_judge_gap": -0.8,
+    "discriminator_ids": [
+      "ci-install-vs-activate"
+    ],
+    "skill_gap_ids": [
+      "ci-github-actions-multiline"
+    ],
+    "no_signal_ids": [],
+    "error_ids": []
+  },
+  "results": [
+    {
+      "id": "ci-github-actions-multiline",
+      "area": "ci",
+      "tier": "should",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": false,
+        "hard_pass_rate": 0.0,
+        "hard_pass_count": 0,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 1.2,
+        "judge_correct": false,
+        "judge_issues": [],
+        "answer_excerpt": "# GitHub Actions Workflow with Flox\n\nHere's the complete solution:\n\n## flox.toml (Manifest)\n\n```toml\n[project]\nname = \"my-project\"\ndescription = \"Python project with testing and linting tools\"\n\n[environments.default.packages]\npython3 = { }\nruff = { }\nmypy = { }\npytest = { }\n```\n\n## GitHub Actions Workflow (.github/workflows/ci.yml)\n\n```yaml\nname: CI\n\non:\n  push:\n    branches: [ main ]\n  pull_request:\n    branches: [ main ]\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      \n      - name: Install Flox\n        uses: DeterminateSystems/flox-cli-action@main\n      \n      - name: Run tests, linting, and type checking\n        run: |\n          flox shell -- bash -c 'python3 -m pytest -q && ruff check . && mypy src'\n```\n\n## Explanation\n\n- **flox.toml**: Declares the default environment with Python 3 and the three required tools (pytest, ruff, mypy) as top-level nixpkgs packages\n- **Workflow**: Uses `DeterminateSystems/flox-cli-action` to install Flox, then runs all three commands in a single step via `flox shell -- bash -c`\n- **Key command**: `flox shell -- bash -c '...'` activates the Flox environment and executes the chained commands in one shell ",
+        "cost_usd": 0.1372
+      },
+      "skills": {
+        "hard_pass": false,
+        "hard_pass_rate": 0.0,
+        "hard_pass_count": 0,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 1.4,
+        "judge_correct": false,
+        "judge_issues": [],
+        "answer_excerpt": "# GitHub Actions Workflow for Flox\n\n## The Complete Solution\n\n### 1. Flox Manifest (`.flox/env/manifest.toml`)\n\n```toml\n[env]\npython = \"3.11\"\n\n[env.devDependencies]\npytest = \"*\"\nruff = \"*\"\nmypy = \"*\"\n```\n\n### 2. GitHub Actions Workflow (`.github/workflows/test.yml`)\n\n```yaml\nname: Tests\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      \n      - uses: DeterminateSystems/flox-installer@v3\n      \n      - name: Run pytest, ruff, and mypy in Flox environment\n        run: flox activate -- bash -c \"python3 -m pytest -q && ruff check . && mypy src\"\n```\n\n## Explanation\n\n**How it works:**\n\n- **`flox activate --`** activates the Flox environment and passes control to the following command\n- **`bash -c \"...\"`** runs multiple commands as a single bash script\n- **`&&`** chains commands so they run sequentially; if any command fails, the step fails immediately\n- All three linting/testing tools are defined in the manifest's `devDependencies` group, available when the environment activates\n\n**Key points:**\n\n- The three commands run in a **single GitHub Actions step** (the last step shown) with the Flox envi",
+        "cost_usd": 0.1428
+      },
+      "discriminates_hard": false,
+      "discriminates_judge": false,
+      "judge_gap": 0.2,
+      "classification": "skill-gap"
+    },
+    {
+      "id": "ci-install-vs-activate",
+      "area": "ci",
+      "tier": "should",
+      "trigger_test": false,
+      "baseline": {
+        "hard_pass": false,
+        "hard_pass_rate": 0.0,
+        "hard_pass_count": 0,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 2.2,
+        "judge_correct": false,
+        "judge_issues": [],
+        "answer_excerpt": "# The Problem\n\nThe `install-flox-action` installs the Flox tool, but **it doesn't activate your Flox environment**. Each GitHub Actions step runs in a separate shell, so the environment activation from one step doesn't carry to the next. Subsequent steps can't find your tools because they're not in PATH.\n\n# The Solution\n\nUse `flox activate --` to run commands within your activated environment. Here's the corrected workflow:\n\n## Corrected Workflow YAML\n\n```yaml\nname: CI\non: [push, pull_request]\n\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v3\n      \n      - name: Install Flox\n        uses: flox/install-flox-action@v1\n      \n      - name: Build with Flox environment\n        run: |\n          flox activate -- bash -c '\n            your-tool --version\n            npm run build\n            other-commands\n          '\n```\n\n**Key:** The `flox activate --` wrapper executes commands within the activated environment for that step.\n\n## Flox Environment Manifest (flox.toml)\n\nAdd this to your repository root:\n\n```toml\n[packages]\nnodejs = {}\ngcc = {}\n\n[profile.default]\n# Additional settings if needed\n```\n\nReplace the package list with whatever tools your work",
+        "cost_usd": 0.1347
+      },
+      "skills": {
+        "hard_pass": true,
+        "hard_pass_rate": 0.8,
+        "hard_pass_count": 4,
+        "reps": 5,
+        "ok_reps": 5,
+        "judge_score": 0.4,
+        "judge_correct": false,
+        "judge_issues": [],
+        "answer_excerpt": "## The Problem\n\n**`flox/install-flox-action` only installs the Flox CLI \u2014 it does not activate your environment.** After that step runs, subsequent steps still run on the bare runner and can't find your environment's tools. You need to activate the environment in each step that uses it.\n\n## The Solution\n\nThere are two patterns, depending on whether you're running a short command or a multiline script.\n\n### Pattern 1: Short Command (Use `flox/activate-action`)\n\nFor single-command steps, use the `flox/activate-action`:\n\n```yaml\n- name: Install flox\n  uses: flox/install-flox-action@v1\n\n- name: Run a single command\n  uses: flox/activate-action@v1\n  with:\n    command: pytest -q\n    # Optional: dir: .  # if .flox/ is not in the repo root\n```\n\n### Pattern 2: Multiline Script (Make Flox Your Shell)\n\nFor multiple commands in one step, set the `shell` to activate Flox for the entire block:\n\n```yaml\n- name: Install flox\n  uses: flox/install-flox-action@v1\n\n- name: Run tests and linting\n  shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}\n  run: |\n    python3 -m pytest -q\n    ruff check .\n```\n\n**Critical details:**\n- `flox activate -- bash --noprofile --norc -e -o pipefail {0}`",
+        "cost_usd": 0.2326
+      },
+      "discriminates_hard": true,
+      "discriminates_judge": false,
+      "judge_gap": -1.8,
+      "classification": "discriminator"
+    }
+  ]
+}

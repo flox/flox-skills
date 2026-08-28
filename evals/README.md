@@ -183,7 +183,7 @@ a short reply is not free. Do the arithmetic before a whole-registry run:
 
 | Command | Calls |
 |---|---|
-| `run.py` over `tasks/tasks.jsonl` | 31 tasks × 2 = **62** |
+| `run.py` over `tasks/tasks.jsonl` | 33 tasks × 2 = **66** |
 | `screen.py --reps 5` over `tasks/screening.jsonl` | 51 candidates × 4 × 5 reps = **1020** |
 | `run_floxify.py` over `synthetic.jsonl` | 7 fixtures × 2 = **14** |
 
@@ -585,12 +585,12 @@ kept on purpose, not ordinary run output.
 
 | File | What it is | Coverage | Read by |
 |---|---|---|---|
-| `skills.json` | `run.py --mode skills` over the gated registry | 27 of 31 tasks | `run.py`'s regression diff |
-| `baseline.json` | `run.py --mode baseline` — the unassisted arm, with the isolation caveat above | 27 of 31 tasks | `run.py`'s regression diff |
+| `skills.json` | `run.py --mode skills` over the gated registry | 27 of 33 tasks | `run.py`'s regression diff |
+| `baseline.json` | `run.py --mode baseline` — the unassisted arm, with the isolation caveat above | 27 of 33 tasks | `run.py`'s regression diff |
 | `screen-opus.json`, `screen-sonnet.json`, `screen-haiku.json` | `screen.py` at n=5 per model | 19 of 51 candidates | `gen_screening_report.py --results`, by hand |
 
 **These snapshots lag their registries.** Both `run.py` baselines were recorded
-against a 27-task registry that has since grown to 31, so every run opens its
+against a 27-task registry that has since grown to 33, so every run opens its
 diff with phantom "new tasks" lines. Treat the *flips* as the signal, not the
 additions, until a refresh lands. The screening snapshots cover a subset too —
 `gen_screening_report.py` names the unmeasured candidates under "Not screened"

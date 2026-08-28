@@ -456,6 +456,205 @@ def _sandbox_schema_version(answer):
     )
 
 
+# --- CI activation shape (AI-511) -------------------------------------------
+# Two questions about a generated GitHub Actions workflow: did the answer get
+# INTO the environment by a sanctioned route, and does any single step re-enter
+# it once per command (slow, and each line loses the state the previous one
+# set).
+#
+# Both are answered against parsed *steps*, not by grepping fence text. The
+# first cut of these checks grepped, and PR #100's review showed what that
+# costs: a commented-out `# uses: flox/activate-action` greened a broken
+# answer, while a quoted `shell:` scalar and the plain `run: flox activate --`
+# form both redded correct ones.
+#
+# `evals/README.md` ("Designing a check") governs the shape:
+#
+#   - "Prefer positive `must_match` ... Assert the correct construction rather
+#     than detecting the wrong one."
+#   - "A correct answer often illustrates the anti-pattern as a labeled
+#     counter-example, so a negative or proximity check false-fires on good
+#     answers."
+#
+# The second rule is not hypothetical here: `references/ci.md` teaches the
+# model to show the per-line form under a `# WRONG` heading, so the skill
+# actively trains answers that a naive negative check would fail. Hence
+# `_is_counter_example`, and hence the negative check additionally requiring
+# the correct construction to be present.
+
+_YAML_INFO = {"yaml", "yml", ""}
+# Deliberately looser than skill_toml_lint's fence regex, which anchors the
+# info string to end-of-line: a model writes ```yaml title="ci.yml" often
+# enough that treating it as "no fence here" silently drops the whole answer.
+_FENCE_LINE = re.compile(r"^(?P<indent>[ \t]*)(?P<fence>```+)(?P<info>[^\s`]*)")
+_FULL_LINE_COMMENT = re.compile(r"^[ \t]*#")
+# Markers a document uses to label a block as the thing NOT to do.
+_COUNTER_EXAMPLE = re.compile(
+    r"\bWRONG\b|\bBAD\b|\bavoid\b|\banti-?pattern\b|\bdo\s*n[o']?t\b|\bnever\b|"
+    r"\binstead\s+of\b|\bbroken\b|❌", re.I
+)
+
+
+def _yaml_blocks(answer):
+    """Yield (body, is_counter_example) for every YAML-ish fenced block.
+
+    Handles the four shapes the regex this replaced returned nothing for:
+    CRLF answers, ```yml, an attributed info string, and an answer that ends
+    mid-fence (taken as running to the end rather than dropped, the same
+    choice `_fenced_manifests` documents for the TOML path).
+    """
+    lines = answer.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    i = 0
+    while i < len(lines):
+        m = _FENCE_LINE.match(lines[i])
+        if not m or m.group("info").lower() not in _YAML_INFO:
+            i += 1
+            continue
+        indent, fence = m.group("indent"), m.group("fence")
+        # Prose immediately above the fence is where a counter-example is
+        # usually labelled ("Do NOT do this:"), so it is part of the verdict.
+        preamble = "\n".join(lines[max(0, i - 3):i])
+        body, i = [], i + 1
+        while i < len(lines):
+            close = _FENCE_LINE.match(lines[i])
+            if close and close.group("info") == "" and len(close.group("fence")) >= len(fence):
+                break
+            body.append(lines[i][len(indent):] if indent and lines[i].startswith(indent)
+                        else lines[i])
+            i += 1
+        text = "\n".join(body)
+        comments = "\n".join(ln for ln in body if _FULL_LINE_COMMENT.match(ln))
+        yield text, bool(_COUNTER_EXAMPLE.search(preamble + "\n" + comments))
+        i += 1
+
+
+_STEP_DASH = re.compile(r"^(?P<indent>[ \t]*)-[ \t]+(?=\S)")
+_KEY = re.compile(r"^(?P<indent>[ \t]*)(?P<key>[A-Za-z_][\w-]*):[ \t]*(?P<val>.*)$")
+_BLOCK_SCALAR = re.compile(r"^[|>][-+]?[0-9]*[ \t]*$")
+
+
+def _unquote(v):
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        return v[1:-1]
+    return v
+
+
+class _Step:
+    """One YAML list item, reduced to what these checks ask about."""
+
+    def __init__(self):
+        self.keys = {}       # step key -> scalar value, comments excluded
+        self.run = []        # `run:` body lines, comments excluded
+
+
+def _parse_steps(block):
+    """Every list item in `block` that carries step keys, comments stripped.
+
+    A deliberate half-parser: enough structure to tell a step key from a
+    lookalike inside a comment or a shell line, without a YAML dependency the
+    stdlib-only harness does not have.
+    """
+    lines = [ln for ln in block.split("\n") if not _FULL_LINE_COMMENT.match(ln)]
+    steps, cur, cur_indent = [], None, None
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        dash = _STEP_DASH.match(ln)
+        if dash:
+            cur = _Step()
+            steps.append(cur)
+            cur_indent = len(dash.group("indent")) + len(dash.group(0)) - len(dash.group("indent"))
+            ln = " " * len(dash.group(0)) + ln[len(dash.group(0)):]
+        if cur is None:
+            i += 1
+            continue
+        km = _KEY.match(ln)
+        if km and len(km.group("indent")) >= cur_indent:
+            key, val = km.group("key"), km.group("val").strip()
+            if key == "run" and _BLOCK_SCALAR.match(val):
+                body_indent = len(km.group("indent"))
+                i += 1
+                while i < len(lines):
+                    b = lines[i]
+                    if b.strip() and (len(b) - len(b.lstrip())) <= body_indent:
+                        break
+                    cur.run.append(b)
+                    i += 1
+                continue
+            if key == "run":
+                cur.run.append(val)
+            else:
+                cur.keys[key] = _unquote(val)
+        i += 1
+    return steps
+
+
+_FLOX_ACTIVATE = re.compile(r"\bflox\s+activate\b")
+_ACTIVATE_ACTION = re.compile(r"\bflox/activate-action\b")
+# Job-level `defaults: run: shell:`, which ci.md recommends for a job whose
+# steps mostly need the environment. Not a step, so _parse_steps never sees it.
+_DEFAULTS_SHELL = re.compile(
+    r"^[ \t]*defaults:[ \t]*$\n(?:^[ \t]*$\n)*^[ \t]*run:[ \t]*$\n(?:^[ \t]*$\n)*"
+    r"^[ \t]*shell:[ \t]*(?P<val>.+)$",
+    re.M,
+)
+
+
+def _count_activations(run_lines):
+    """How many times a `run:` body enters the environment.
+
+    Counts occurrences rather than matching line starts: `cd api && flox
+    activate --`, `time flox activate --`, `env CI=1 flox activate --`, and two
+    activations chained with `&&` on one line are all the violation, and a
+    `^\\s*flox` anchor counts none of them.
+    """
+    return sum(len(_FLOX_ACTIVATE.findall(ln)) for ln in run_lines)
+
+
+def _uses_activate_mechanism(answer):
+    """True iff some step actually wires up an activation.
+
+    Anchored to step keys, so a mechanism named in prose or commented out
+    inside the fence does not count. Existential by nature: the question is
+    whether the answer reached for a sanctioned route at all. It does not
+    assert that EVERY step needing the environment activates, because nothing
+    here can tell which steps need it.
+    """
+    for block, _ in _yaml_blocks(answer):
+        no_comments = "\n".join(
+            ln for ln in block.split("\n") if not _FULL_LINE_COMMENT.match(ln)
+        )
+        m = _DEFAULTS_SHELL.search(no_comments)
+        if m and _FLOX_ACTIVATE.search(_unquote(m.group("val"))):
+            return True
+        for st in _parse_steps(block):
+            if _ACTIVATE_ACTION.search(st.keys.get("uses", "")):
+                return True
+            if _FLOX_ACTIVATE.search(st.keys.get("shell", "")):
+                return True
+            # The once-per-script form: a step whose run: enters the
+            # environment exactly once (`run: flox activate -- pytest`).
+            if _count_activations(st.run) == 1:
+                return True
+    return False
+
+
+def _repeats_activate(answer):
+    """True iff a step's `run:` enters the environment more than once.
+
+    Blocks labelled as counter-examples are skipped: `ci.md` teaches the model
+    to show this exact shape under `# WRONG`, so counting it would fail the
+    answers the skill is trying to produce.
+    """
+    return any(
+        _count_activations(st.run) > 1
+        for block, is_counter in _yaml_blocks(answer)
+        if not is_counter
+        for st in _parse_steps(block)
+    )
+
+
 CHECKS = {
     "no_fake_install_url": lambda a: not FAKE_INSTALL.search(a),
     "no_abs_paths": lambda a: not ABS_PATH.search(toml_blocks(a)),
@@ -475,6 +674,14 @@ CHECKS = {
     "sets_build_sandbox_mode": _sets_sandbox_mode,
     "build_sandbox_schema_version": _sandbox_schema_version,
     "uses_remote_env": lambda a: "flox push" in a or "flox pull" in a or "flox activate -r" in a,
+    # AI-511: one activation per step, and an actual activation mechanism —
+    # `install-flox-action` on its own does not activate anything.
+    # An answer that shows the per-line form must also show a sanctioned one:
+    # correct answers illustrate the anti-pattern, broken ones only commit it.
+    "ci_no_repeated_activate": lambda a: (
+        not _repeats_activate(a) or _uses_activate_mechanism(a)
+    ),
+    "ci_uses_activate_mechanism": _uses_activate_mechanism,
     # Implicit-trigger check: did the skill fire and produce Flox guidance even
     # though the prompt never said "flox"?
     "invokes_flox": lambda a: bool(
