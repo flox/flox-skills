@@ -274,9 +274,9 @@ Resolving packages...
 
 ### Search term strategies
 
-- **Node.js**: search `"nodejs <major>"` — prefer `nodejs_22` over `nodejs`
-- **Python**: search `"python <major.minor>"` — prefer `python312` over `python`
-- **Go**: search `"go <major.minor>"` — prefer the versioned `go_1_23` over bare `go`
+- **Node.js**: search `"nodejs <major>"`
+- **Python**: search `"python <major.minor>"`
+- **Go**: search `"go <major.minor>"`
 - **PostgreSQL**: search `"postgresql <major>"` not `"postgres"` — catalog name differs
 - **Rust**: search `"cargo"` and `"rustc"` separately; also `"clippy"` and `"rustfmt"` for dev tooling
 - **Elixir**: search `"elixir"` only — Erlang/OTP is bundled; do NOT search "erlang" separately
@@ -294,6 +294,14 @@ Resolving packages...
 - **`bun.lockb` present**: search `"bun"` and use it instead of nodejs
 
 ### Picking from search results
+
+**Prefer the versioned `pkg-path` over a `version` range** — `nodejs_22`, not
+`nodejs` + `version = "^22.0"`. The catalog encodes the major version in the
+name, and a versioned name is both more precise and verifiable, where a range
+is neither. Add `<id>.version` only for an exact patch the repo itself pins
+("Emitting an exact pin" below). The `flox` skill's `[install]` `version`
+section is canonical for the full preference ladder and the reasoning; this
+skill states the operational half.
 
 1. Prefer the most specific versioned name (`python312` over `python`)
 2. For unversioned tools, pick the plain name (`redis`, `cmake`, `jq`)
@@ -329,17 +337,15 @@ read all of it before asserting anything about a package:
    discipline" below — record it the same way.
 3. **Query the versioned `pkg-path` directly — never infer a ceiling from the
    bare name.** `flox show <versioned>` (`flox show ruby_4_0`, `nodejs_24`,
-   `go_1_23`, `python313`) is authoritative for a pinned runtime. The bare
-   `flox show ruby` may report a *lower* ceiling that belongs to a different
-   catalog entry — trusting it silently downgrades the runtime. Mastodon
-   pins Ruby 4.0.6: `flox show ruby` tops out at 3.4.x, but the versioned
-   `ruby_4_0` page carries the 4.x line the bare name doesn't reach at
-   all — verify live whether it reaches the repo's exact patch or only the
-   nearest prior one (same live-verify discipline as "Emitting an exact
-   pin" below; the catalog moves forward, so don't trust a number cited
-   elsewhere in this guidance over today's `flox show`). Search the
-   versioned `pkg-path` first; fall back to the bare name only for
-   genuinely unversioned tools.
+   `go_1_23`, `python313`) is authoritative for a pinned runtime; the bare
+   name may report a *lower* ceiling belonging to a different catalog entry,
+   and trusting it silently downgrades the runtime. The `flox` skill's
+   `version` section carries the worked example. Verify live whether the
+   versioned page reaches the repo's exact patch or only the nearest prior
+   one — same live-verify discipline as "Emitting an exact pin" below; the
+   catalog moves forward, so don't trust a number cited elsewhere in this
+   guidance over today's `flox show`. Search the versioned `pkg-path` first;
+   fall back to the bare name only for genuinely unversioned tools.
 4. **When the question is package CONTENTS (does this build include a given
    extension/module?), don't infer it from the name — execute it.**
    `flox show` describes outputs and versions; it does not enumerate what's
