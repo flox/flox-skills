@@ -28,6 +28,78 @@ def cell(cell_id):
     return next(c for c in CELLS if c.id == cell_id)
 
 
+def _argv(call):
+    return call.args[0] if call.args else call.kwargs.get("args")
+
+
+def docker_calls(run, *subcmd):
+    """Every mocked docker invocation matching `docker <subcmd...>`.
+
+    Staging turned a cell from two `docker run`s into three plus a `commit`, a
+    `rm` and an `rmi`, so a test that pinned behaviour to a position in a
+    `side_effect` list would now be asserting about whichever call happened to
+    land there. These tests address a call by what it is.
+    """
+    want = ["docker", *subcmd]
+    return [a for a in (_argv(c) for c in run.call_args_list)
+            if isinstance(a, list) and a[:len(want)] == want]
+
+
+def mounted_script(argv):
+    """The text of the script this `docker run` mounted, read from the host."""
+    spec = next(a for a in argv
+                if isinstance(a, str)
+                and a.endswith(f"{run_matrix.CONTAINER_SCRIPT}:ro"))
+    return Path(spec.rsplit(":", 2)[0]).read_text()
+
+
+class FakeDocker:
+    """Answer `docker run` by reading the script the runner mounted.
+
+    Phase is derived from the script rather than from call order, and the
+    cidfile is written because the real docker writes it and `stage_install`
+    reads it back to name the container it commits — a fake that skipped it
+    would make the commit path untestable.
+    """
+
+    def __init__(self, install=("", 0), load=("", 0), trigger=("", 0),
+                 commit_rc=0):
+        self.install, self.load, self.trigger = install, load, trigger
+        self.commit_rc = commit_rc
+
+    @staticmethod
+    def _answer(spec, argv):
+        """`(stdout, rc)`, `(stdout, stderr, rc)`, or an exception to raise."""
+        if isinstance(spec, BaseException):
+            raise spec
+        out, err, rc = spec if len(spec) == 3 else (spec[0], "", spec[1])
+        return subprocess.CompletedProcess(argv, rc, stdout=out, stderr=err)
+
+    def __call__(self, argv, **kwargs):
+        if argv[:2] == ["docker", "run"]:
+            if "--cidfile" in argv:
+                path = Path(argv[argv.index("--cidfile") + 1])
+                path.write_text(f"cid-{path.stem}")
+            text = mounted_script(argv)
+            if run_matrix.LIST_MARKER in text:
+                return self._answer(self.load, argv)
+            if run_matrix.LAUNCH_MARKER in text:
+                return self._answer(self.trigger, argv)
+            return self._answer(self.install, argv)
+        if argv[:2] == ["docker", "commit"]:
+            return subprocess.CompletedProcess(argv, self.commit_rc,
+                                               stdout="sha256:deadbeef",
+                                               stderr="no space left on device")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+
+# Satisfies every cell's `expect` at once: the two native cells look for the
+# plugin id, the other six for `floxify`. A load output that only satisfied one
+# of them would quietly turn the other cells' tests into load-failure tests.
+GOOD_LOAD = (run_matrix.LIST_MARKER + "\nflox@flox-skills\nfloxify", 0)
+GOOD_TRIGGER = (run_matrix.LAUNCH_MARKER + "\npkg-path python312", 0)
+
+
 class TestImages(unittest.TestCase):
     def test_tag_is_env_name_and_version(self):
         # `flox containerize` names the repo after the ENVIRONMENT (agent-compat-base),
@@ -123,8 +195,7 @@ class TestRunCell(unittest.TestCase):
 
     @patch("run_matrix.subprocess.run")
     def test_load_passes_when_list_cmd_prints_expect(self, run):
-        run.return_value = subprocess.CompletedProcess(
-            [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr="")
+        run.side_effect = FakeDocker(load=GOOD_LOAD)
         with TemporaryDirectory() as tmp:
             out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp))
         self.assertEqual(out["load"], "pass")
@@ -133,13 +204,18 @@ class TestRunCell(unittest.TestCase):
     def test_installer_chatter_cannot_satisfy_the_load_check(self, run):
         """Regression: skills.sh prints a picker listing 'flox' and 'floxify'
         while installing nothing. Judging the whole transcript passed the cell
-        even though `claude plugin list` said 'No plugins installed'."""
+        even though `claude plugin list` said 'No plugins installed'.
+
+        Staging the install put that chatter in a different container
+        entirely, so the original route is closed — but the slicing is what
+        makes the load verdict a statement about `list_cmd` alone, and this
+        pins it against anything else the container prints first."""
         transcript = (
             "Found 2 skills\n  flox\n  floxify\n"
             + run_matrix.LIST_MARKER + "\n"
             + "No plugins installed. Use `claude plugin install` to install a plugin.\n"
         )
-        run.return_value = subprocess.CompletedProcess([], 0, stdout=transcript, stderr="")
+        run.side_effect = FakeDocker(load=(transcript, 0))
         with TemporaryDirectory() as tmp:
             out = run_matrix.run_cell(cell("claude-npx"), "img:1", Path(tmp))
         self.assertEqual(out["load"], "fail")
@@ -160,7 +236,7 @@ class TestRunCell(unittest.TestCase):
 
     @patch("run_matrix.subprocess.run")
     def test_load_fails_when_expect_absent(self, run):
-        run.return_value = subprocess.CompletedProcess([], 0, stdout="no plugins", stderr="")
+        run.side_effect = FakeDocker(load=("no plugins", 0))
         with TemporaryDirectory() as tmp:
             out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp))
         self.assertEqual(out["load"], "fail")
@@ -168,13 +244,10 @@ class TestRunCell(unittest.TestCase):
 
     @patch("run_matrix.subprocess.run")
     def test_auth_failure_is_reported_distinctly(self, run):
-        run.side_effect = [
-            subprocess.CompletedProcess([], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills",
-                                        stderr=""),
-            subprocess.CompletedProcess(
-                [], 1, stdout="",
-                stderr=run_matrix.LAUNCH_MARKER + "\nInvalid API key · Please run /login"),
-        ]
+        run.side_effect = FakeDocker(
+            load=GOOD_LOAD,
+            trigger=("", run_matrix.LAUNCH_MARKER + "\nInvalid API key · "
+                         "Please run /login", 1))
         with TemporaryDirectory() as tmp:
             out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp))
         self.assertEqual(out["trigger"], "auth-error")
@@ -188,28 +261,38 @@ class TestRunCell(unittest.TestCase):
     def test_script_shims_usr_bin_env(self):
         # Without this, npx-installed binaries die on `#!/usr/bin/env node`
         # because a flox container has no FHS layout.
-        script = run_matrix.cell_script(cell("claude-npx"), include_launch=False)
-        self.assertIn("/usr/bin/env", script)
-        self.assertIn("ln -s", script)
+        # Every phase, not just the one that used to carry the install: the
+        # install phase needs it to run `npx` at all and commits the symlink,
+        # and the two flox-package cells stage nothing and would never get it.
+        for phase in (run_matrix.INSTALL, run_matrix.LOAD, run_matrix.TRIGGER):
+            script = run_matrix.cell_script(cell("claude-npx"), phase)
+            self.assertIn("/usr/bin/env", script, phase)
+            self.assertIn("ln -s", script, phase)
 
     @patch("run_matrix.subprocess.run")
     def test_load_only_never_launches(self, run):
-        run.return_value = subprocess.CompletedProcess(
-            [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr="")
+        run.side_effect = FakeDocker(load=GOOD_LOAD)
         with TemporaryDirectory() as tmp:
             out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp), load_only=True)
+            # Install and load, and no launch: relabelling after the fact
+            # would still have spent the model call. Asserted on what the
+            # containers were told to do rather than on how many there were,
+            # so staging the install did not have to weaken it. Inside the
+            # temp dir, because that is where the scripts are read back from.
+            self.assertEqual(len(docker_calls(run, "run")), 2)
+            for argv in docker_calls(run, "run"):
+                self.assertNotIn(run_matrix.LAUNCH_MARKER, mounted_script(argv))
         self.assertEqual(out["trigger"], "not-attempted")
-        # One container only: the load check. Relabelling after the fact
-        # would still have spent the model call.
-        self.assertEqual(run.call_count, 1)
 
     @patch("run_matrix.subprocess.run")
     def test_prompt_placeholder_is_substituted(self, run):
-        run.return_value = subprocess.CompletedProcess(
-            [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr="")
+        run.side_effect = FakeDocker(load=GOOD_LOAD, trigger=GOOD_TRIGGER)
         with TemporaryDirectory() as tmp:
             run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp))
-            script = (Path(tmp) / "cell.sh").read_text()
+            # One script per phase now, each named for it: a single `cell.sh`
+            # rewritten between phases would be diagnosed from whichever one
+            # overwrote the others.
+            script = (Path(tmp) / f"{run_matrix.TRIGGER}.sh").read_text()
         self.assertIn(run_matrix.CONTAINER_PROMPT, script)
         self.assertNotIn("{prompt}", script)
 
@@ -268,25 +351,18 @@ class TestAuthDetection(unittest.TestCase):
         and the cell was scored auth-error on an exit-0 run."""
         answer = ("PostgreSQL is socket-only and uses trust authentication, so "
                   "this is for local development. pkg-path python312 [services]")
-        run.side_effect = [
-            subprocess.CompletedProcess([], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills",
-                                        stderr=""),
-            subprocess.CompletedProcess(
-                [], 0, stdout=run_matrix.LAUNCH_MARKER + "\n" + answer, stderr=""),
-        ]
+        run.side_effect = FakeDocker(
+            load=GOOD_LOAD,
+            trigger=(run_matrix.LAUNCH_MARKER + "\n" + answer, 0))
         with TemporaryDirectory() as tmp:
             out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp))
         self.assertEqual(out["trigger"], "pass")
 
     @patch("run_matrix.subprocess.run")
     def test_a_real_auth_failure_still_reports(self, run):
-        run.side_effect = [
-            subprocess.CompletedProcess([], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills",
-                                        stderr=""),
-            subprocess.CompletedProcess(
-                [], 1, stdout="",
-                stderr=run_matrix.LAUNCH_MARKER + "\nPlease run /login"),
-        ]
+        run.side_effect = FakeDocker(
+            load=GOOD_LOAD,
+            trigger=("", run_matrix.LAUNCH_MARKER + "\nPlease run /login", 1))
         with TemporaryDirectory() as tmp:
             out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp))
         self.assertEqual(out["trigger"], "auth-error")
@@ -348,31 +424,31 @@ class TestMarkerScoping(unittest.TestCase):
 
     def test_a_failing_git_clone_is_not_an_auth_error(self):
         """Regression: `codex-native` installs with `git clone`, the trigger
-        container re-runs the install, and a failing clone prints "fatal:
+        container re-ran the install, and a failing clone prints "fatal:
         Authentication failed" — an AUTH_MARKER. The cell recorded
-        "credential problem, not a skill problem" for a repo/network failure."""
+        "credential problem, not a skill problem" for a repo/network failure.
+
+        Marker slicing fixed the misreading; staging the install closes the
+        route. A clone that fails now fails in a container that launches no
+        agent, so the auth classifier — which only ever reads the agent's own
+        output — cannot be reached by it at all."""
         install_failure = ("Cloning into '/work/flox-skills'...\n"
                            "fatal: Authentication failed for "
                            "'https://github.com/flox/flox-skills.git/'\n")
         with patch("run_matrix.subprocess.run") as run:
-            run.side_effect = [
-                subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr=""),
-                # No launch marker: the script died in the install step.
-                subprocess.CompletedProcess([], 1, stdout="", stderr=install_failure),
-            ]
+            run.side_effect = FakeDocker(install=("", install_failure, 1))
             with TemporaryDirectory() as tmp:
                 out = run_matrix.run_cell(cell("codex-native"), "img:1", Path(tmp))
-        self.assertEqual(out["trigger"], "fail")
+        self.assertEqual(out["load"], "fail")
+        self.assertEqual(out["trigger"], "skipped")
+        self.assertNotEqual(out["trigger"], "auth-error")
+        self.assertIn("Authentication failed", out["load_evidence"])
 
     def test_an_agent_auth_failure_after_the_marker_still_reports(self):
         with patch("run_matrix.subprocess.run") as run:
-            run.side_effect = [
-                subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr=""),
-                subprocess.CompletedProcess(
-                    [], 1, stdout="", stderr=run_matrix.LAUNCH_MARKER + "\nPlease run /login"),
-            ]
+            run.side_effect = FakeDocker(
+                load=GOOD_LOAD,
+                trigger=("", run_matrix.LAUNCH_MARKER + "\nPlease run /login", 1))
             with TemporaryDirectory() as tmp:
                 out = run_matrix.run_cell(cell("codex-native"), "img:1", Path(tmp))
         self.assertEqual(out["trigger"], "auth-error")
@@ -380,18 +456,15 @@ class TestMarkerScoping(unittest.TestCase):
     def test_installer_chatter_cannot_reach_the_evidence_classifier(self):
         chatter = "pkg-path [services] python312 flox activate\n"
         with patch("run_matrix.subprocess.run") as run:
-            run.side_effect = [
-                subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr=""),
-                subprocess.CompletedProcess(
-                    [], 0, stdout=chatter + run_matrix.LAUNCH_MARKER + "\nhello", stderr=""),
-            ]
+            run.side_effect = FakeDocker(
+                load=GOOD_LOAD,
+                trigger=(chatter + run_matrix.LAUNCH_MARKER + "\nhello", 0))
             with TemporaryDirectory() as tmp:
                 out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp))
         self.assertEqual(out["evidence_class"], "weak")
 
     def test_the_launch_marker_is_emitted_on_both_streams(self):
-        script = run_matrix.cell_script(cell("claude-native"), include_launch=True)
+        script = run_matrix.cell_script(cell("claude-native"), run_matrix.TRIGGER)
         self.assertIn(f"echo {run_matrix.LAUNCH_MARKER}", script)
         self.assertIn(f"echo {run_matrix.LAUNCH_MARKER} >&2", script)
 
@@ -399,11 +472,9 @@ class TestMarkerScoping(unittest.TestCase):
 class TestVerdictsSurviveEachOther(unittest.TestCase):
     def test_a_trigger_timeout_keeps_a_load_pass(self):
         with patch("run_matrix.subprocess.run") as run:
-            run.side_effect = [
-                subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr=""),
-                subprocess.TimeoutExpired(cmd="docker", timeout=600),
-            ]
+            run.side_effect = FakeDocker(
+                load=GOOD_LOAD,
+                trigger=subprocess.TimeoutExpired(cmd="docker", timeout=600))
             with TemporaryDirectory() as tmp:
                 out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp))
         self.assertEqual(out["load"], "pass")      # measured, and kept
@@ -436,11 +507,8 @@ class TestVerdictsSurviveEachOther(unittest.TestCase):
 
     def test_a_trigger_crash_keeps_a_load_pass(self):
         with patch("run_matrix.subprocess.run") as run:
-            run.side_effect = [
-                subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills", stderr=""),
-                RuntimeError("boom"),
-            ]
+            run.side_effect = FakeDocker(load=GOOD_LOAD,
+                                         trigger=RuntimeError("boom"))
             with TemporaryDirectory() as tmp:
                 out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp))
         self.assertEqual(out["load"], "pass")
@@ -448,12 +516,9 @@ class TestVerdictsSurviveEachOther(unittest.TestCase):
 
     def test_both_halves_keep_their_own_transcript(self):
         with patch("run_matrix.subprocess.run") as run:
-            run.side_effect = [
-                subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LIST_MARKER + "\nflox@flox-skills plugin listed", stderr=""),
-                subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LAUNCH_MARKER + "\npkg-path [services]", stderr=""),
-            ]
+            run.side_effect = FakeDocker(
+                load=(run_matrix.LIST_MARKER + "\nflox@flox-skills plugin listed", 0),
+                trigger=(run_matrix.LAUNCH_MARKER + "\npkg-path [services]", 0))
             with TemporaryDirectory() as tmp:
                 out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp))
         self.assertIn("plugin listed", out["load_evidence"])
@@ -1002,11 +1067,11 @@ class TestOpenCodeModel(unittest.TestCase):
         for c in CELLS:
             self.assertEqual(run_matrix.model_flag(c, None), "")
             self.assertNotIn("--model",
-                             run_matrix.cell_script(c, include_launch=True))
+                             run_matrix.cell_script(c, run_matrix.TRIGGER))
 
     def test_an_opencode_launch_carries_the_model(self):
         script = run_matrix.cell_script(cell("opencode-flox-ai"),
-                                        include_launch=True,
+                                        run_matrix.TRIGGER,
                                         model="openrouter/z-ai/glm-5.3-flash")
         self.assertIn("--model openrouter/z-ai/glm-5.3-flash", script)
 
@@ -1084,15 +1149,20 @@ class TestOpenCodeModel(unittest.TestCase):
             run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
             with TemporaryDirectory() as tmp:
                 run_matrix._run(cell("opencode-npx"), "img:1", Path(tmp),
-                                include_launch=True, timeout=1,
+                                run_matrix.TRIGGER, timeout=1,
                                 model="openrouter/z-ai/glm-5.3-flash")
                 launch = " ".join(run.call_args[0][0])
                 run_matrix._run(cell("opencode-npx"), "img:1", Path(tmp),
-                                include_launch=False, timeout=1,
+                                run_matrix.LOAD, timeout=1,
                                 model="openrouter/z-ai/glm-5.3-flash")
                 load = " ".join(run.call_args[0][0])
+                run_matrix._run(cell("opencode-npx"), "img:1", Path(tmp),
+                                run_matrix.INSTALL, timeout=1,
+                                model="openrouter/z-ai/glm-5.3-flash")
+                install = " ".join(run.call_args[0][0])
         self.assertIn(f"{run_matrix.CONTAINER_OPENCODE_CONFIG}:ro", launch)
         self.assertNotIn(run_matrix.CONTAINER_OPENCODE_CONFIG, load)
+        self.assertNotIn(run_matrix.CONTAINER_OPENCODE_CONFIG, install)
 
 
 class TestMergeRow(unittest.TestCase):
@@ -1189,18 +1259,193 @@ class TestPerAgentMounts(unittest.TestCase):
 
     def test_run_cell_gates_the_mount_on_the_cells_own_agent(self):
         with patch("run_matrix.subprocess.run") as run:
-            run.side_effect = [
-                subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LIST_MARKER + "\nfloxify", stderr=""),
-                subprocess.CompletedProcess(
-                    [], 0, stdout=run_matrix.LAUNCH_MARKER + "\npkg-path [services]",
-                    stderr=""),
-            ]
+            run.side_effect = FakeDocker(
+                load=(run_matrix.LIST_MARKER + "\nfloxify", 0),
+                trigger=(run_matrix.LAUNCH_MARKER + "\npkg-path [services]", 0))
             with TemporaryDirectory() as tmp:
                 run_matrix.run_cell(cell("codex-npx"), "img:1", Path(tmp))
-            launch_argv = " ".join(run.call_args_list[1][0][0])
-        self.assertIn("/root/.codex", launch_argv)
-        self.assertNotIn("/root/.claude", launch_argv)
+                # Addressed by what the container was told to do: with three
+                # containers per cell, a positional index names whichever call
+                # happened to land there.
+                launch = " ".join(
+                    argv for run_argv in docker_calls(run, "run")
+                    if run_matrix.LAUNCH_MARKER in mounted_script(run_argv)
+                    for argv in run_argv)
+        self.assertIn("/root/.codex", launch)
+        self.assertNotIn("/root/.claude", launch)
+
+
+class TestStagedInstall(unittest.TestCase):
+    """The installer must never run in a container that holds a credential.
+
+    Review point from David Sawyer on PR #95: the trigger container re-ran the
+    install, so `npx --yes skills add` — unpinned code fetched from npm at run
+    time, running as root — executed in the one container with a live OAuth
+    token mounted beside it. The install now happens once, credential-free, and
+    is committed to an image the other two halves run from.
+    """
+
+    def test_no_container_both_installs_and_mounts_a_credential(self):
+        """The property this whole change exists to establish, over every cell."""
+        for c in CELLS:
+            with self.subTest(cell=c.id), TemporaryDirectory() as tmp:
+                with patch("run_matrix.subprocess.run") as run:
+                    run.side_effect = FakeDocker(load=GOOD_LOAD,
+                                                 trigger=GOOD_TRIGGER)
+                    run_matrix.run_cell(c, "agent-compat-base:v1", Path(tmp),
+                                        version="v1")
+                for argv in docker_calls(run, "run"):
+                    mounts_credential = any(
+                        f"{run_matrix.CONTAINER_HOME}/{s.container_dir}" in a
+                        for a in argv if isinstance(a, str)
+                        for s in creds.STORES)
+                    if mounts_credential and c.install:
+                        self.assertNotIn(c.install, mounted_script(argv))
+
+    def test_the_trigger_script_carries_no_install(self):
+        for c in CELLS:
+            if not c.install:
+                continue
+            with self.subTest(cell=c.id):
+                self.assertNotIn(
+                    c.install, run_matrix.cell_script(c, run_matrix.TRIGGER))
+
+    def test_the_install_script_is_the_install_and_nothing_else(self):
+        script = run_matrix.cell_script(cell("claude-npx"), run_matrix.INSTALL)
+        self.assertIn("npx --yes skills add", script)
+        self.assertNotIn(run_matrix.LAUNCH_MARKER, script)
+        self.assertNotIn(run_matrix.LIST_MARKER, script)
+
+    def test_the_install_container_is_kept_so_it_can_be_committed(self):
+        keep = run_matrix.docker_cmd("img:1", Path("/tmp/run"), Path("/tmp/s.sh"),
+                                     mount_credentials=False, remove=False)
+        self.assertNotIn("--rm", keep)
+        self.assertIn("--rm", run_matrix.docker_cmd(
+            "img:1", Path("/tmp/run"), Path("/tmp/s.sh"), mount_credentials=False))
+
+    @patch("run_matrix.subprocess.run")
+    def test_load_and_trigger_run_from_the_staged_image(self, run):
+        run.side_effect = FakeDocker(load=GOOD_LOAD, trigger=GOOD_TRIGGER)
+        with TemporaryDirectory() as tmp:
+            out = run_matrix.run_cell(cell("claude-native"),
+                                      "agent-compat-base:v1", Path(tmp),
+                                      version="v1")
+        staged = run_matrix.staged_tag("v1", "claude-native")
+        runs = docker_calls(run, "run")
+        self.assertEqual(len(runs), 3)
+        self.assertIn("agent-compat-base:v1", runs[0])
+        self.assertIn(staged, runs[1])
+        self.assertIn(staged, runs[2])
+        self.assertEqual(out["trigger"], "pass")
+
+    @patch("run_matrix.subprocess.run")
+    def test_the_install_container_is_committed_then_removed(self, run):
+        run.side_effect = FakeDocker(load=GOOD_LOAD, trigger=GOOD_TRIGGER)
+        with TemporaryDirectory() as tmp:
+            run_matrix.run_cell(cell("claude-native"), "agent-compat-base:v1",
+                                Path(tmp), version="v1")
+        staged = run_matrix.staged_tag("v1", "claude-native")
+        self.assertEqual(docker_calls(run, "commit"),
+                         [["docker", "commit", "cid-install", staged]])
+        self.assertIn(["docker", "rm", "cid-install"], docker_calls(run, "rm"))
+
+    @patch("run_matrix.subprocess.run")
+    def test_the_staged_image_is_removed_when_the_cell_ends(self, run):
+        run.side_effect = FakeDocker(load=GOOD_LOAD, trigger=GOOD_TRIGGER)
+        with TemporaryDirectory() as tmp:
+            run_matrix.run_cell(cell("claude-native"), "agent-compat-base:v1",
+                                Path(tmp), version="v1")
+        self.assertIn(
+            ["docker", "rmi", "-f", run_matrix.staged_tag("v1", "claude-native")],
+            docker_calls(run, "rmi"))
+
+    @patch("run_matrix.subprocess.run")
+    def test_a_failed_install_is_a_red_load_not_a_crash(self, run):
+        run.side_effect = FakeDocker(install=("npm ERR! 404 skills", 1))
+        with TemporaryDirectory() as tmp:
+            out = run_matrix.run_cell(cell("claude-npx"), "agent-compat-base:v1",
+                                      Path(tmp), version="v1")
+        self.assertEqual(out["load"], "fail")
+        self.assertEqual(out["trigger"], "skipped")
+        # Nothing was committed, so nothing ran against a half-installed image.
+        self.assertEqual(docker_calls(run, "commit"), [])
+        # And the reason survives: a red cell whose transcript was thrown away
+        # is the failure mode the marker rules were written against.
+        self.assertIn("npm ERR!", out["load_evidence"])
+
+    @patch("run_matrix.subprocess.run")
+    def test_a_commit_failure_does_not_become_a_pass(self, run):
+        run.side_effect = FakeDocker(load=GOOD_LOAD, trigger=GOOD_TRIGGER,
+                                     commit_rc=1)
+        with TemporaryDirectory() as tmp:
+            out = run_matrix.run_cell(cell("claude-native"),
+                                      "agent-compat-base:v1", Path(tmp),
+                                      version="v1")
+        self.assertEqual(out["load"], "error")
+        self.assertEqual(out["trigger"], "skipped")
+        self.assertIn("commit", out["notes"])
+
+    @patch("run_matrix.subprocess.run")
+    def test_a_cell_with_nothing_to_install_is_not_staged(self, run):
+        run.side_effect = FakeDocker(load=GOOD_LOAD, trigger=GOOD_TRIGGER)
+        with TemporaryDirectory() as tmp:
+            out = run_matrix.run_cell(cell("claude-flox-ai"),
+                                      "agent-compat-withpkg:v1", Path(tmp),
+                                      version="v1")
+        self.assertEqual(len(docker_calls(run, "run")), 2)
+        self.assertEqual(docker_calls(run, "commit"), [])
+        self.assertEqual(docker_calls(run, "rmi"), [])
+        for argv in docker_calls(run, "run"):
+            self.assertIn("agent-compat-withpkg:v1", argv)
+        self.assertEqual(out["trigger"], "pass")
+
+    @patch("run_matrix.subprocess.run")
+    def test_load_only_stages_and_stays_credential_free(self, run):
+        run.side_effect = FakeDocker(load=GOOD_LOAD)
+        with TemporaryDirectory() as tmp:
+            out = run_matrix.run_cell(cell("claude-native"),
+                                      "agent-compat-base:v1", Path(tmp),
+                                      load_only=True, version="v1")
+        self.assertEqual(out["trigger"], "not-attempted")
+        runs = docker_calls(run, "run")
+        self.assertEqual(len(runs), 2)          # install, then load
+        for argv in runs:
+            self.assertNotIn("/root/.claude", " ".join(a for a in argv
+                                                       if isinstance(a, str)))
+
+    @patch("run_matrix.subprocess.run")
+    def test_an_install_timeout_is_recorded_against_the_load_half(self, run):
+        """The install belongs to the credential-free half, so a hang there is
+        that half's verdict — not a `timeout` written against a trigger
+        container that never started."""
+        run.side_effect = FakeDocker(
+            install=subprocess.TimeoutExpired(cmd="docker", timeout=600))
+        with TemporaryDirectory() as tmp:
+            out = run_matrix.run_cell(cell("claude-native"), "img:1", Path(tmp),
+                                      version="v1")
+        self.assertEqual(out["load"], "timeout")
+        self.assertEqual(out["trigger"], "skipped")
+
+    @patch("run_matrix.subprocess.run")
+    def test_the_sweep_removes_only_this_runs_staged_images(self, run):
+        run.side_effect = lambda argv, **kw: subprocess.CompletedProcess(
+            argv, 0,
+            stdout=("agent-compat-staged:v1-claude-native\n"
+                    "agent-compat-staged:v2-codex-npx\n"),
+            stderr="")
+        self.assertEqual(run_matrix.surviving_staged_images("v1"), [])
+        removed = [a for a in docker_calls(run, "rmi")]
+        self.assertEqual(removed,
+                         [["docker", "rmi", "-f", "agent-compat-staged:v1-claude-native"]])
+
+    def test_the_dry_run_plan_names_all_three_phases(self):
+        with TemporaryDirectory() as tmp:
+            with patch("run_matrix.subprocess.run") as run:
+                out = run_matrix.run_cell(cell("claude-native"), "img:1",
+                                          Path(tmp), dry_run=True, version="v1")
+                run.assert_not_called()
+        for phase in (run_matrix.INSTALL, run_matrix.LOAD, run_matrix.TRIGGER):
+            self.assertIn(f"{phase}:", out["notes"])
 
 
 if __name__ == "__main__":
