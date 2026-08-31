@@ -655,9 +655,55 @@ def _repeats_activate(answer):
     )
 
 
+# --- unverifiable version pins ------------------------------------------------
+# SKILL.md's `[install]` `version` ladder puts a semver range LAST, behind a
+# versioned pkg-path and a literal pin. The reason is not style: a range names
+# a constraint rather than a catalog version, so `verify.py` cannot tell which
+# version applies and records the entry as unchecked rather than confirmed.
+#
+# The gate mirrors `verify.py`'s `_is_version_literal` deliberately, so this
+# check and the verifier agree on what "unverifiable" means. It asks "is this a
+# literal", NOT "is this a range" -- those are not complements, and the set of
+# specs flox's resolver accepts is defined server-side. A `v`-prefixed semver
+# and an `x`/`X` wildcard segment are alphanumeric but are range syntax, so
+# both are excluded.
+_VERSION_LITERAL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
+_VERSION_RANGE_SHAPES_RE = re.compile(r"^[vV]\d|^[xX]$|\.[xX](\.|$)")
+
+
+def _is_version_literal(v):
+    """A `version` this suite could look up in the catalog's version list."""
+    return bool(_VERSION_LITERAL_RE.match(v)) and not _VERSION_RANGE_SHAPES_RE.search(v)
+
+
+def _no_range_version_pin(answer):
+    """No `[install]` entry pins a version this suite cannot resolve.
+
+    An ABSENT or empty `version` passes: flox treats it as unconstrained, and
+    an unpinned versioned pkg-path is the ladder's FIRST rung, not a failure.
+    Only a present, non-literal spec fails.
+    """
+    for manifest in _parsed_manifests(answer):
+        install = manifest.get("install")
+        if not isinstance(install, dict):
+            continue
+        for entry in install.values():
+            if not isinstance(entry, dict):
+                continue
+            version = entry.get("version")
+            if not isinstance(version, str) or not version:
+                continue
+            if not _is_version_literal(version):
+                return False
+    return True
+
+
 CHECKS = {
     "no_fake_install_url": lambda a: not FAKE_INSTALL.search(a),
     "no_abs_paths": lambda a: not ABS_PATH.search(toml_blocks(a)),
+    # Every `version` pin is a literal the catalog can be asked about — a
+    # semver range is the ladder's last rung and is not verifiable.
+    "no_range_version_pin": _no_range_version_pin,
     # No secret hardcoded into the manifest — secrets belong in env vars,
     # `~/.config/<env_name>/`, or an existing credentials file, never in the
     # committed manifest (SKILL.md "Configuration & Secrets").

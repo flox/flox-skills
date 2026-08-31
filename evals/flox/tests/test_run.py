@@ -1144,3 +1144,66 @@ flox activate -- ruff check .
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoRangeVersionPinCheck(unittest.TestCase):
+    """`no_range_version_pin` — SKILL.md's version ladder ranks a semver
+    range last because a range names a constraint rather than a catalog
+    version, so `verify.py` records the entry unchecked rather than
+    confirmed. The gate mirrors `verify.py`'s `_is_version_literal`: it
+    asks "is this a literal", not "is this a range".
+    """
+
+    def _answer(self, toml):
+        return f"```toml\n{toml}```\n"
+
+    def _install(self, body):
+        return self._answer(f"version = 1\n\n[install]\n{body}")
+
+    def test_versioned_pkg_path_with_no_version_passes(self):
+        # The ladder's FIRST rung — absent version is not a failure.
+        a = self._install('nodejs.pkg-path = "nodejs_22"\n')
+        self.assertTrue(run.CHECKS["no_range_version_pin"](a))
+
+    def test_literal_pins_pass(self):
+        for v in ("22.11.0", "22", "22.11", "python3-3.13.13", "18rc1"):
+            with self.subTest(version=v):
+                a = self._install(f'nodejs.pkg-path = "nodejs"\nnodejs.version = "{v}"\n')
+                self.assertTrue(run.CHECKS["no_range_version_pin"](a))
+
+    def test_range_pins_fail(self):
+        for v in ("^20.0", ">=2.0", "~1.2", "18.4 || 18.3", "18.2 - 18.5"):
+            with self.subTest(version=v):
+                a = self._install(f'nodejs.pkg-path = "nodejs"\nnodejs.version = "{v}"\n')
+                self.assertFalse(run.CHECKS["no_range_version_pin"](a))
+
+    def test_alphanumeric_range_spellings_fail(self):
+        # `v18.4` and an `x`/`X` wildcard are alphanumeric but are range
+        # syntax — flox accepts them and both resolve to something other
+        # than themselves.
+        for v in ("v18.4", "V18.4", "18.x", "18.X", "X"):
+            with self.subTest(version=v):
+                a = self._install(f'nodejs.pkg-path = "nodejs"\nnodejs.version = "{v}"\n')
+                self.assertFalse(run.CHECKS["no_range_version_pin"](a))
+
+    def test_empty_version_passes(self):
+        # flox treats `version = ""` as unconstrained.
+        a = self._install('nodejs.pkg-path = "nodejs"\nnodejs.version = ""\n')
+        self.assertTrue(run.CHECKS["no_range_version_pin"](a))
+
+    def test_latest_passes_as_a_literal(self):
+        # `latest` is a literal by this rule; flox rejects it, so the loud
+        # finding belongs to verify.py's catalog check, not to this gate.
+        a = self._install('nodejs.pkg-path = "nodejs"\nnodejs.version = "latest"\n')
+        self.assertTrue(run.CHECKS["no_range_version_pin"](a))
+
+    def test_one_bad_entry_fails_the_whole_answer(self):
+        a = self._install('a.pkg-path = "nodejs_22"\n'
+                          'b.pkg-path = "python"\nb.version = "^3.12"\n')
+        self.assertFalse(run.CHECKS["no_range_version_pin"](a))
+
+    def test_prose_mentioning_a_range_is_not_a_manifest(self):
+        # Only fenced, parseable manifests are judged — discussing `^20.0`
+        # in prose must not fail the check.
+        a = 'You could write version = "^20.0" but prefer nodejs_20.\n'
+        self.assertTrue(run.CHECKS["no_range_version_pin"](a))
