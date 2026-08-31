@@ -377,6 +377,35 @@ example.priority = 3                        # Optional: resolve file conflicts (
 - Semver ranges: `"^1.2"`, `">=2.0"`
 - Partial versions act as wildcards: `"1.2"` = latest 1.2.X
 
+**Prefer a versioned `pkg-path` over a `version` range.** The catalog already
+encodes major versions in package names — `nodejs_22`, `python312`, `go_1_23`,
+`postgresql_16`, `ruby_4_0`. Reach for those first, in this order:
+
+1. **Versioned `pkg-path`, no `version` field** — `nodejs_22.pkg-path =
+   "nodejs_22"`. Says "Node 22, newest patch" and keeps receiving patch
+   updates as the catalog moves.
+2. **Partial literal pin** — `version = "22"` or `"22.11"`, for a package
+   with no versioned name. Resolves to the newest match within that line.
+3. **Exact pin** — `version = "22.11.0"`, when something in the repo pins an
+   exact patch (`.nvmrc`, `.python-version`, `rust-toolchain.toml`). Use the
+   exact string `flox show` prints, not a normalized guess: some pages carry
+   a prefix, and `python312`'s versions read `python3-3.12.14`.
+4. **Semver range** — `"^22.0"`, `">=22"`. Valid, and Flox resolves it, but
+   the last resort. See below.
+
+Never infer a version ceiling from the bare name: `flox show ruby` tops out
+in the 3.4.x line, while the versioned `ruby_4_0` carries a 4.x line the bare
+name does not reach at all. Query the versioned `pkg-path` directly.
+
+Two reasons the range sits last. It is less precise than it looks — `"^22.0"`
+and `nodejs_22` express the same intent, but only the second one survives a
+reader asking "which Node is this?". And a range is not verifiable: it names a
+constraint rather than a catalog version, so tooling that checks a manifest
+against the catalog (`floxify`'s `verify.py`, for one) cannot tell which
+version applies and records the entry as unchecked rather than confirmed. A
+versioned `pkg-path` or a literal pin gets checked; a range silently drops out
+of verification.
+
 **systems**
 - Constrains package to specific platforms
 - Options: `"x86_64-linux"`, `"x86_64-darwin"`, `"aarch64-linux"`, `"aarch64-darwin"`
@@ -398,9 +427,8 @@ python.systems = ["x86_64-linux", "aarch64-linux"]  # Linux only
 uv.pkg-path = "uv"
 uv.systems = ["x86_64-linux", "aarch64-linux"]
 
-# Version-pinned with custom priority — every key is <id>.-prefixed under [install]
-nodejs.pkg-path = "nodejs"
-nodejs.version = "^20.0"
+# Versioned pkg-path with custom priority — every key is <id>.-prefixed under [install]
+nodejs.pkg-path = "nodejs_22"
 nodejs.priority = 1  # Takes precedence in conflicts
 
 # Separate package groups to avoid version conflicts
@@ -445,7 +473,7 @@ gcc-unwrapped.pkg-group = "libraries"
 ### Node.js Development
 
 - **Package managers**: Install `nodejs` (includes npm); add `yarn` or `pnpm` separately if needed
-- **Version pinning**: Use `version = "^20.0"` for LTS, or exact versions for reproducibility
+- **Version pinning**: Use the versioned pkg-path for an LTS line — `nodejs_22.pkg-path = "nodejs_22"`, no `version` field. Add `version = "22.11.0"` only when the repo pins an exact patch (`.nvmrc`, `.node-version`). Check which majors the catalog carries with `flox search nodejs_`
 - **Global tools pattern**: Use `npx` for one-off tools, install commonly-used globals in manifest
 
 ### Platform-Specific Patterns
