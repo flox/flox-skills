@@ -63,11 +63,14 @@ supports and records the class next to the verdict:
 |---|---|
 | `answer-shaped` | The answer carries at least two of the five fingerprints (`pkg-path`, `python312`, `postgresql_`, `[services]`, `flox activate`). Consistent with the skill — not proof of it, and see the caveat below. |
 | `weak` | The agent ran and answered, but fewer than two surfaced. |
-| `no-output` | Nothing came back — *or* the agent never launched, because the install step failed first. The `notes` field says which. |
+| `no-output` | Nothing came back — *or* the agent never launched, because its container failed before it. The `notes` field says which. |
 
-The class is computed from the agent's own output only: the trigger container
-re-runs the install first, and everything it prints is discarded at a marker
-before the answer is judged. A cell whose trigger passes on exit status but
+The class is computed from the agent's own output only: everything the
+container prints before the launch is discarded at a marker before the answer
+is judged. The installer is no longer among the things that can print there —
+it ran two containers earlier — but the slicing stays, because the verdict is
+a statement about the agent's output and nothing else. A cell whose trigger
+passes on exit status but
 classifies below `answer-shaped` is flagged in its `notes`, because exit 0 is
 not evidence.
 
@@ -137,6 +140,42 @@ found" after a *successful* `npx skills add`). That makes the skills.sh load
 check the weakest of the three on purpose: it proves the files landed where the
 installer put them, not that the agent reads them.
 
+## Three containers, and why
+
+The install is a container of its own, and that split is a security boundary
+rather than a refactor.
+
+| Container | Mounts | Runs |
+|---|---|---|
+| **install** | nothing | the cell's install step; kept, not `--rm`ed, and committed with `docker commit` to `agent-compat-staged:<version>-<cell id>` |
+| **load** | nothing | `list_cmd`, from the staged image |
+| **trigger** | one agent's credential, rw | the agent, from the *same* staged image |
+
+The trigger half needs the skill installed **and** a live OAuth token. It used
+to get there by re-running the install itself, which put `npx --yes skills
+add` — unpinned code fetched from npm at run time, running as root — in the
+one container that had a token to find. Committing the install and mounting
+the credential only into the launch keeps them apart without weakening either
+verdict.
+
+Two things fall out of it. The load and trigger halves now demonstrably run
+against the **same** installation, where before they ran two installs assumed
+to agree. And an install that fails is a red `load` in a container that
+launches no agent, so a failing `git clone` printing "fatal: Authentication
+failed" can no longer reach the credential classifier at all — the marker
+scoping that first caught that misreading now has nothing left to catch.
+
+The staged image is removed when the cell ends, whichever way the cell went,
+and a backstop sweep at the end of the run reports any that survive. It holds
+no credential by construction, so a survivor is a note about disk and never
+the credential alarm. `docker commit` carries the image config forward, which
+is what makes this work on `flox containerize` output at all: the staged image
+keeps the `flox-activations activate` entrypoint, so the agent binaries are
+still on `PATH`.
+
+A cell whose package ships the skill (`*-flox-ai`) has no install step, stages
+nothing, and runs from the base image.
+
 ## The runtime: activate once
 
 ```bash
@@ -166,8 +205,9 @@ The last line is the pinned-model run: it gives the two OpenCode cells **GLM
 5.3 Flash** through OpenRouter, in place of the free no-login provider the
 shipped build falls back to.
 
-A cell runs up to two containers, each on its own `--timeout` budget, so a
-full run's worst case is sixteen of them.
+A cell runs up to **three** containers, each on its own `--timeout` budget, so
+a full run's worst case is twenty-two of them (the two Flox-package cells have
+nothing to install and run two). See "Three containers, and why" below.
 
 Start with `--dry-run`. It costs nothing, starts no container, writes no
 results, and prints exactly what each cell would run. `--load-only` is the next
@@ -268,22 +308,23 @@ Notion, Slack, Sentry, and friends). None of that is needed here, so
   refreshed in place; mounting your live files would let a container race your
   own session), and **never** bakes a credential into an image layer;
 - mounts them **only into the trigger container**, and only the store
-  belonging to that cell's own agent. The load check is credential-free and
-  runs with nothing mounted. Note that every recorded successful load —
-  including the 8/8 in `reports/` — was produced *with* both directories
-  mounted, so the first `--load-only` run against logged-out CLIs is what
-  confirms the two native cells still install without a login. If they do not,
-  those two cells go red on the half this README calls deterministic.
+  belonging to that cell's own agent. The install and load containers are
+  credential-free and run with nothing mounted.
 
-**Residual exposure, stated plainly.** The trigger container re-runs the cell's
-install step before launching the agent, and it holds one token: the one that
-cell's own agent uses. So on the three skills.sh cells, `npx --yes skills add` —
-unpinned code fetched from npm at run time, running as root — still executes
-with that OAuth file readable, and on `opencode-npx` with neither. The load half
-does not do this at all, which is where the installer is exercised for its own
-sake; the trigger half needs the skill installed *and* the agent authenticated
-in one container. Narrowing it further means splitting the trigger into two
-containers, which is not done here — see the follow-ups in the PR description.
+**The installer never runs beside a token.** The install is its own container,
+mounted with nothing, committed to an image the load and trigger halves run
+from — so `npx --yes skills add`, unpinned code fetched from npm at run time
+and running as root, has no OAuth file to read. This closes the residual
+exposure earlier revisions documented rather than fixed; see "Three
+containers, and why" above for the mechanism.
+
+**Verified against real containers, logged out.** A `--load-only` run over all
+eight cells on 2026-08-31 passed 8/8 with nothing mounted anywhere, exit 0, no
+staged image and no container surviving the run. That also settles a question
+earlier revisions left open: `claude plugin marketplace add` and `claude plugin
+install` need no login, so the two native cells do not go red on the half this
+README calls deterministic. Every load recorded before that run — the 8/8 in
+`reports/` included — had been produced *with* credential directories mounted.
 
 Gating on `cell.agent` was deferred once, on the grounds that "nothing prepares
 an OpenCode credential at all, yet both OpenCode cells passed authenticated", so
@@ -405,7 +446,8 @@ Cells are data, so a new agent application or installation method is an entry in
    fall back to a filesystem check only when the agent offers no such query, as
    the six non-native cells do, and expect a weaker verdict when you do. Never
    assert on the installer's own output — that is the false pass `LIST_MARKER`
-   exists to prevent.
+   exists to prevent, and since the install runs in a container of its own,
+   its output is not even in the transcript the load verdict reads.
 2. If it needs packages the images lack, add them to
    `environments/<image>/.flox/env/manifest.toml` and rebuild with `--rebuild`.
 3. Add its structural test to `tests/test_cells.py`. Every cell must prove it

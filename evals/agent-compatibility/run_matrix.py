@@ -8,11 +8,23 @@ rate. See README.md.
     python3 run_matrix.py                    # full run (needs credentials)
     python3 run_matrix.py --cells claude-native,codex-npx
 
-Two container facts shape this file, both observed against a built image:
+A cell runs up to THREE containers, and the split is the security boundary:
+  * install, with nothing mounted, kept (no `--rm`) and committed to a staged
+    image — so the unpinned `npx --yes skills add` fetched from the network at
+    run time never shares a filesystem with an OAuth token;
+  * load, from that staged image, still credential-free;
+  * trigger, from the same staged image, with one agent's credential mounted
+    and no installer in sight.
+A cell whose package ships the skill has nothing to install and runs two.
+
+Three container facts shape this file, all observed against a built image:
   * the image's default HOME is /var/empty, so every run sets HOME=/root;
   * `bash -lc '<script>'` is re-quoted by the flox activation entrypoint and
     dies on any `$( )`, so each cell's script is written to a file and
-    mounted.
+    mounted;
+  * `docker commit` carries the image config forward, so a staged image keeps
+    the `flox-activations activate` entrypoint and its agent binaries stay on
+    PATH — verified against a committed `agent-compat-base`.
 
 Exit status. Only two of these can be true of one run at once — something the
 cleanup found, and whatever the run itself did — and 3 wins that, because it is
@@ -101,16 +113,23 @@ def docker_cmd(tag: str, creds_dir: Path, script: Path,
                mount_credentials: bool, agent: str | None = None,
                cidfile: Path | None = None,
                stores: tuple[creds.Store, ...] | None = None,
-               config: Path | None = None) -> list[str]:
+               config: Path | None = None,
+               remove: bool = True) -> list[str]:
     """Build the `docker run` line for one cell.
 
     Credentials mount rw when they mount at all — these are OAuth tokens the
     agent refreshes in place. The prompt and the script mount ro. No API keys,
     ever.
 
-    `mount_credentials` is false for the load check, which is documented as
-    credential-free and must not hand a live subscription token to `npx --yes
-    skills add` — code fetched from the network at run time, running as root.
+    `mount_credentials` is true for the trigger phase alone. The install runs
+    in a container of its own with nothing mounted, which is what keeps `npx
+    --yes skills add` — code fetched from the network at run time, running as
+    root — out of the same filesystem as a live subscription token.
+
+    `remove` is false for that install container and only for it: `--rm` fires
+    the moment the container exits, and `docker commit` needs it to still be
+    there. Its `--cidfile` is what `reclaim_containers` reclaims it by, so an
+    install that hangs is killed on the same path as any other container here.
 
     `agent` narrows the mount to that agent's own store. Every trigger
     container used to receive both, so `npx --yes skills add` on a Codex cell
@@ -129,7 +148,8 @@ def docker_cmd(tag: str, creds_dir: Path, script: Path,
     `cidfile` is how a timed-out container is reclaimed at all — see
     `reclaim_containers`.
     """
-    cmd = ["docker", "run", "--rm", "-e", f"HOME={CONTAINER_HOME}"]
+    cmd = ["docker", "run"] + (["--rm"] if remove else [])
+    cmd += ["-e", f"HOME={CONTAINER_HOME}"]
     if cidfile is not None:
         cmd += ["--cidfile", str(cidfile)]
     if mount_credentials:
@@ -173,6 +193,29 @@ ENV_SHIM = (
 LIST_MARKER = "@@@FLOX_AGENT_COMPAT_LIST@@@"
 LAUNCH_MARKER = "@@@FLOX_AGENT_COMPAT_LAUNCH@@@"
 
+# The three containers a cell runs, in order. They used to be two, and the
+# install was the first statement of BOTH of them — so the container that
+# mounted a live OAuth token was also the one running `npx --yes skills add`,
+# unpinned, as root, from the network. Splitting the install out and committing
+# its filesystem means the installer and the credential never coexist, and
+# costs nothing measured: the load and trigger halves run the same skill tree
+# they always did, now demonstrably the SAME one rather than two installs that
+# were assumed to agree.
+INSTALL, LOAD, TRIGGER = "install", "load", "trigger"
+# Repository for the per-cell image an install is committed into. The tag is
+# `<version>-<cell id>`: `--version` is already validated against Docker's tag
+# grammar by VERSION_RE, and cell ids are literals in lib/cells.py.
+STAGED_REPO = "agent-compat-staged"
+
+
+def staged_tag(version: str, cell_id: str) -> str:
+    """Docker reference for the image cell `cell_id`'s install is committed to."""
+    return f"{STAGED_REPO}:{version}-{cell_id}"
+
+
+class StageError(RuntimeError):
+    """The install ran, but its container could not be committed to an image."""
+
 
 def _emit(marker: str) -> str:
     return f"echo {marker}; echo {marker} >&2"
@@ -191,13 +234,24 @@ def model_flag(cell: Cell, model: str | None) -> str:
     return f" --model {model}"
 
 
-def cell_script(cell: Cell, include_launch: bool,
-                model: str | None = None) -> str:
-    """Assemble the shell a cell runs inside the container."""
+def cell_script(cell: Cell, phase: str, model: str | None = None) -> str:
+    """Assemble the shell one PHASE of a cell runs inside its container.
+
+    One phase per script, and the install appears in exactly one of them. The
+    marker slicing below survives because it is cheap and because `ENV_SHIM`
+    still prints on the failure path — but it is no longer load-bearing for the
+    load half, which now has no installer chatter in front of it to discard.
+
+    `ENV_SHIM` runs in every phase: it is idempotent, the install phase commits
+    the symlink it creates, and the two flox-package cells stage nothing at all
+    and would otherwise never get it.
+    """
+    if phase not in (INSTALL, LOAD, TRIGGER):
+        raise ValueError(f"unknown phase: {phase}")
     parts = ["set -euo pipefail", ENV_SHIM]
-    if cell.install:
+    if phase == INSTALL:
         parts.append(cell.install)
-    if include_launch:
+    elif phase == TRIGGER:
         parts.append(_emit(LAUNCH_MARKER))
         parts.append(cell.launch.format(prompt=CONTAINER_PROMPT,
                                         model_flag=model_flag(cell, model)))
@@ -233,27 +287,31 @@ def launch_output(stdout: str, stderr: str) -> str:
                       after_marker(stderr, LAUNCH_MARKER)))
 
 
-def _run(cell: Cell, tag: str, work: Path, include_launch: bool,
+def _run(cell: Cell, tag: str, work: Path, phase: str,
          timeout: int, model: str | None = None,
          stores: tuple[creds.Store, ...] | None = None
          ) -> subprocess.CompletedProcess:
-    script = work / "cell.sh"
-    script.write_text(cell_script(cell, include_launch, model))
+    # One script and one cidfile per phase, named for it. They used to be a
+    # single `cell.sh` rewritten between halves, which was survivable with two
+    # containers and is not with three: a phase that fails is diagnosed from
+    # the script it actually ran, not from whichever one overwrote it.
+    script = work / f"{phase}.sh"
+    script.write_text(cell_script(cell, phase, model))
     # Written beside the script, never inside a credential mount, and only for
     # the agent whose catalogue needs it.
     config = None
-    if model is not None and cell.agent == "opencode":
+    if model is not None and cell.agent == "opencode" and phase == TRIGGER:
         config = work / "opencode.json"
         config.write_text(json.dumps(opencode_config(model)))
-    # Docker refuses to start over a cidfile that already exists, and this
-    # path is reused when the trigger half follows the load half.
-    cidfile = work / ("trigger.cid" if include_launch else "load.cid")
+    # Docker refuses to start over a cidfile that already exists, and a rerun
+    # of the same phase in the same work dir would hit exactly that.
+    cidfile = work / f"{phase}.cid"
     cidfile.unlink(missing_ok=True)
     try:
         return subprocess.run(
-            docker_cmd(tag, work, script, mount_credentials=include_launch,
+            docker_cmd(tag, work, script, mount_credentials=(phase == TRIGGER),
                        agent=cell.agent, cidfile=cidfile, stores=stores,
-                       config=config if include_launch else None),
+                       config=config, remove=(phase != INSTALL)),
             capture_output=True, text=True, timeout=timeout)
     except BaseException:
         # A timeout — or a Ctrl-C — kills the docker CLI and leaves the
@@ -264,6 +322,95 @@ def _run(cell: Cell, tag: str, work: Path, include_launch: bool,
         # backstop, for the paths that never reach this handler.
         reclaim_containers(work)
         raise
+
+
+def stage_install(cell: Cell, tag: str, work: Path, version: str,
+                  timeout: int) -> tuple[str | None, subprocess.CompletedProcess]:
+    """Install into a credential-free container, then commit it to an image.
+
+    This is the whole reason a cell starts three containers rather than two.
+    The trigger half needs both the skill installed and a live OAuth token, and
+    running the install there put an unpinned `npx --yes skills add` in the one
+    container that had a token to find. Committing the install and mounting the
+    credential only into the launch keeps them apart while leaving both
+    verdicts measuring what they measured before.
+
+    A `docker commit` captures the container's filesystem and NOT its volumes,
+    so the mounted script and prompt do not travel into the staged image —
+    only what the install itself wrote. The image config travels, which is what
+    makes this work at all here: these images are `flox containerize` output
+    whose entrypoint is `flox-activations activate`, and a commit that dropped
+    it would leave the staged image with no agent binaries on PATH.
+
+    Returns `(staged tag, the install container's result)`. The tag is None
+    when the install FAILED — that is a red cell, and the caller reports it as
+    one. A commit that fails after a successful install is a different animal
+    and raises: nothing was measured, and running the load check against the
+    base image would silently check an uninstalled container.
+    """
+    proc = _run(cell, tag, work, INSTALL, timeout)
+    if proc.returncode != 0:
+        return None, proc
+    try:
+        cid = (work / f"{INSTALL}.cid").read_text().strip()
+    except OSError as exc:
+        raise StageError(f"no container id for the install step: {exc}") from exc
+    if not cid:
+        raise StageError("the install step wrote an empty container id")
+    staged = staged_tag(version, cell.id)
+    try:
+        commit = subprocess.run(["docker", "commit", cid, staged],
+                                capture_output=True, text=True, timeout=timeout)
+    finally:
+        # Unconditional, and before the returncode is read: the install
+        # container is dead weight whichever way the commit went, and a run
+        # that has already gone wrong should not also fill the disk. `--rm`
+        # cannot do this job — it is what was given up to make the commit
+        # possible in the first place.
+        try:
+            subprocess.run(["docker", "rm", cid], capture_output=True,
+                           text=True, timeout=KILL_TIMEOUT)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    if commit.returncode != 0:
+        raise StageError(f"docker commit failed: {commit.stderr.strip()}")
+    return staged, proc
+
+
+def remove_image(tag: str) -> bool:
+    """Delete a staged image. Never raises — this is disk, not a verdict.
+
+    `-f` because the container that produced it may still be being reaped by
+    the daemon, and an image left behind for that reason is not worth failing
+    a cell over.
+    """
+    try:
+        proc = subprocess.run(["docker", "rmi", "-f", tag], capture_output=True,
+                              text=True, timeout=KILL_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
+def surviving_staged_images(version: str) -> list[str]:
+    """Staged images from this run that are still on disk.
+
+    Per-cell cleanup already removes them; this is the backstop, and it exists
+    for the same reason `cleanup_run_dir` scans after its own rmtree. A staged
+    image holds no credential — that is the point of it — so a survivor is a
+    note about disk and never the credential alarm.
+    """
+    try:
+        proc = subprocess.run(
+            ["docker", "images", "--format", "{{.Repository}}:{{.Tag}}", STAGED_REPO],
+            capture_output=True, text=True, timeout=KILL_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if proc.returncode != 0:
+        return []
+    mine = [line.strip() for line in proc.stdout.splitlines()
+            if line.strip().startswith(f"{STAGED_REPO}:{version}-")]
+    return [tag for tag in mine if not remove_image(tag)]
 
 
 def _looks_like_auth_failure(text: str) -> bool:
@@ -281,7 +428,8 @@ def _halves(row: dict, verdict: str) -> tuple[str, str]:
 def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
              load_only: bool = False, timeout: int = 600,
              model: str | None = None,
-             stores: tuple[creds.Store, ...] | None = None) -> dict:
+             stores: tuple[creds.Store, ...] | None = None,
+             version: str = "run") -> dict:
     """Run one cell. Never raises: every failure becomes a recorded verdict."""
     row = {"cell": cell.id, "agent": cell.agent,
            "install_method": cell.install_method,
@@ -300,24 +448,43 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
         # THE PLAN. Five surfaces promise a dry run prints what each cell would
         # run — the module docstring, `--dry-run`'s help, the README, the
         # "Adding a cell" checklist and the retained report — and until
-        # `summarize` rendered this field it was computed and thrown away. Both
-        # halves, because a full run starts two containers and checking a new
-        # cell's shell before spending one is the whole point.
-        plan = [("load", cell_script(cell, include_launch=False, model=model))]
+        # `summarize` rendered this field it was computed and thrown away.
+        # Every phase, because a full run starts up to three containers and
+        # checking a new cell's shell before spending one is the whole point.
+        phases = [INSTALL] if cell.install else []
+        phases.append(LOAD)
         if not load_only:
-            plan.append(("trigger",
-                         cell_script(cell, include_launch=True, model=model)))
+            phases.append(TRIGGER)
+        plan = [(phase, cell_script(cell, phase, model=model))
+                for phase in phases]
         row["notes"] = " | ".join(
-            f"{half}: {script.strip().replace(chr(10), ' ; ')}"
-            for half, script in plan)
+            f"{phase}: {script.strip().replace(chr(10), ' ; ')}"
+            for phase, script in plan)
         return row
 
     work.mkdir(parents=True, exist_ok=True)
+    staged = None
     try:
-        # Load — install, then prove the agent application can see the skill.
+        # Install — once, in a container with nothing mounted, committed to an
+        # image the other two phases run from. A cell whose package ships the
+        # skill has no install to stage and runs from the base image.
+        if cell.install:
+            staged, installed = stage_install(cell, tag, work, version, timeout)
+            if staged is None:
+                # A failed install is a red cell, exactly as it was when the
+                # install lived inside the load script — same verdict, same
+                # transcript, one container earlier.
+                row["load"] = "fail"
+                row["load_evidence"] = (installed.stdout + installed.stderr)[-2000:]
+                row["trigger"] = "skipped"
+                row["notes"] = "the install failed; nothing was staged to check"
+                return row
+            tag = staged
+
+        # Load — prove the agent application can see what the install landed.
         # Needs no credentials, so it still answers when the trigger half is
         # blocked, and it runs with none mounted.
-        a = _run(cell, tag, work, include_launch=False, timeout=timeout,
+        a = _run(cell, tag, work, LOAD, timeout=timeout,
                  model=model, stores=stores)
         row["load_evidence"] = (a.stdout + a.stderr)[-2000:]
         listed = list_output(a.stdout, a.stderr)
@@ -335,8 +502,12 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
             row["notes"] = "--load-only"
             return row
 
-        # Trigger — one prompt, in a fresh container that re-runs the install.
-        b = _run(cell, tag, work, include_launch=True, timeout=timeout,
+        # Trigger — one prompt, in a fresh container from the SAME staged
+        # image the load check passed against. It no longer re-runs the
+        # install, which is what let an installer failure here be read as a
+        # credential problem and what put an unpinned network installer beside
+        # a live token.
+        b = _run(cell, tag, work, TRIGGER, timeout=timeout,
                  model=model, stores=stores)
         row["trigger_evidence"] = (b.stdout + b.stderr)[-4000:]
         agent_out = launch_output(b.stdout, b.stderr)
@@ -351,11 +522,14 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
             row["trigger"] = "pass"
         row["evidence_class"] = classify_trigger(agent_out)
         if LAUNCH_MARKER not in (b.stdout + b.stderr):
-            # `set -euo pipefail` means a failed install exits before the
-            # marker, so `no-output` here means "never launched" rather than
-            # "launched and said nothing". The class cannot carry both.
+            # `set -euo pipefail` means the script exits before the marker if
+            # anything ahead of it fails, so `no-output` here means "never
+            # launched" rather than "launched and said nothing". The class
+            # cannot carry both. The install is no longer one of the things
+            # that can fail ahead of it — it ran, and passed, two containers
+            # ago — so this now points at the container or the shim.
             row["notes"] = (row["notes"] + " " if row["notes"] else "") + \
-                "the agent never launched; the install step failed first"
+                "the agent never launched; the container failed before it"
         for warning in harness_warnings(agent_out):
             row["notes"] = (row["notes"] + " " if row["notes"] else "") + warning
         if row["trigger"] == "pass" and row["evidence_class"] != "answer-shaped":
@@ -376,6 +550,13 @@ def run_cell(cell: Cell, tag: str, work: Path, dry_run: bool = False,
     except Exception as exc:  # a broken cell must not take the run down
         row["load"], row["trigger"] = _halves(row, "error")
         row["notes"] = f"{type(exc).__name__}: {exc}"
+    finally:
+        # A staged image outlives nothing: it is per cell, it is 1.5 GB of
+        # nominal size sharing the base's layers, and the run is finished with
+        # it here whether the cell went green, red, timed out or crashed. The
+        # sweep in `main` is the backstop for the paths that never reach this.
+        if staged is not None:
+            remove_image(staged)
     return row
 
 
@@ -778,7 +959,7 @@ def main(argv: list[str] | None = None) -> int:
             row = run_cell(cell, tags.get(cell.image, "dry-run"), work,
                            dry_run=args.dry_run, load_only=args.load_only,
                            timeout=args.timeout, model=args.opencode_model,
-                           stores=stores)
+                           stores=stores, version=args.version)
             rows.append(row)
             print(f"{cell.id}: load {row['load']} / trigger {row['trigger']}")
             # Written per CELL, not once after the loop. A full authenticated
@@ -808,6 +989,15 @@ def main(argv: list[str] | None = None) -> int:
                     # check actually reads.
                     rc = 4 if all(r["trigger"] == "auth-error" for r in bad) else 1
     finally:
+        if not args.dry_run:
+            # Disk, not credentials: a staged image is the one artifact here
+            # built precisely so that it holds no token. It still gets a
+            # backstop, because "silently leaves things behind" is not a
+            # property this runner should have, and it never changes `rc`.
+            left = surviving_staged_images(args.version)
+            if left:
+                print(f"note: staged images left on disk: {', '.join(left)}",
+                      file=sys.stderr)
         leaked = cleanup_run_dir(run_dir, next(iter(tags.values()), None))
         if leaked:
             # Outranks every other outcome, code 5 included: it is the only one
