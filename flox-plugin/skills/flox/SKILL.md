@@ -354,7 +354,7 @@ Options for packages from the Flox catalog:
 [install]
 example.pkg-path = "package-name"           # Required: location in catalog
 example.pkg-group = "mygroup"               # Optional: group packages together
-example.version = "1.2.3"                   # Optional: exact or semver range
+example.version = "1.2.3"                   # Optional: prefer a versioned pkg-path — see below
 example.systems = ["x86_64-linux"]          # Optional: limit to specific platforms
 example.priority = 3                        # Optional: resolve file conflicts (lower = higher priority)
 ```
@@ -377,25 +377,48 @@ example.priority = 3                        # Optional: resolve file conflicts (
 - Semver ranges: `"^1.2"`, `">=2.0"`
 - Partial versions act as wildcards: `"1.2"` = latest 1.2.X
 
-**Prefer a versioned `pkg-path` over a `version` range.** The catalog already
-encodes major versions in package names — `nodejs_22`, `python312`, `go_1_23`,
-`postgresql_16`, `ruby_4_0`. Reach for those first, in this order:
+**Prefer a versioned `pkg-path` over a `version` range.** This ladder answers
+one question — how to *name* a package version. It does not rank how much a
+pin costs you; that is the `floxify` skill's pin-consequence gradation, which
+asks a different question (how much to *freeze*) and answers it differently.
+The catalog already encodes major versions in package names — check what it
+carries today with `flox search nodejs_` / `flox search python3` rather than
+trusting the examples below, which age. Reach for these first, in this order:
 
-1. **Versioned `pkg-path`, no `version` field** — `nodejs_22.pkg-path =
+1. **Versioned `pkg-path`, no `version` field** — `nodejs.pkg-path =
    "nodejs_22"`. Says "Node 22, newest patch" and keeps receiving patch
-   updates as the catalog moves.
+   updates as the catalog moves. Keep the install id unversioned (`nodejs`,
+   not `nodejs_22`) so a major bump does not rename every reference to it.
 2. **Partial literal pin** — `version = "22"` or `"22.11"`, for a package
    with no versioned name. Resolves to the newest match within that line.
 3. **Exact pin** — `version = "22.11.0"`, when something in the repo pins an
-   exact patch (`.nvmrc`, `.python-version`, `rust-toolchain.toml`). Use the
-   exact string `flox show` prints, not a normalized guess: some pages carry
-   a prefix, and `python312`'s versions read `python3-3.12.14`.
+   exact patch (`.nvmrc`, `.python-version`, `rust-toolchain.toml`). This
+   **composes with rung 1 rather than replacing it** — emit `version`
+   *alongside* the versioned `pkg-path`:
+
+   ```toml
+   # eval: skip fragment - package descriptors, go under [install]
+   nodejs.pkg-path = "nodejs_22"
+   nodejs.version = "22.11.0"    # .nvmrc pins this exact patch
+   ```
+
+   Exact pins are the most consequential form: each one freezes a package to
+   a single catalog entry, and stacking several is what produces
+   `constraints for group 'toplevel' are too tight`. Add one only when the
+   repo asks for it, and be ready to split a package group if it does.
 4. **Semver range** — `"^22.0"`, `">=22"`. Valid, and Flox resolves it, but
-   the last resort. See below.
+   the last resort for *naming* a version. See below.
+
+**Use the exact version string `flox show` prints, not a normalized guess**
+— this governs rungs 2 and 3 alike. Some pages carry a name prefix:
+`python312`'s versions read `python3-3.12.14`, so both `version = "3.12.14"`
+and the partial `version = "3.12"` fail to resolve against it.
 
 Never infer a version ceiling from the bare name: `flox show ruby` tops out
 in the 3.4.x line, while the versioned `ruby_4_0` carries a 4.x line the bare
-name does not reach at all. Query the versioned `pkg-path` directly.
+name does not reach at all. Query the versioned `pkg-path` directly. The
+catalog moves forward — verify any version named in this guidance against
+today's `flox show` before relying on it.
 
 Two reasons the range sits last. It is less precise than it looks — `"^22.0"`
 and `nodejs_22` express the same intent, but only the second one survives a
@@ -473,7 +496,8 @@ gcc-unwrapped.pkg-group = "libraries"
 ### Node.js Development
 
 - **Package managers**: Install `nodejs` (includes npm); add `yarn` or `pnpm` separately if needed
-- **Version pinning**: Use the versioned pkg-path for an LTS line — `nodejs_22.pkg-path = "nodejs_22"`, no `version` field. Add `version = "22.11.0"` only when the repo pins an exact patch (`.nvmrc`, `.node-version`). Check which majors the catalog carries with `flox search nodejs_`
+- **Version pinning**: Use the versioned pkg-path for an LTS line — `nodejs.pkg-path = "nodejs_22"`, no `version` field. Add `version = "22.11.0"` alongside it when the repo pins an exact patch (`.nvmrc`, `.node-version`). Check which majors the catalog carries with `flox search nodejs_`
+- **Bundled runtimes**: a versioned pkg-path does NOT constrain a Node bundled inside another package in the same pkg-group. `yarn` ships its own Node, and installing `nodejs_22` beside it leaves that one untouched. To pin it, use the bare name with a full patch version — `nodejs.pkg-path = "nodejs"` and `nodejs.version = "22.14.0"`, in the same pkg-group as `yarn`. Use a full patch, not a bare major: `version = "22"` resolves but can fail to build on a `nodejs` dev/out file conflict
 - **Global tools pattern**: Use `npx` for one-off tools, install commonly-used globals in manifest
 
 ### Platform-Specific Patterns
