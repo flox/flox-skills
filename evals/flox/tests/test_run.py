@@ -1142,10 +1142,6 @@ flox activate -- ruff check .
         self.assertTrue(run.CHECKS["ci_no_repeated_activate"](answer))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class NoRangeVersionPinCheck(unittest.TestCase):
     """`no_range_version_pin` — SKILL.md's version ladder ranks a semver
     range last because a range names a constraint rather than a catalog
@@ -1192,8 +1188,8 @@ class NoRangeVersionPinCheck(unittest.TestCase):
         self.assertTrue(run.CHECKS["no_range_version_pin"](a))
 
     def test_latest_passes_as_a_literal(self):
-        # `latest` is a literal by this rule; flox rejects it, so the loud
-        # finding belongs to verify.py's catalog check, not to this gate.
+        # `latest` is a literal by this rule and verify.py agrees, so the loud
+        # `catalog-version-missing` belongs to its catalog check, not here.
         a = self._install('nodejs.pkg-path = "nodejs"\nnodejs.version = "latest"\n')
         self.assertTrue(run.CHECKS["no_range_version_pin"](a))
 
@@ -1207,3 +1203,103 @@ class NoRangeVersionPinCheck(unittest.TestCase):
         # in prose must not fail the check.
         a = 'You could write version = "^20.0" but prefer nodejs_20.\n'
         self.assertTrue(run.CHECKS["no_range_version_pin"](a))
+
+    def test_non_string_version_fails(self):
+        # TOML allows an unquoted `version = 18.4`, which parses as a float --
+        # and `18.10` parses as `18.1`, so its text names a version the
+        # manifest does not. verify.py refuses to call that a literal; so do we.
+        a = self._install('nodejs.pkg-path = "nodejs"\nnodejs.version = 18.4\n')
+        self.assertFalse(run.CHECKS["no_range_version_pin"](a))
+
+    def test_predicate_rejects_non_string_directly(self):
+        self.assertFalse(run._is_version_literal(18.4))
+        self.assertFalse(run._is_version_literal(None))
+
+
+class GateMatchesVerifyPy(unittest.TestCase):
+    """The gate's comment claims it mirrors `verify.py`'s `_is_version_literal`.
+    That claim is only worth making if something fails when the two drift.
+
+    verify.py is a skill payload rather than an importable module on this
+    suite's path, so it is loaded by path here and the two predicates are run
+    side by side over the awkward specs. No catalog, no subprocess.
+    """
+
+    SPECS = ("22.11.0", "22", "22.11", "python3-3.13.13", "python3-3.12.14",
+             "18rc1", "18beta2", "latest", "^20.0", ">=2.0", "~1.2",
+             "18.4 || 18.3", "18.2 - 18.5", "=18.4", "v18.4", "V18.4",
+             "18.x", "18.X", "X", "x", "x.10", "18_4")
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        import pathlib as _p
+        # tests/ -> evals/flox -> evals -> repo root
+        verify = (_p.Path(__file__).resolve().parents[3]
+                  / "flox-plugin/skills/floxify/scripts/verify.py")
+        # NOT a skip: a parity test that quietly disappears when the path moves
+        # is the "vacuous green" this suite already warns about elsewhere.
+        assert verify.exists(), f"verify.py not found at {verify}"
+        spec = importlib.util.spec_from_file_location("_verify_for_parity", verify)
+        cls.verify = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.verify)
+
+    def test_patterns_are_character_for_character(self):
+        self.assertEqual(run._VERSION_LITERAL_RE.pattern,
+                         self.verify._VERSION_LITERAL_RE.pattern)
+        self.assertEqual(run._VERSION_V_PREFIX_RE.pattern,
+                         self.verify._VERSION_V_PREFIX_RE.pattern)
+        self.assertEqual(run._VERSION_WILDCARD_RE.pattern,
+                         self.verify._VERSION_WILDCARD_RE.pattern)
+
+    def test_predicates_agree_on_every_spec(self):
+        for v in self.SPECS:
+            with self.subTest(version=v):
+                self.assertEqual(run._is_version_literal(v),
+                                 self.verify._is_version_literal(v))
+
+    def test_predicates_agree_on_a_non_string(self):
+        self.assertEqual(run._is_version_literal(18.4),
+                         self.verify._is_version_literal(18.4))
+
+
+class VersionPinGateIsBound(unittest.TestCase):
+    """`no_range_version_pin` existing in CHECKS proves nothing about whether
+    any task exercises it. Same reasoning as `test_secret_handling_is_covered`:
+    bind the gate to the tasks that need it, so it cannot be dropped silently.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import pathlib as _p
+        tasks = _p.Path(__file__).resolve().parents[1] / "tasks/tasks.jsonl"
+        cls.by_id = {}
+        for line in tasks.read_text().splitlines():
+            if line.strip():
+                t = json.loads(line)
+                cls.by_id[t["id"]] = t
+
+    def test_version_tasks_carry_the_gate(self):
+        for tid in ("node-env", "func-install-versioned", "version-lts-node"):
+            with self.subTest(task=tid):
+                t = self.by_id[tid]
+                self.assertIn("no_range_version_pin", t["checks"])
+                self.assertEqual(t.get("tier"), "should")
+
+    def test_every_manifest_emitting_task_carries_the_gate(self):
+        # The gate is a pure function of the emitted manifest, so any task that
+        # asks for one should be judged by it.
+        for tid, t in self.by_id.items():
+            if "has_install_section" in t["checks"]:
+                with self.subTest(task=tid):
+                    self.assertIn("no_range_version_pin", t["checks"])
+
+    def test_comparison_task_deliberately_omits_the_gate(self):
+        # version-range-tradeoff invites a contrast manifest showing the
+        # discouraged form, and the check judges every fenced block.
+        t = self.by_id["version-range-tradeoff"]
+        self.assertNotIn("no_range_version_pin", t["checks"])
+
+
+if __name__ == "__main__":
+    unittest.main()
