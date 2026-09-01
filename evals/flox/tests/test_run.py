@@ -1142,7 +1142,7 @@ flox activate -- ruff check .
         self.assertTrue(run.CHECKS["ci_no_repeated_activate"](answer))
 
 
-class NoRangeVersionPinCheck(unittest.TestCase):
+class TestNoRangeVersionPinCheck(unittest.TestCase):
     """`no_range_version_pin` — SKILL.md's version ladder ranks a semver
     range last because a range names a constraint rather than a catalog
     version, so `verify.py` records the entry unchecked rather than
@@ -1216,7 +1216,7 @@ class NoRangeVersionPinCheck(unittest.TestCase):
         self.assertFalse(run._is_version_literal(None))
 
 
-class GateMatchesVerifyPy(unittest.TestCase):
+class TestGateMatchesVerifyPy(unittest.TestCase):
     """The gate's comment claims it mirrors `verify.py`'s `_is_version_literal`.
     That claim is only worth making if something fails when the two drift.
 
@@ -1263,7 +1263,7 @@ class GateMatchesVerifyPy(unittest.TestCase):
                          self.verify._is_version_literal(18.4))
 
 
-class VersionPinGateIsBound(unittest.TestCase):
+class TestVersionPinGateIsBound(unittest.TestCase):
     """`no_range_version_pin` existing in CHECKS proves nothing about whether
     any task exercises it. Same reasoning as `test_secret_handling_is_covered`:
     bind the gate to the tasks that need it, so it cannot be dropped silently.

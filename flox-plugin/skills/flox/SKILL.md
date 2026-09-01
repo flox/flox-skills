@@ -389,6 +389,11 @@ trusting the examples below, which age. Reach for these first, in this order:
    "nodejs_22"`. Says "Node 22, newest patch" and keeps receiving patch
    updates as the catalog moves. Keep the install id unversioned (`nodejs`,
    not `nodejs_22`) so a major bump does not rename every reference to it.
+   One exception, and the ladder does not reach it: a versioned `pkg-path`
+   does not constrain a runtime bundled *inside another package* in the same
+   pkg-group, so pinning one of those takes the bare name plus an exact
+   `version` — the form rung 3 composes with rung 1 for a directly installed
+   package. See **Bundled runtimes** under "Node.js Development".
 2. **Partial literal pin** — `version = "22"` or `"22.11"`, for a package
    with no versioned name. Resolves to the newest match within that line.
 3. **Exact pin** — `version = "22.11.0"`, when something in the repo pins an
