@@ -338,10 +338,11 @@ read all of it before asserting anything about a package:
 3. **Query the versioned `pkg-path` directly — never infer a ceiling from the
    bare name.** `flox show <versioned>` (`flox show ruby_4_0`, `nodejs_24`,
    `go_1_23`, `python313`) is authoritative for a pinned runtime; the bare
-   name may report a *lower* ceiling belonging to a different catalog entry,
-   and trusting it silently downgrades the runtime. The `flox` skill's
-   `version` section carries the worked example. Verify live whether the
-   versioned page reaches the repo's exact patch or only the nearest prior
+   name may report a *lower* ceiling belonging to a different catalog entry —
+   sometimes a whole major behind, as `flox show ruby` (3.4.x) is behind
+   `ruby_4_0` (4.x) — and trusting it silently downgrades the runtime. The
+   `flox` skill's `version` section carries the fuller worked example. Verify
+   live whether the versioned page reaches the repo's exact patch or only the nearest prior
    one — same live-verify discipline as "Emitting an exact pin" below; the
    catalog moves forward, so don't trust a number cited elsewhere in this
    guidance over today's `flox show`. Search the versioned `pkg-path` first;
