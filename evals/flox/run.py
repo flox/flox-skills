@@ -667,13 +667,33 @@ def _repeats_activate(answer):
 # specs flox's resolver accepts is defined server-side. A `v`-prefixed semver
 # and an `x`/`X` wildcard segment are alphanumeric but are range syntax, so
 # both are excluded.
+#
+# The three patterns below are `verify.py`'s, character for character
+# (`_VERSION_LITERAL_RE`, `_VERSION_V_PREFIX_RE`, `_VERSION_WILDCARD_RE` at
+# `flox-plugin/skills/floxify/scripts/verify.py`). Kept as a copy rather than
+# an import because that file is a skill payload, not an importable module on
+# this suite's path -- so `test_gate_matches_verify_py` reads both files and
+# fails if they drift, which is what actually holds the claim above true.
+# Splitting the wildcard out of a single alternation is not cosmetic: the
+# earlier `^[xX]$|\.[xX](\.|$)` spelling missed a LEADING wildcard segment
+# (`x.10`), which `verify.py` catches and which is range syntax `flox edit`
+# accepts.
 _VERSION_LITERAL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
-_VERSION_RANGE_SHAPES_RE = re.compile(r"^[vV]\d|^[xX]$|\.[xX](\.|$)")
+_VERSION_V_PREFIX_RE = re.compile(r"^[vV][0-9]")
+_VERSION_WILDCARD_RE = re.compile(r"(^|\.)[xX](\.|$)")
 
 
 def _is_version_literal(v):
-    """A `version` this suite could look up in the catalog's version list."""
-    return bool(_VERSION_LITERAL_RE.match(v)) and not _VERSION_RANGE_SHAPES_RE.search(v)
+    """A `version` this suite could look up in the catalog's version list.
+
+    A NON-STRING is not a literal, matching `verify.py`: TOML allows an
+    unquoted `version = 18.4`, which parses as a float, and `18.10` parses as
+    `18.1` -- so the text of the coerced value names a version the manifest
+    does not. `flox edit` rejects such a manifest outright.
+    """
+    if not isinstance(v, str) or not _VERSION_LITERAL_RE.match(v):
+        return False
+    return not (_VERSION_V_PREFIX_RE.match(v) or _VERSION_WILDCARD_RE.search(v))
 
 
 def _no_range_version_pin(answer):
@@ -681,7 +701,8 @@ def _no_range_version_pin(answer):
 
     An ABSENT or empty `version` passes: flox treats it as unconstrained, and
     an unpinned versioned pkg-path is the ladder's FIRST rung, not a failure.
-    Only a present, non-literal spec fails.
+    Only a present, non-literal spec fails -- including a NON-STRING one, which
+    `verify.py` also refuses to treat as a literal.
     """
     for manifest in _parsed_manifests(answer):
         install = manifest.get("install")
@@ -691,7 +712,7 @@ def _no_range_version_pin(answer):
             if not isinstance(entry, dict):
                 continue
             version = entry.get("version")
-            if not isinstance(version, str) or not version:
+            if version is None or version == "":
                 continue
             if not _is_version_literal(version):
                 return False
