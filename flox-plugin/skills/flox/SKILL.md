@@ -389,11 +389,10 @@ trusting the examples below, which age. Reach for these first, in this order:
    "nodejs_22"`. Says "Node 22, newest patch" and keeps receiving patch
    updates as the catalog moves. Keep the install id unversioned (`nodejs`,
    not `nodejs_22`) so a major bump does not rename every reference to it.
-   One exception, and the ladder does not reach it: a versioned `pkg-path`
-   does not constrain a runtime bundled *inside another package* in the same
-   pkg-group, so pinning one of those takes the bare name plus an exact
-   `version` — the form rung 3 composes with rung 1 for a directly installed
-   package. See **Bundled runtimes** under "Node.js Development".
+   One case needs rung 3 even with nothing in the repo asking for a pin: a
+   package in the same pkg-group that bundles its own copy of the runtime
+   (`yarn`, `pnpm`) is not constrained by the pkg-path alone — see "Bundled
+   runtimes" under "Node.js Development".
 2. **Partial literal pin** — `version = "22"` or `"22.11"`, for a package
    with no versioned name. Resolves to the newest match within that line.
 3. **Exact pin** — `version = "22.11.0"`, when something in the repo pins an
@@ -502,7 +501,7 @@ gcc-unwrapped.pkg-group = "libraries"
 
 - **Package managers**: Install `nodejs` (includes npm); add `yarn` or `pnpm` separately if needed
 - **Version pinning**: Use the versioned pkg-path for an LTS line — `nodejs.pkg-path = "nodejs_22"`, no `version` field. Add `version = "22.11.0"` alongside it when the repo pins an exact patch (`.nvmrc`, `.node-version`). Check which majors the catalog carries with `flox search nodejs_`
-- **Bundled runtimes**: a versioned pkg-path does NOT constrain a Node bundled inside another package in the same pkg-group. `yarn` ships its own Node, and installing `nodejs_22` beside it leaves that one untouched. To pin it, use the bare name with a full patch version — `nodejs.pkg-path = "nodejs"` and `nodejs.version = "22.14.0"`, in the same pkg-group as `yarn`. Use a full patch, not a bare major: `version = "22"` resolves but can fail to build on a `nodejs` dev/out file conflict
+- **Bundled runtimes**: a versioned pkg-path *on its own* does NOT constrain a Node bundled inside another package in the same pkg-group. `yarn` ships its own Node, and installing `nodejs_22` beside it leaves that one byte-identical to `yarn` installed alone. What reaches the bundled runtime is the `version` field, not the bare name — so this is rung 3, not an exception to the ladder: keep the versioned pkg-path and add an exact pin, `nodejs.pkg-path = "nodejs_22"` with `nodejs.version = "22.14.0"`, in the same pkg-group as `yarn`. Use a full patch, not a bare major: a major-only `version` can fail to build on a `nodejs` dev/out `common.gypi` file conflict
 - **Global tools pattern**: Use `npx` for one-off tools, install commonly-used globals in manifest
 
 ### Platform-Specific Patterns
