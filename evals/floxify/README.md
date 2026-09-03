@@ -28,11 +28,48 @@ Three registries, three levels of realism, three gate policies.
 | `synthetic.jsonl` (7) | `run_floxify.py` | Small fixture repos vendored under `fixtures/` | `--gate` binds on `should`-tier deterministic checks |
 | `stretch.jsonl` (6) | `run_floxify.py --tasks stretch.jsonl` | Known-hard and conversion-mode fixtures under `fixtures/` | never gates — every entry is `stretch`-tier |
 | `real-world.jsonl` (8) | `real_world.py` | Real OSS repos cloned at a pinned SHA | never gates — the runner has no `--gate` flag |
+| `build.jsonl` (4) | `build_step.py` | Buildable fixtures, seeded with a known-good dev manifest | never gates — the runner has no `--gate` flag |
 
 Alongside the outcome runs, this suite owns the evals for the two deterministic
 scripts the skill itself bundles: `detect.py` (grounds the skill's input) and
 `verify.py` (grounds its output). Those are covered under
 [The skill's own scripts](#the-skills-own-scripts).
+
+## The build-step suite (`build_step.py`)
+
+The other three registries measure the skill's stated job: the dev
+environment. `build_step.py` measures the step beyond it — can an agent with
+the flox skill's build guidance author a `[build.*]` target whose
+`flox build` produces a WORKING artifact? The question exists because the
+answer gates a product decision (raised in review of the CI-wiring
+guidance): before any skill offers to wire `flox build` verification into a
+user's CI, the measured success rate across ecosystems says whether that
+offer helps or embarrasses. Solid rate → add the offer; weak rate → the
+per-task failure details here are the gap list to diagnose and file.
+
+Design differences from the other runners, all deliberate:
+
+- **The dev environment is seeded, not detected.** Each task installs a
+  known-good manifest (a committed golden, or the fixture's
+  `seed-manifest.toml`) via `flox init` + overwrite + a locking activation
+  before the agent starts. Detection variance is `run_floxify.py`'s
+  subject; this suite isolates build authoring.
+- **Scoring trusts nothing the agent said.** The harness re-parses the
+  manifest for `[build.*]`, re-runs `flox build` itself, and smoke-tests
+  the artifact: `run_bin` executes a binary from `result*/bin/` (the
+  user-facing wrapper, not flox's hidden `.<name>-wrapped` internal) and
+  matches stdout; `artifact_exists` accepts any file under a `result*/`
+  output (the stretch-tier python task).
+- **Deterministic-only scoring, no LLM judge.** Build success is binary in
+  a way manifest quality is not; the `rubric` field documents intent for
+  humans and any future judge.
+- Builds hit the network (cargo fetch, toolchain downloads) and take
+  minutes — expect a full run to be slow, like `real_world.py`.
+
+```bash
+python3 build_step.py                 # full registry → results/build.json
+python3 build_step.py --only go-build
+```
 
 ## How a run works
 
