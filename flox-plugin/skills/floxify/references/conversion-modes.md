@@ -12,9 +12,13 @@ Print: `<project-name>/ already uses Flox. Running gap analysis...`
    - List build targets: `[build.*]` sections in the manifest, plus any
      `.flox/pkgs/*.nix`. Also grep the README for `flox build` — an advertised
      build command counts as a claim even if you missed the target file.
-   - Grep the CI configs (`.github/workflows/*.yml`, `.gitlab-ci.yml`,
-     `.circleci/config.yml`) for `flox activate`, `flox build`, and
-     `install-flox-action`.
+   - Grep whatever CI configs exist — `.github/workflows/*.yml`,
+     `.gitlab-ci.yml`, `.circleci/config.yml`, `.buildkite/`, `Jenkinsfile`,
+     `.woodpecker.yml`, `azure-pipelines.yml`, `.drone.yml` — for `flox`
+     usage: `flox activate`, `flox build`, `install-flox-action`, the
+     `flox/orb` orb, the `ghcr.io/flox/flox` image, or a flox Buildkite
+     plugin. Judge coverage against the CI system the repo actually uses,
+     not against GitHub Actions.
    - An environment no CI job activates, or a build target no CI job builds,
      is a gap — the dev loop keeps passing while the committed artifact rots
      (a stale `vendorHash` after a dep bump breaks `flox build` silently;

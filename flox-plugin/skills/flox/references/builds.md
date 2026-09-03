@@ -489,10 +489,15 @@ version.command = "cargo metadata --no-deps --format-version 1 | jq -r '.package
 ## The Build Job Travels With the Target
 
 A build target ships with a CI job that runs it: the commit that adds a
-`[build.*]` section or a `.flox/pkgs/*.nix` also adds (or extends) a workflow
-running `flox build <target>` from a clean checkout. When you create a target
-for someone else's repo, wiring that job is part of the deliverable — offer it
-in the same change, not as advice for later.
+`[build.*]` section or a `.flox/pkgs/*.nix` also adds a job running
+`flox build <target>` from a clean checkout — in whatever CI system the repo
+already uses (detect it from the config files present; `references/ci.md`
+§ Other CI systems lists the official integrations per system). When you
+create a target for someone else's repo, wiring that job is part of the
+deliverable — offer it in the same change, not as advice for later. If the
+repo's CI system is one you can't cleanly conform to, or the repo has no CI,
+recommend the job and ask the user where it should live rather than imposing
+a vendor.
 
 The reason is that the dev loop keeps passing while packaging rots. Two failure
 classes surface ONLY on a from-scratch build:
@@ -508,7 +513,8 @@ classes surface ONLY on a from-scratch build:
   declared inputs, so a `checkPhase` that shells out to it fails only inside
   the sandbox. Tests pass locally forever; the build is broken the whole time.
 
-The job itself is small:
+The job itself is small — GitHub Actions shown as the worked example, same
+shape in any system (get `flox` onto the runner, run `flox build <target>`):
 
 ```yaml
 jobs:
