@@ -807,6 +807,22 @@ other-package.systems = ["aarch64-darwin", "x86_64-darwin"]  # macOS-only
 Valid system values: `"aarch64-darwin"`, `"x86_64-darwin"`, `"aarch64-linux"`, `"x86_64-linux"`.
 Omit `systems` entirely for packages that work on all platforms.
 
+**A per-package `systems` value must be enabled at the environment level, and
+the default enabled set no longer includes `x86_64-darwin`** (dropped from
+Flox's default as of 1.15 — a fresh `flox init` templates only the other
+three). Naming a non-enabled system in any `<id>.systems` fails activation
+with "specifies disabled or unknown system". So whenever you emit a
+per-package `systems` scope that mentions `x86_64-darwin`, also declare it
+in `[options]`:
+
+```toml
+[options]
+systems = ["aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux"]
+```
+
+(verified live 2026-09-03 on flox 1.15.0 — with the declaration the
+manifest activates; without it, it errors).
+
 **How to recognize a platform mismatch:**
 - The build system (CMakeLists.txt, Makefile) gates a dep on an OS check
 - The dep name signals a platform-specific API (Linux kernel interfaces, macOS frameworks)
