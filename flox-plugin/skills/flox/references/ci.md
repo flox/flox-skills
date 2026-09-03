@@ -210,6 +210,14 @@ which is the failure this section exists to prevent.
 | `uses: flox/install-flox-action@v2` | Moving tag; supply-chain risk | Pin the full SHA |
 | A made-up 40-character SHA | Fails at `uses:` resolution, and looks correct | Read it from the releases page or `git ls-remote` |
 
+## Build and publish jobs
+
+This file covers running CI steps *inside* an environment. Two related jobs
+have their own references: a `flox build <target>` verification job (which
+needs no activation at all) is specified in `references/builds.md` § The Build
+Job Travels With the Target, and publishing from CI in `references/publish.md`
+§ Continuous Integration Publishing.
+
 ## Other CI systems
 
 The same split applies. Provide Flox in the runner image, via the platform's

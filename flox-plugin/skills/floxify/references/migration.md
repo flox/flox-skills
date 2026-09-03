@@ -81,18 +81,78 @@ If `NEEDS_ENTRY`: append to `.gitignore`:
 The `.flox/env/` directory (manifest, lockfile) IS committed — that's the point.
 The `.flox/cache/` directory (venvs, cargo target, etc.) is machine-local and should not be.
 
-**5. Stage and commit**
+**5. Wire CI to exercise the environment**
+
+The commit above makes a standing promise — the README now says `flox activate`
+is the setup command — and nothing in the repo verifies that promise stays true.
+Catalog drift, a hook broken by a dependency bump, a manifest a teammate's change
+no longer satisfies: each lands silently, and the first person to find out is the
+new contributor the environment was meant to protect. The CI job travels with
+the artifact: the workflow ships in the same commit as `.flox/env/`, so the
+promise and its check never separate.
+
+Skip this step (and keep the "In CI" hint in step 7's summary) only when the
+repo has no GitHub remote — check `git remote get-url origin` — or the user
+declines when you name the file you're about to add.
+
+Write `.github/workflows/flox.yml` as a NEW file. Existing workflows belong to
+the maintainers — leave every one of them untouched.
+
+```yaml
+name: Flox
+
+on:
+  push:
+    branches: [<default branch>]
+  pull_request:
+
+jobs:
+  flox-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@<full SHA> # <tag>
+      - uses: flox/install-flox-action@<full SHA> # <tag>
+      - name: Run checks in the Flox environment
+        shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
+        run: |
+          <check command>
+```
+
+Filling the placeholders:
+
+- `<check command>` — the project's own test or build invocation, which Phase 1
+  already read from its existing CI workflow, Makefile, or package.json scripts
+  (`go test ./...`, `pnpm test`, `cargo build`). Prefer the cheapest command that
+  proves the environment provides the toolchain. If nothing is detectable, fall
+  back to the runtimes' version flags and say so in the summary.
+- `<full SHA>` / `<tag>` — look each SHA up from the action's releases page or
+  `git ls-remote`; never invent one. The flox skill's `references/ci.md`
+  (§ Pinning, § Install is not activation, and the custom-shell pattern used
+  above) is the source of truth for these mechanics — read it before writing
+  the file.
+- `<default branch>` — read it from `git symbolic-ref refs/remotes/origin/HEAD`,
+  don't assume `main`.
+
+If the repo already has a build target (a `[build.*]` section or
+`.flox/pkgs/*.nix` — floxify doesn't create these, but audit and migrate can
+meet one), add a second job running `flox build <target>` per the flox skill's
+`references/builds.md` § The build job travels with the target.
+
+**6. Stage and commit**
 
 ```bash
 cd "$TARGET_DIR"
 git add .flox/env/
 git add .gitignore
 git add README.md   # (or README.rst, CONTRIBUTING.md — whichever was modified)
+git add .github/workflows/flox.yml   # if step 5 wrote it
 # If old tool files were git rm'd, they're already staged
 git commit -m "Add Flox development environment"
 ```
 
-**6. Print migration summary**
+**7. Print migration summary**
 
 ```
 ─────────────────────────────────────────────────────────────────
@@ -101,6 +161,7 @@ git commit -m "Add Flox development environment"
 
    Modified:  README.md  ← updated dev setup section
    Added:     .flox/env/manifest.toml
+   Added:     .github/workflows/flox.yml  ← CI runs <check command> inside the environment
    Removed:   devbox.json        ← (or "left in place" for Brewfile / devcontainer)
 
    Commit:    "Add Flox development environment"
@@ -114,11 +175,16 @@ Next steps:
   → teammates: flox activate -r <you>/<project-name>
   → first time? flox auth login
 
+─────────────────────────────────────────────────────────────────
+```
+
+Include the workflow's `Added:` line only when step 5 wrote it. When step 5 was
+skipped, append this to Next steps instead:
+
+```
   In CI (GitHub Actions, etc.):
   → install Flox, then: flox activate -- <your-test-command>
   → see: https://flox.dev/docs/install-flox/install
-
-─────────────────────────────────────────────────────────────────
 ```
 
 Then ask: "Ready to push to origin? I can run `git push -u origin add-flox-environment`."
@@ -128,6 +194,8 @@ Then ask: "Ready to push to origin? I can run `git push -u origin add-flox-envir
 - Never `git push` without explicit user confirmation
 - Never remove Brewfile or `.devcontainer/` — they serve different purposes
 - Always confirm before `git rm` on any file
+- `.github/workflows/flox.yml` is the only workflow file this skill writes —
+  existing workflows stay exactly as they are
 - If git is not initialized (`git status` fails): skip branch creation, just update
   the README and note: "No git repo found — commit manually when ready"
 - Commit message is always exactly `"Add Flox development environment"` — no variations

@@ -8,7 +8,18 @@ Print: `<project-name>/ already uses Flox. Running gap analysis...`
    `on-activate` hook exists, and whether a `[profile]` section activates the venv.
 2. Run the Phase 1 scan to detect runtimes and services from dep files.
 3. Compare: what do dep files imply vs. what's in the manifest?
-4. Print:
+4. Check that CI exercises every committed Flox artifact:
+   - List build targets: `[build.*]` sections in the manifest, plus any
+     `.flox/pkgs/*.nix`. Also grep the README for `flox build` — an advertised
+     build command counts as a claim even if you missed the target file.
+   - Grep the CI configs (`.github/workflows/*.yml`, `.gitlab-ci.yml`,
+     `.circleci/config.yml`) for `flox activate`, `flox build`, and
+     `install-flox-action`.
+   - An environment no CI job activates, or a build target no CI job builds,
+     is a gap — the dev loop keeps passing while the committed artifact rots
+     (a stale `vendorHash` after a dep bump breaks `flox build` silently;
+     `go test` never notices).
+5. Print:
 
 ```
 <project-name>/ — Flox gap analysis
@@ -23,7 +34,16 @@ Possibly missing (detected in dep files, not in manifest):
   pkg-config      → detected via requirements.txt (psycopg2 non-binary)
 
 on-activate hook: [present / missing]
+
+CI coverage:
+  environment     [exercised by <workflow file> / no CI job activates it]
+  build: <target> [built by <workflow file> / not built in CI ← README advertises `flox build <target>`]
 ```
+
+Omit the `build:` line when there are no build targets. For each CI gap,
+suggest the fix without applying it — the environment job per
+`references/migration.md` step 5, the build job per the flox skill's
+`references/builds.md` § The Build Job Travels With the Target.
 
 If the hook is missing, suggest:
 ```
