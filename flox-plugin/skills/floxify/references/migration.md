@@ -108,33 +108,11 @@ Then conform to what you found:
 
 - **GitHub Actions** — the one system where a standalone file conforms
   cleanly: write `.github/workflows/flox.yml` as a NEW file (existing
-  workflows belong to the maintainers — leave every one untouched):
-
-  ```yaml
-  name: Flox
-
-  on:
-    push:
-      branches: [<default branch>]
-    pull_request:
-
-  jobs:
-    flox-check:
-      runs-on: ubuntu-latest
-      permissions:
-        contents: read
-      steps:
-        - uses: actions/checkout@<full SHA> # <tag>
-        - uses: flox/install-flox-action@<full SHA> # <tag>
-        - name: Run checks in the Flox environment
-          shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
-          run: |
-            <check command>
-  ```
-
-  Look each SHA up from the action's releases page or `git ls-remote`; never
-  invent one. Read `<default branch>` from
-  `git symbolic-ref refs/remotes/origin/HEAD`, don't assume `main`.
+  workflows belong to the maintainers — leave every one untouched). The
+  job is the flox skill's `references/ci.md` § Complete workflow with
+  three deltas: name it `Flox`, read the `branches:` value from
+  `git symbolic-ref refs/remotes/origin/HEAD` instead of assuming `main`,
+  and make the `run:` block the `<check command>` below.
 
 - **Single-file systems with an official Flox integration** (GitLab CI,
   CircleCI) — there is no standalone file to add; the check goes inside
