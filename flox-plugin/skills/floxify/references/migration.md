@@ -104,7 +104,21 @@ project doesn't use is clutter at best. Detect first:
 | `Jenkinsfile` | Jenkins |
 | `.woodpecker.yml`, `azure-pipelines.yml`, `.drone.yml` | Woodpecker / Azure / Drone |
 
-Then conform to what you found:
+Then OFFER — never write CI config silently, whatever the system. One
+question, in the agent session, naming what was detected and what the job
+verifies:
+
+```
+Detected <CI system>. Want a CI job that verifies the dev environment —
+flox activate + your own test command — on every PR? [y/N]
+```
+
+The job verifies the DEV environment only: it activates and runs the
+project's own checks inside it. It never runs `flox build` — packaging is a
+separate, deeper step that stays out of onboarding. If the user declines,
+put the snippet for their system under Next steps in the summary and move on.
+
+On a yes, conform to what you found:
 
 - **GitHub Actions** — the one system where a standalone file conforms
   cleanly: write `.github/workflows/flox.yml` as a NEW file (existing
@@ -208,11 +222,11 @@ Then ask: "Ready to push to origin? I can run `git push -u origin add-flox-envir
 - Never `git push` without explicit user confirmation
 - Never remove Brewfile or `.devcontainer/` — they serve different purposes
 - Always confirm before `git rm` on any file
-- CI changes conform to the system the repo already uses (step 5's detection
-  table). The standalone `.github/workflows/flox.yml` is the only CI file
-  written unprompted; any edit to existing CI config (`.gitlab-ci.yml`,
-  `.circleci/config.yml`, existing workflows) happens only after showing the
-  snippet and getting an explicit yes
+- CI is offered, never imposed: every CI change starts with step 5's [y/N]
+  question and conforms to the system the repo already uses (the detection
+  table). Any edit to existing CI config (`.gitlab-ci.yml`,
+  `.circleci/config.yml`, existing workflows) additionally requires showing
+  the snippet and getting an explicit yes
 - If git is not initialized (`git status` fails): skip branch creation, just update
   the README and note: "No git repo found — commit manually when ready"
 - Commit message is always exactly `"Add Flox development environment"` — no variations

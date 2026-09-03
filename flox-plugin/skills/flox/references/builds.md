@@ -493,11 +493,22 @@ A build target ships with a CI job that runs it: the commit that adds a
 `flox build <target>` from a clean checkout — in whatever CI system the repo
 already uses (detect it from the config files present; `references/ci.md`
 § Other CI systems lists the official integrations per system). When you
-create a target for someone else's repo, wiring that job is part of the
-deliverable — offer it in the same change, not as advice for later. If the
-repo's CI system is one you can't cleanly conform to, or the repo has no CI,
-recommend the job and ask the user where it should live rather than imposing
-a vendor.
+create a target for someone else's repo, offering that job is part of the
+deliverable — in the same change, not as advice for later, and as an offer
+the maintainer accepts, never a file written silently. If the repo's CI
+system is one you can't cleanly conform to, or the repo has no CI, recommend
+the job and ask the user where it should live rather than imposing a vendor.
+
+**This job is PR-time verification, not build automation.** It exists to keep
+a pull request from landing the silent break; it is not the pipeline that
+produces or distributes artifacts. Building and publishing on `main` is the
+Factory's job once the package is registered with it — position the CI job as
+the test that runs before merge, and the Factory as what builds after. The
+distinction to keep sharp with users: the dev environment (`flox activate`,
+what floxify sets up, high confidence) and a working built artifact
+(`flox build`, a step deeper with more edge cases) are different promises —
+verify each with its own job, and never let a build failure be someone's
+first Flox experience.
 
 The reason is that the dev loop keeps passing while packaging rots. Two failure
 classes surface ONLY on a from-scratch build:
