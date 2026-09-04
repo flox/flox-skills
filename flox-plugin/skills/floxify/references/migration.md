@@ -218,12 +218,13 @@ Next steps:
 
 Include the CI line only when step 5 wrote or edited a file. When a workflow
 file was written, also append one line to the summary: pushing this commit
-needs a git credential with the `workflow` scope — a PAT without it is
-rejected at push time ("refusing to allow a Personal Access Token to create
-or update workflow"), which lands AFTER floxify has reported success and
-reads like the user's own push breaking. When step 5 produced a snippet the
-user will place themselves, put the snippet under Next steps. When step 5
-ended with no CI change at all, append this instead:
+requires the `workflow` scope on the user's GitHub authorization — without
+it, GitHub refuses any push that creates or updates a workflow file. That
+refusal lands AFTER floxify has reported success, so it reads like the
+user's own push breaking rather than a consequence of the CI step. When
+step 5 produced a snippet the user will place themselves, put the snippet
+under Next steps. When step 5 ended with no CI change at all, append this
+instead:
 
 ```
   In CI (GitHub Actions, GitLab, CircleCI, etc.):
