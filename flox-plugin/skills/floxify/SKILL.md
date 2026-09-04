@@ -801,28 +801,21 @@ different OS will need it.
 some-package.pkg-path = "some-package"
 some-package.systems = ["x86_64-linux", "aarch64-linux"]  # Linux-only
 other-package.pkg-path = "other-package"
-other-package.systems = ["aarch64-darwin", "x86_64-darwin"]  # macOS-only
+other-package.systems = ["aarch64-darwin"]  # macOS-only
 ```
 
 Valid system values: `"aarch64-darwin"`, `"x86_64-darwin"`, `"aarch64-linux"`, `"x86_64-linux"`.
 Omit `systems` entirely for packages that work on all platforms.
 
-**A per-package `systems` value must be enabled at the environment level, and
-the default enabled set no longer includes `x86_64-darwin`** on Flox >= 1.15:
-naming it in any `<id>.systems` with no `[options] systems` declaration
-fails activation with "specifies disabled or unknown system" — the
-activation behavior verified live, not inferred from `flox init`'s template
-(which corroborates by templating only the other three). So whenever you
-emit a per-package `systems` scope that mentions `x86_64-darwin`, also
-declare it in `[options]`:
-
-```toml
-[options]
-systems = ["aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux"]
-```
-
-(verified live 2026-09-03 on flox 1.15.0 — with the declaration the
-manifest activates; without it, it errors).
+**Scope to the default enabled set** (Flox >= 1.15: `aarch64-darwin`,
+`aarch64-linux`, `x86_64-linux`). `x86_64-darwin` is deprecated upstream
+and off by default — do NOT emit it just because an old example did. Emit
+it only when the repo demonstrably targets Intel Macs (e.g. an
+`x86_64`/`macos-13` runner in its CI matrix); then it must ALSO be
+declared in `[options] systems` (naming a non-enabled system fails
+activation with "specifies disabled or unknown system" — verified live on
+1.15.0), and the report notes the opt-in under ⚠ since upstream support
+is winding down.
 
 **How to recognize a platform mismatch:**
 - The build system (CMakeLists.txt, Makefile) gates a dep on an OS check

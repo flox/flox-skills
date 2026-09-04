@@ -15,9 +15,12 @@ clippy.pkg-group = "rust-toolchain"
 rustfmt.pkg-path = "rustfmt"
 rustfmt.pkg-group = "rust-toolchain"
 
-# Platform-specific linkers
+# Platform-specific linkers. x86_64-darwin is omitted deliberately: it is
+# deprecated upstream and out of Flox's default enabled set (>= 1.15) --
+# a repo that explicitly needs Intel macOS opts in by adding it to this
+# scope AND to [options].systems.
 clang.pkg-path = "clang"
-clang.systems = ["aarch64-darwin", "x86_64-darwin"]
+clang.systems = ["aarch64-darwin"]
 gcc.pkg-path = "gcc"
 gcc.systems = ["aarch64-linux", "x86_64-linux"]
 
@@ -32,11 +35,3 @@ mkdir -p "$CARGO_HOME" "$CARGO_TARGET_DIR"
 bash = 'export CARGO_HOME="$FLOX_ENV_CACHE/cargo"; export PATH="$CARGO_HOME/bin:$PATH"'
 zsh = 'export CARGO_HOME="$FLOX_ENV_CACHE/cargo"; export PATH="$CARGO_HOME/bin:$PATH"'
 fish = 'set -x CARGO_HOME "$FLOX_ENV_CACHE/cargo"; fish_add_path "$CARGO_HOME/bin"'
-
-[options]
-# 2026-09-03: required, not decorative — flox 1.15's DEFAULT enabled set no
-# longer includes x86_64-darwin, so clang.systems naming it fails activation
-# ("specifies disabled or unknown system") unless the environment declares
-# it here. Found by the build-step eval's seed activation (rust-build 0/3,
-# all unverifiable-env).
-systems = ["aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux"]

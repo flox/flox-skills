@@ -110,9 +110,9 @@ authoritative; use them inline without opening a reference file.
 
 **macOS frameworks**
 - `pkg-path = "darwin.apple_sdk.frameworks.<Name>"` (e.g. `…IOKit`), scoped with
-  `.systems = ["x86_64-darwin", "aarch64-darwin"]` — naming `x86_64-darwin`
-  requires declaring it in `[options] systems` too (Flox >= 1.15; see the
-  `systems` field notes and Platform-Specific Patterns below).
+  `.systems = ["aarch64-darwin"]` (add `x86_64-darwin` only for an explicit
+  Intel-macOS need — deprecated upstream, and it must then also be declared
+  in `[options] systems`).
 
 **Services** — depth in `references/services.md`
 - A self-daemonizing process needs `is-daemon = true` and a `shutdown.command`
@@ -435,14 +435,13 @@ of verification.
 - Constrains package to specific platforms
 - Options: `"x86_64-linux"`, `"x86_64-darwin"`, `"aarch64-linux"`, `"aarch64-darwin"`
 - Defaults to manifest's `options.systems` if omitted
-- Every system named here must be enabled at the environment level, and
-  the DEFAULT enabled set excludes `x86_64-darwin` on Flox >= 1.15: a
-  `<id>.systems` naming it without a matching `[options] systems`
-  declaration fails activation with "specifies disabled or unknown
-  system" (verified live on 1.15.0, 2026-09-03 — the activation
-  behavior itself, not inferred from `flox init`'s template, which
-  merely corroborates by templating only the other three). See the note
-  under Platform-Specific Patterns below
+- Rely on the default enabled set (Flox >= 1.15: `aarch64-darwin`,
+  `aarch64-linux`, `x86_64-linux`). Declare `systems` to LIMIT an
+  environment to a known-working subset (e.g. CUDA: Linux only)
+- `x86_64-darwin` is deprecated upstream and off by default — explicit
+  opt-in only: naming it in a `<id>.systems` without also declaring it
+  in `[options] systems` fails activation ("specifies disabled or
+  unknown system", verified live on 1.15.0)
 
 **priority**
 - Resolves file conflicts between packages
@@ -515,24 +514,22 @@ gcc-unwrapped.pkg-group = "libraries"
 # eval: skip fragment - package descriptors, go under [install]
 # Darwin-specific frameworks
 IOKit.pkg-path = "darwin.apple_sdk.frameworks.IOKit"
-IOKit.systems = ["x86_64-darwin", "aarch64-darwin"]
+IOKit.systems = ["aarch64-darwin"]
 
 # Platform-preferred compilers
 gcc.pkg-path = "gcc"
 gcc.systems = ["x86_64-linux", "aarch64-linux"]
 clang.pkg-path = "clang"
-clang.systems = ["x86_64-darwin", "aarch64-darwin"]
+clang.systems = ["aarch64-darwin"]
 
 # Darwin GNU compatibility layer
 coreutils.pkg-path = "coreutils"
-coreutils.systems = ["x86_64-darwin", "aarch64-darwin"]
-
-# REQUIRED alongside any x86_64-darwin scope above: the default enabled
-# set (Flox >= 1.15) omits x86_64-darwin, and naming a non-enabled system
-# fails activation. Declare it explicitly:
-[options]
-systems = ["aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux"]
+coreutils.systems = ["aarch64-darwin"]
 ```
+
+Intel macOS (`x86_64-darwin`) is deprecated upstream and outside the
+default enabled set — only for an explicit need, add it to the relevant
+scopes AND declare it in `[options] systems`, and expect gaps.
 
 ## Best Practices
 
