@@ -486,12 +486,23 @@ Eval layers:
   real `/floxify` through package resolution and manifest-writing and asserts
   the skill *actually invoked* `verify.py`. Spawns an agent; manual only.
 
+- **`invocation_source_eval.py`** — behavioral conformance for the AI-597
+  invocation-source tag. `verify.py` sets `FLOX_INVOCATION_SOURCE` at module
+  load, which needs no eval; SKILL.md's `flox run` blocks carry the tag as a
+  literal a model has to copy, which does. Reports the share of prescribed
+  `flox run` calls that carried it, and separately whether the append-
+  preserving form survived. Exits 2 when the run made no such call at all, so
+  "nothing to measure" stays distinguishable from "the model dropped it".
+  Its matchers are gated by `tests/test_invocation_source_eval.py`; the eval
+  itself spawns an agent and is manual only.
+
 ```bash
 python3 -m unittest tests.test_verify -v
 python3 -m unittest tests.test_real_world_golden_lint -v
 python3 -m unittest tests.test_stretch_golden_lint -v
 FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0 python3 -m unittest tests.test_real_world_golden_lint -v  # no network
 python3 verify_usage_eval.py
+python3 invocation_source_eval.py
 ```
 
 `FLOXIFY_GOLDEN_LINT_LIVE_CATALOG=0` forces the offline mode explicitly rather
