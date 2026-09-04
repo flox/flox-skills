@@ -31,7 +31,7 @@ Input: `$ARGUMENTS`
 
 **Delegating to a cheaper model?** If you are the parent session deciding
 whether to hand this conversion to a cheaper-model subagent, read
-`references/delegation.md` first. **If you are the delegated subagent, skip
+[references/delegation.md](references/delegation.md) first. **If you are the delegated subagent, skip
 straight to Phase 0** — the verify gate, not this note, carries correctness.
 
 ---
@@ -109,10 +109,10 @@ test -d "$TARGET_DIR/.flox" && echo "HAS_FLOX" || echo "CLEAN"
 ```
 
 **If `HAS_FLOX`:** Switch to audit mode — do NOT initialize or modify anything.
-Read `references/conversion-modes.md` § Audit Mode and follow it.
+Read [references/conversion-modes.md](references/conversion-modes.md) § Audit Mode and follow it.
 
 **If `devbox.json` exists (and no .flox/):** Switch to DevBox conversion mode.
-Read `references/conversion-modes.md` § DevBox Conversion Mode and follow it.
+Read [references/conversion-modes.md](references/conversion-modes.md) § DevBox Conversion Mode and follow it.
 
 **If `flake.nix` or `shell.nix` exists (and no .flox/):**
 Ask:
@@ -138,7 +138,7 @@ yourself (Step 1b) for nuance it only summarizes.
 
 ### Step 1a — Run the grounded analyzer (do this first)
 
-The analyzer ships with this skill at `scripts/detect.py` (next to this
+The analyzer ships with this skill at [scripts/detect.py](scripts/detect.py) (next to this
 SKILL.md). Run it through Flox so you don't depend on a system Python — this is
 also the fastest way to run a one-off script. Save its output alongside
 printing it — Phase 3c's `verify.py` re-reads these same facts to check the
@@ -205,9 +205,9 @@ their own project as each line appears. **Do not buffer — print as each file i
 
 **Files to scan** (priority order — higher sources win for version numbers):
 
-1. `.devcontainer/devcontainer.json` — full conversion: `image`, `features`, `postCreateCommand`, `containerEnv` (see `references/conversion-modes.md` § Dev Container Full Conversion)
-2. `devbox.json` — if present, handled via `references/conversion-modes.md` § DevBox Conversion Mode (skip to Phase 3)
-3. `Brewfile` — `brew "name"` lines mapped to Flox catalog (see `references/conversion-modes.md` § Brewfile Conversion Mode)
+1. `.devcontainer/devcontainer.json` — full conversion: `image`, `features`, `postCreateCommand`, `containerEnv` (see [references/conversion-modes.md](references/conversion-modes.md) § Dev Container Full Conversion)
+2. `devbox.json` — if present, handled via [references/conversion-modes.md](references/conversion-modes.md) § DevBox Conversion Mode (skip to Phase 3)
+3. `Brewfile` — `brew "name"` lines mapped to Flox catalog (see [references/conversion-modes.md](references/conversion-modes.md) § Brewfile Conversion Mode)
 4. `.github/workflows/*.yml` — `setup-node`/`setup-python`/`setup-go` action version
    values; `services:` blocks with image names and versions; `apt-get install -y` lines
 5. `.gitlab-ci.yml` — `image:` field for runtime hints; `before_script` apt-get installs
@@ -413,7 +413,7 @@ Deferring also **cascades** into the rest of the manifest. Because lemmy's
 `CARGO_TARGET_DIR` into the repo tree as well — one deferral, two defects.
 
 **When the app needs a leaf datastore (the HARD FLOOR above), read
-`references/service-patterns.md`** for the PostgreSQL (socket-default) and
+[references/service-patterns.md](references/service-patterns.md)** for the PostgreSQL (socket-default) and
 Redis (TCP+socket) manifest patterns before wiring `[services.*]`.
 
 **Catalog presence does NOT mean "wire it as a Flox service."** The floor above
@@ -666,7 +666,7 @@ patterns emit uses `'''…'''` for this reason — e.g.
 are both `'''…'''` (that file's postgres service still uses the old TCP
 default this same PR replaces — cited here only for its string type, not
 its socket/TCP shape; see the PostgreSQL pattern in
-`references/service-patterns.md` for the current default). Not every `expected/*.toml` reference
+[references/service-patterns.md](references/service-patterns.md) for the current default). Not every `expected/*.toml` reference
 follows the literal-string rule yet — `firefly-iii.toml`, `lemmy.toml`, and
 `supabase.toml` still carry a basic-string block each — that gap is a
 separate, pre-existing golden defect (tracked outside this guidance-only
@@ -824,7 +824,7 @@ are provided by the OS itself, not installable).
 ### Hook snippets by ecosystem
 
 After resolving packages (Phase 2), for each detected ecosystem read the
-matching section of `references/hook-snippets.md` before writing `[hook]` /
+matching section of [references/hook-snippets.md](references/hook-snippets.md) before writing `[hook]` /
 `[profile]`: Python · Node (+ pinned package-manager/corepack) · Go · Rust ·
 Elixir · .NET · PHP.
 
@@ -1012,7 +1012,7 @@ Wait for the user's response, then:
   since that's where the context lives."
 - **2 (Migrate):** The user chose migrate — or said "migrate", "I'm
   ready", "commit it", "let's go", "do it", or any clear affirmation
-  after the report. Read `references/migration.md` and follow it. Never run
+  after the report. Read [references/migration.md](references/migration.md) and follow it. Never run
   migration automatically — only on this explicit request.
 - **3 (Leave it):** Say: "No problem — run `flox activate` whenever you're ready. Say 'migrate' to commit it."
 - **4 (Remove it):** Run `rm -rf "$TARGET_DIR/.flox/"`, confirm it's gone:
