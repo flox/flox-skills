@@ -21,7 +21,8 @@ They are unrelated.
 
 ## What it measures
 
-Three registries, three levels of realism, three gate policies.
+Four registries: three grade the dev-environment manifest at rising levels
+of realism, and the fourth (`build.jsonl`) measures the build step beyond it.
 
 | Registry | Runner | Input | Gate policy |
 |---|---|---|---|
@@ -341,9 +342,9 @@ to mean anything yet.
 
 | Path | What |
 |---|---|
-| `synthetic.jsonl`, `stretch.jsonl`, `real-world.jsonl` | The three registries |
-| `fixtures/<id>/` | Input repos, shipping no `.flox/` |
-| `expected/<id>.toml` | Reference manifest for the judge. **Not universal**: `script-started-postgres` has none, and `run_floxify.py` silently substitutes the literal string `"(no gold available)"` into the judge prompt, so that fixture is graded against a placeholder and its judge score is not comparable to the other six |
+| `synthetic.jsonl`, `stretch.jsonl`, `real-world.jsonl`, `build.jsonl` | The four registries |
+| `fixtures/<id>/` | Input repos, shipping no `.flox/`. Build-tier fixtures (`go-build`, `node-build`) also carry a `seed-manifest.toml` that `build_step.py` installs before the agent runs — it is stripped from the staged tree |
+| `expected/<id>.toml` | Reference manifest for the judge. **Not universal**: `script-started-postgres` has none, and `run_floxify.py` silently substitutes the literal string `"(no gold available)"` into the judge prompt, so that fixture is graded against a placeholder and its judge score is not comparable to the other six. **Dual use**: `rust-cargo.toml` and `python-uv.toml` are ALSO `build.jsonl` seed manifests, so an edit made for judge-grading reasons changes what the build tier seeds — `test_build_step.py` enforces that seeds carry no `[build]` section and must keep activating |
 | `expected/<id>-notes.md` | Provenance for a real-world reference: every pin traced to its source file, plus the `flox show` / `flox search` log that confirmed it |
 | `samples/` | Captured agent stream transcripts and one real run's manifest, parsed by tests. See [`samples/README.md`](samples/README.md) for how each was captured |
 | `baselines/` | `synthetic.json` (read by `--baseline`), `real-world.json` (read by nothing) — not written by a default run |

@@ -123,6 +123,12 @@ cuda-pytorch.priority = 1
 pytorch.pkg-path = "python313Packages.pytorch"
 pytorch.systems = ["x86_64-darwin", "aarch64-darwin"]
 pytorch.priority = 6                     # Lower priority
+
+## Required with any x86_64-darwin scope: Flox >= 1.15's default enabled
+## set omits it, and a systems value outside the enabled set fails
+## activation. Declare the full set explicitly:
+[options]
+systems = ["aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux"]
 ```
 
 ## GPU Detection Pattern

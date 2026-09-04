@@ -499,11 +499,13 @@ the maintainer accepts, never a file written silently. If the repo's CI
 system is one you can't cleanly conform to, or the repo has no CI, recommend
 the job and ask the user where it should live rather than imposing a vendor.
 
-**This job is PR-time verification, not build automation.** It exists to keep
-a pull request from landing the silent break; it is not the pipeline that
-produces or distributes artifacts. Building and publishing on `main` is the
-Factory's job once the package is registered with it — position the CI job as
-the test that runs before merge, and the Factory as what builds after. The
+**This job is verification, not the release pipeline.** It exists to keep a
+pull request from landing the silent break; how artifacts are produced and
+distributed after merge is a separate concern this job neither performs nor
+forecloses. Flox's direction for that is the Factory — automatic builds once
+a package is registered — so mention it as where build/publish automation is
+headed, but don't present registration as a self-serve step available today,
+and don't tell users their CI is forbidden from building or caching. The
 distinction to keep sharp with users: the dev environment (`flox activate`,
 what floxify sets up, high confidence) and a working built artifact
 (`flox build`, a step deeper with more edge cases) are different promises —
@@ -525,9 +527,18 @@ classes surface ONLY on a from-scratch build:
   the sandbox. Tests pass locally forever; the build is broken the whole time.
 
 The job itself is small — GitHub Actions shown as the worked example, same
-shape in any system (get `flox` onto the runner, run `flox build <target>`):
+shape in any system (get `flox` onto the runner, run `flox build <target>`).
+This is a complete standalone workflow; when the repo already has a Flox
+workflow (e.g. floxify's `flox.yml`), add just the job block to it instead:
 
 ```yaml
+name: Flox build
+
+on:
+  push:
+    branches: [<default branch>]
+  pull_request:
+
 jobs:
   flox-build:
     strategy:

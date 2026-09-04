@@ -122,11 +122,14 @@ On a yes, conform to what you found:
 
 - **GitHub Actions** — the one system where a standalone file conforms
   cleanly: write `.github/workflows/flox.yml` as a NEW file (existing
-  workflows belong to the maintainers — leave every one untouched). The
-  job is the flox skill's `references/ci.md` § Complete workflow with
-  three deltas: name it `Flox`, read the `branches:` value from
-  `git symbolic-ref refs/remotes/origin/HEAD` instead of assuming `main`,
-  and make the `run:` block the `<check command>` below.
+  workflows belong to the maintainers — leave every one untouched; if
+  `flox.yml` itself already exists, stop and ask for a different filename
+  rather than overwriting). The job is the flox skill's
+  `references/ci.md` § Complete workflow with three deltas: name it
+  `Flox`; set `branches:` to the default branch, not an assumed `main` —
+  `git symbolic-ref refs/remotes/origin/HEAD` prints a FULL ref
+  (`refs/remotes/origin/main`), so use its basename, and ask the user if
+  the ref is unset; and make the `run:` block the `<check command>` below.
 
 - **Single-file systems with an official Flox integration** (GitLab CI,
   CircleCI) — there is no standalone file to add; the check goes inside
@@ -141,8 +144,8 @@ On a yes, conform to what you found:
   integration; community ones exist for some (e.g. Buildkite plugins) but
   are unofficial — read one before recommending it. Don't write config
   here: show the generic pattern (Flox in the runner image, then
-  `flox activate -- <check command>`, per `references/ci.md` § Other CI
-  systems) and let the user place it.
+  `flox activate -- <check command>`, per the flox skill's
+  `references/ci.md` § Other CI systems) and let the user place it.
 
 - **No CI config at all** — ask rather than assume: "No CI config detected —
   which CI does this repo use, if any?" If the answer is GitHub Actions (or
@@ -162,9 +165,11 @@ config.
 
 If the repo already has a build target (a `[build.*]` section or
 `.flox/pkgs/*.nix` — floxify doesn't create these, but audit and migrate can
-meet one), add a `flox build <target>` job the same way — conforming to the
-same detected system — per the flox skill's `references/builds.md` § The
-Build Job Travels With the Target.
+meet one), leave it out of this step: the question above asked about the dev
+environment only, and a yes to that is not consent for a packaging job. Name
+the target in step 7's summary and point the maintainer at the flox skill's
+`references/builds.md` § The Build Job Travels With the Target — wiring
+build verification is its own separately consented change.
 
 **6. Stage and commit**
 

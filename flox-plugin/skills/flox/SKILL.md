@@ -433,6 +433,13 @@ of verification.
 - Constrains package to specific platforms
 - Options: `"x86_64-linux"`, `"x86_64-darwin"`, `"aarch64-linux"`, `"aarch64-darwin"`
 - Defaults to manifest's `options.systems` if omitted
+- Every system named here must be enabled at the environment level, and
+  the DEFAULT enabled set excludes `x86_64-darwin` (dropped as of Flox
+  1.15 — a fresh `flox init` templates only the other three; verified
+  live 2026-09-03). A `<id>.systems` naming it without a matching
+  `[options] systems` declaration fails activation with "specifies
+  disabled or unknown system" — see the note under Platform-Specific
+  Patterns below
 
 **priority**
 - Resolves file conflicts between packages
@@ -516,6 +523,12 @@ clang.systems = ["x86_64-darwin", "aarch64-darwin"]
 # Darwin GNU compatibility layer
 coreutils.pkg-path = "coreutils"
 coreutils.systems = ["x86_64-darwin", "aarch64-darwin"]
+
+# REQUIRED alongside any x86_64-darwin scope above: the default enabled
+# set (Flox >= 1.15) omits x86_64-darwin, and naming a non-enabled system
+# fails activation. Declare it explicitly:
+[options]
+systems = ["aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux"]
 ```
 
 ## Best Practices
