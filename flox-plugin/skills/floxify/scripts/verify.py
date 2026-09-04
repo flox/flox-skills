@@ -42,6 +42,7 @@ to `flox show` and is fully mockable (see evals/floxify/tests/test_verify.py).
 """
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -54,6 +55,51 @@ try:
     import tomllib  # Python 3.11+
 except ImportError:  # pragma: no cover - fallback for < 3.11
     tomllib = None
+
+# --- invocation source tag (AI-597) ---------------------------------------
+# The flox CLI reads FLOX_INVOCATION_SOURCE at startup and ships it two ways:
+# as the `flox-invocation-source` header on catalog requests, and as
+# `invocation_sources` in its telemetry event. Nothing else distinguishes
+# "an agent ran flox" from "an agent ran flox because this skill said to".
+#
+# Set at module load rather than per call: `_run_show_command` passes no
+# `env=`, so every `flox show` this script makes inherits os.environ. That
+# makes the tag deterministic here, unlike the SKILL.md command blocks a
+# model has to remember to prefix.
+#
+# APPEND, never overwrite — a nested context (flox-mcp-server, CI) has its
+# own tag and both should survive. Mirrors flox-mcp-server's
+# src/flox_mcp/server.py.
+#
+# The version is a literal, NOT read from .claude-plugin/plugin.json at
+# runtime. plugin.json ships only in the Claude layout: flox-agent-layout.sh
+# copies the whole plugin for claude, but codex, pi and opencode get bare
+# skill directories with no plugin root, so a relative lookup resolves for
+# one agent in four. Held to plugin.json by test_invocation_source.py, which
+# reads both and fails when they drift.
+#
+# Dashes because dot is the hierarchy separator: a consumer truncating to
+# three fields coalesces every version of this skill.
+SKILL_VERSION = "1-1-0"
+INVOCATION_SOURCE = f"agentic.skill.floxify.{SKILL_VERSION}"
+
+
+def _tag_invocation_source(environ=None):
+    """Append this skill's tag to FLOX_INVOCATION_SOURCE.
+
+    Idempotent: re-importing, or running under a parent that already set
+    this exact tag, must not repeat it — the CLI unions the list, but a
+    duplicated entry misreports as two invocations in the raw header.
+    """
+    env = os.environ if environ is None else environ
+    existing = env.get("FLOX_INVOCATION_SOURCE", "")
+    parts = [p for p in existing.split(",") if p]
+    if INVOCATION_SOURCE not in parts:
+        parts.append(INVOCATION_SOURCE)
+    env["FLOX_INVOCATION_SOURCE"] = ",".join(parts)
+
+
+_tag_invocation_source()
 
 HARD = "hard"
 ADVISORY = "advisory"
