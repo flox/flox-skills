@@ -110,7 +110,16 @@ cudatoolkit.systems = ["aarch64-linux", "x86_64-linux"]
 
 ## Cross-Platform GPU Development
 
-Dual CUDA/CPU packages for portability (Linux gets CUDA, macOS gets CPU fallback):
+CUDA does not exist on macOS, so the primary shape for a CUDA environment
+is to LIMIT it to Linux at the environment level:
+
+```toml
+[options]
+systems = ["x86_64-linux", "aarch64-linux"]
+```
+
+When the team also develops on Apple-silicon Macs, add a CPU fallback
+instead (Linux gets CUDA, macOS gets CPU):
 
 ```toml
 [install]
@@ -119,9 +128,9 @@ cuda-pytorch.pkg-path = "flox-cuda/python3Packages.torch"
 cuda-pytorch.systems = ["x86_64-linux", "aarch64-linux"]
 cuda-pytorch.priority = 1
 
-## Non-CUDA packages (macOS + Linux fallback)
+## Non-CUDA fallback (Apple-silicon macOS)
 pytorch.pkg-path = "python313Packages.pytorch"
-pytorch.systems = ["x86_64-darwin", "aarch64-darwin"]
+pytorch.systems = ["aarch64-darwin"]
 pytorch.priority = 6                     # Lower priority
 ```
 

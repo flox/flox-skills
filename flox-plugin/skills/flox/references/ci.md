@@ -210,10 +210,32 @@ which is the failure this section exists to prevent.
 | `uses: flox/install-flox-action@v2` | Moving tag; supply-chain risk | Pin the full SHA |
 | A made-up 40-character SHA | Fails at `uses:` resolution, and looks correct | Read it from the releases page or `git ls-remote` |
 
+## Build and publish jobs
+
+This file covers running CI steps *inside* an environment. Two related jobs
+have their own references: a `flox build <target>` verification job (which
+needs no activation at all) is specified in `references/builds.md` § The Build
+Job Travels With the Target, and publishing from CI in `references/publish.md`
+§ Continuous Integration Publishing.
+
 ## Other CI systems
 
-The same split applies. Provide Flox in the runner image, via the platform's
-package manager or a prebuilt image, rather than piping an installer into a
-shell at job time. Then enter the environment once per script rather than per
-line — `flox activate -- <interpreter> <script>`, or by making the script's
-first action an activation.
+GitHub Actions is this file's worked example, not a recommendation — a repo's
+existing CI system is the one to integrate with. The official integrations:
+
+| System | Integration |
+|---|---|
+| GitHub Actions | `flox/install-flox-action` + `flox/activate-action` (above) |
+| CircleCI | The `flox/orb` orb — `flox/install` and `flox/activate` steps |
+| GitLab CI | Run jobs in the `ghcr.io/flox/flox` container image; plain `flox` CLI commands from there |
+
+Community integrations exist for other systems (e.g. Buildkite plugins) —
+unofficial, so read the plugin before recommending it, and prefer the generic
+pattern below when in doubt.
+
+For anything else, the same install-is-not-activation split applies. Provide
+Flox in the runner image, via the platform's package manager or a prebuilt
+image, rather than piping an installer into a shell at job time. Then enter
+the environment once per script rather than per line —
+`flox activate -- <interpreter> <script>`, or by making the script's first
+action an activation.
