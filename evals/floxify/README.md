@@ -21,8 +21,9 @@ They are unrelated.
 
 ## What it measures
 
-Four registries: three grade the dev-environment manifest at rising levels
-of realism, and the fourth (`build.jsonl`) measures the build step beyond it.
+Five registries: three grade the dev-environment manifest at rising levels
+of realism, `build.jsonl` measures the build step beyond it, and
+`migrate.jsonl` verifies the migrate-step CI-wiring guidance is followed.
 
 | Registry | Runner | Input | Gate policy |
 |---|---|---|---|
@@ -30,6 +31,7 @@ of realism, and the fourth (`build.jsonl`) measures the build step beyond it.
 | `stretch.jsonl` (6) | `run_floxify.py --tasks stretch.jsonl` | Known-hard and conversion-mode fixtures under `fixtures/` | never gates — every entry is `stretch`-tier |
 | `real-world.jsonl` (8) | `real_world.py` | Real OSS repos cloned at a pinned SHA | never gates — the runner has no `--gate` flag |
 | `build.jsonl` (4) | `build_step.py` | Buildable fixtures, seeded with a known-good dev manifest | never gates — the runner has no `--gate` flag |
+| `migrate.jsonl` (4) | `migrate_mode.py` | go-build fixture + per-task CI configs, driven through migrate with a scripted user | never gates — the runner has no `--gate` flag |
 
 Alongside the outcome runs, this suite owns the evals for the two deterministic
 scripts the skill itself bundles: `detect.py` (grounds the skill's input) and
@@ -70,6 +72,29 @@ Design differences from the other runners, all deliberate:
 ```bash
 python3 build_step.py                 # full registry → results/build.json
 python3 build_step.py --only go-build
+```
+
+## The migrate-mode suite (`migrate_mode.py`)
+
+Exists to satisfy the guidance-eval policy for the CI-wiring guidance:
+the [y/N] offer, the detect-and-conform branches, and the
+never-touch-existing-CI rule all live in migrate step 5, which a plain
+`/floxify <dir>` run never reaches. Each task stages the go-build
+fixture with a per-task CI config (an existing GitHub workflow, a
+`.gitlab-ci.yml`, or nothing), `git init`s it, and drives one headless
+agent through the whole conversation with a scripted user
+(`/floxify` → `migrate` → the offer answer). Grading is deterministic
+and covers the guidance's three claims: **consent** (the offer question
+appears in the transcript; a "n" produced no file), **conform** (a new
+`flox.yml` with the install action for GitHub Actions; a proposed
+snippet — never an edit — for GitLab; a which-CI question when nothing
+was detected), and **untouched** (every pre-existing CI file is
+byte-identical, checked by digest). Never gates; the check functions are
+gated by `tests/test_migrate_mode.py`.
+
+```bash
+python3 migrate_mode.py               # full registry → results/migrate.json
+python3 migrate_mode.py --only migrate-gh-yes
 ```
 
 ## How a run works
@@ -342,7 +367,7 @@ to mean anything yet.
 
 | Path | What |
 |---|---|
-| `synthetic.jsonl`, `stretch.jsonl`, `real-world.jsonl`, `build.jsonl` | The four registries |
+| `synthetic.jsonl`, `stretch.jsonl`, `real-world.jsonl`, `build.jsonl`, `migrate.jsonl` | The five registries |
 | `fixtures/<id>/` | Input repos, shipping no `.flox/`. Build-tier fixtures (`go-build`, `node-build`) also carry a `seed-manifest.toml` that `build_step.py` installs before the agent runs — it is stripped from the staged tree |
 | `expected/<id>.toml` | Reference manifest for the judge. **Not universal**: `script-started-postgres` has none, and `run_floxify.py` silently substitutes the literal string `"(no gold available)"` into the judge prompt, so that fixture is graded against a placeholder and its judge score is not comparable to the other six. **Dual use**: `rust-cargo.toml` and `python-uv.toml` are ALSO `build.jsonl` seed manifests, so an edit made for judge-grading reasons changes what the build tier seeds — `test_build_step.py` enforces that seeds carry no `[build]` section and must keep activating |
 | `expected/<id>-notes.md` | Provenance for a real-world reference: every pin traced to its source file, plus the `flox show` / `flox search` log that confirmed it |

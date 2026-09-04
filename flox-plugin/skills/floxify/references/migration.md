@@ -133,12 +133,18 @@ On a yes, conform to what you found:
 
 - **Single-file systems with an official Flox integration** (GitLab CI,
   CircleCI) — there is no standalone file to add; the check goes inside
-  config the maintainers own. Compose the job in that system's idiom (the
-  `flox/orb` orb for CircleCI; a job on the `ghcr.io/flox/flox` image for
-  GitLab — the flox skill's `references/ci.md` § Other CI systems is the
-  source of truth), show the exact snippet, and ask before inserting it.
-  If the user declines the edit, hand them the snippet in the summary
-  instead.
+  config the maintainers own, so this branch has TWO consents, and they
+  never share a message. The step-opening [y/N] covered composing only:
+  on that yes, compose the job in the system's idiom (the `flox/orb` orb
+  for CircleCI; a job on the `ghcr.io/flox/flox` image for GitLab — the
+  flox skill's `references/ci.md` § Other CI systems is the source of
+  truth) and show the exact snippet. Then STOP and ask a second,
+  file-naming question on its own — "Insert this into `.gitlab-ci.yml`?
+  [y/N]" — and edit only on a yes to THAT. Bundling the snippet with the
+  step-opening offer turns one yes into an unconsented edit of the
+  maintainers' file (observed live in the migrate eval). Declined, or no
+  answer: the file stays byte-identical and the snippet goes under Next
+  steps in the summary.
 
 - **Everything else** (Buildkite, Jenkins, Woodpecker, …) — no official
   integration; community ones exist for some (e.g. Buildkite plugins) but
