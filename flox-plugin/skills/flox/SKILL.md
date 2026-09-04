@@ -35,7 +35,7 @@ authoritative; use them inline without opening a reference file.
 - `[options] systems = ["x86_64-linux", "aarch64-linux", …]` constrains the
   whole environment to specific platforms.
 
-**Manifest schema versions** — depth in `references/schema-versions.md`
+**Manifest schema versions** — depth in [references/schema-versions.md](references/schema-versions.md)
 - Every manifest declares one schema key on its very first line: the legacy
   `version = 1`, **or** `schema-version = "<X.Y.Z>"` in place of it. The two
   are mutually exclusive; a manifest carrying both is a parse error.
@@ -76,7 +76,7 @@ authoritative; use them inline without opening a reference file.
   are not available in the interactive shell.
 - Python venvs live at `$FLOX_ENV_CACHE/venv` (local-only, survives rebuilds).
 
-**Builds** — depth in `references/builds.md`
+**Builds** — depth in [references/builds.md](references/builds.md)
 - Hermetic build: `sandbox = "pure"` in `[build.<name>]` — always a string,
   NOT `sandbox = true`. The full enum is
   `"off" | "warn" | "enforce" | "pure"`; `"warn"` and `"enforce"` additionally
@@ -112,7 +112,7 @@ authoritative; use them inline without opening a reference file.
 - `pkg-path = "darwin.apple_sdk.frameworks.<Name>"` (e.g. `…IOKit`), scoped with
   `.systems = ["x86_64-darwin", "aarch64-darwin"]`.
 
-**Services** — depth in `references/services.md`
+**Services** — depth in [references/services.md](references/services.md)
 - A self-daemonizing process needs `is-daemon = true` and a `shutdown.command`
   in its `[services.<name>]` block, not just `command`.
 - **"make this environment auto-start its services" / "start the services
@@ -139,17 +139,17 @@ authoritative; use them inline without opening a reference file.
   service* auto-start" still means this one env-wide key (say so). Default is
   off; `flox activate --no-start-services` overrides it for one activation.
 
-**Sharing / compose / layer** — depth in `references/sharing.md`
+**Sharing / compose / layer** — depth in [references/sharing.md](references/sharing.md)
 - Build-time compose (merge into one definition): `[include]` with
   `environments = [{ remote = "org/env" }]`.
 - Runtime layering (both active at once, order = precedence):
   `flox activate -r org/a -- flox activate -r org/b`.
 - One-off remote run without cloning: `flox activate -r org/env`.
 
-**Containers** — depth in `references/containers.md`
+**Containers** — depth in [references/containers.md](references/containers.md)
 - `flox containerize --runtime docker` (or `-f file.tar`) — no Dockerfile.
 
-**CI (GitHub Actions)** — depth in `references/ci.md`
+**CI (GitHub Actions)** — depth in [references/ci.md](references/ci.md)
 - `flox/install-flox-action` **installs the CLI and does not activate anything.**
   It has no input for running a command in an environment. After it runs, steps
   are still on the bare runner.
@@ -196,29 +196,29 @@ authoritative; use them inline without opening a reference file.
 
 - **Sharing, composition & layering** — composing environments via `[include]`,
   runtime layering, remote environments, push/pull, FloxHub, team collaboration
-  → read `references/sharing.md`
+  → read [references/sharing.md](references/sharing.md)
 - **Services** — background processes, daemons, databases, logging, service
-  debugging → read `references/services.md`
+  debugging → read [references/services.md](references/services.md)
 - **Builds & packaging** — manifest builds, Nix-expression builds, sandbox
-  modes, multi-stage builds, packaging assets → read `references/builds.md`
+  modes, multi-stage builds, packaging assets → read [references/builds.md](references/builds.md)
 - **Containers** — containerizing environments with Docker/Podman, OCI
-  exports, multi-stage container builds, deployment → read `references/containers.md`
+  exports, multi-stage container builds, deployment → read [references/containers.md](references/containers.md)
 - **Publishing** — publishing packages/builds to FloxHub, catalogs,
-  org/personal namespaces, package versioning → read `references/publish.md`
+  org/personal namespaces, package versioning → read [references/publish.md](references/publish.md)
 - **CI** — running steps inside an activated environment on GitHub Actions and
   other CI systems, install-vs-activate, action selection, SHA pinning
-  → read `references/ci.md`
+  → read [references/ci.md](references/ci.md)
 - **CUDA / GPU** — NVIDIA CUDA setup, GPU computing, deep-learning
-  frameworks, cuDNN, cross-platform GPU/CPU development → read `references/cuda.md`
+  frameworks, cuDNN, cross-platform GPU/CPU development → read [references/cuda.md](references/cuda.md)
 - **Manifest schema versions** — what each schema gates, when flox
   forward-migrates a version line on its own (and when it doesn't),
-  `minimum-cli-version` → read `references/schema-versions.md`
+  `minimum-cli-version` → read [references/schema-versions.md](references/schema-versions.md)
 
 ## Working Style & Structure
 
 - Use **modular, idempotent bash functions** in hooks
 - Don't hardcode machine-specific absolute paths in a manifest or hook — they break reproducibility on the next machine. Reach for Flox's environment variables instead: `$FLOX_ENV` for environment-specific runtime dependencies, `$FLOX_ENV_PROJECT` for the project directory, `$FLOX_ENV_CACHE` for persistent local data
-- The exception is a deliberate, project-scoped path that isn't machine-specific state — e.g. a short Unix-socket path like `/tmp/<project>-postgres` (see `references/services.md`), or paths inside a container's own filesystem
+- The exception is a deliberate, project-scoped path that isn't machine-specific state — e.g. a short Unix-socket path like `/tmp/<project>-postgres` (see [references/services.md](references/services.md)), or paths inside a container's own filesystem
 - Name functions descriptively (e.g., `setup_postgres()`)
 - Consider using **gum** for styled output when creating environments for interactive use; this is an anti-pattern in CI
 - Put persistent data/configs in `$FLOX_ENV_CACHE`
@@ -312,7 +312,7 @@ many versions:
   `.flox/pkgs/<name>/default.nix` that calls `<pkg>.overrideAttrs` to bump
   `version` and `src`, run `flox build` (leave `hash = ""` and the build prints
   the real hash to paste back), then `flox publish` so the updated package
-  installs in any environment. Full workflow in `references/builds.md`
+  installs in any environment. Full workflow in [references/builds.md](references/builds.md)
   ("Nix Expression Builds") and the tutorial
   [Using a newer version of a package](https://flox.dev/docs/tutorials/overriding-packages/).
 
@@ -323,9 +323,9 @@ many versions:
 - `[hook]`: Non-interactive setup scripts
 - `[profile]`: Shell-specific functions/aliases
 - `[services]`: Service definitions, plus the env-wide `auto-start` toggle (see
-  `references/services.md`)
-- `[build]`: Reproducible build commands (see `references/builds.md`)
-- `[include]`: Compose other environments (see `references/sharing.md`)
+  [references/services.md](references/services.md))
+- `[build]`: Reproducible build commands (see [references/builds.md](references/builds.md))
+- `[include]`: Compose other environments (see [references/sharing.md](references/sharing.md))
 - `[options]`: Activation mode, supported systems
 
 ## The [install] Section
@@ -438,7 +438,7 @@ of verification.
 - Resolves file conflicts between packages
 - Default: 5
 - Lower number = higher priority wins conflicts
-- **Critical for CUDA packages** (see `references/cuda.md`)
+- **Critical for CUDA packages** (see [references/cuda.md](references/cuda.md))
 
 ### Practical Examples
 
