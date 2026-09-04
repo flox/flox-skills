@@ -11,6 +11,7 @@ Run from the suite root (`evals/floxify/`):
     python3 -m unittest tests.test_invocation_source -v
 """
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -21,6 +22,7 @@ SUITE = HERE.parent
 REPO_ROOT = SUITE.parent.parent
 PLUGIN_JSON = REPO_ROOT / "flox-plugin" / ".claude-plugin" / "plugin.json"
 VERIFY = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
+SKILL_MD = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "SKILL.md"
 
 # No sys_modules_key: nothing here patches by string name, so this gets a
 # private instance rather than competing for the shared "verify" key.
@@ -95,14 +97,47 @@ class TestVersionMatchesPluginJson(unittest.TestCase):
     opencode bare skill dirs with no plugin root). This is the only thing
     keeping the literal honest, so it asserts rather than skips."""
 
-    def test_matches(self):
+    def _plugin_version_dashed(self):
         self.assertTrue(PLUGIN_JSON.is_file(), f"plugin.json not at {PLUGIN_JSON}")
-        version = json.loads(PLUGIN_JSON.read_text())["version"]
+        return json.loads(PLUGIN_JSON.read_text())["version"].replace(".", "-")
+
+    def test_verify_py_matches(self):
+        want = self._plugin_version_dashed()
         self.assertEqual(
-            verify.SKILL_VERSION, version.replace(".", "-"),
+            verify.SKILL_VERSION, want,
             f"verify.py SKILL_VERSION ({verify.SKILL_VERSION}) has drifted from "
-            f"plugin.json version ({version}); update the literal.",
+            f"plugin.json ({want}); update the literal.",
         )
+
+    def test_skill_md_command_blocks_match(self):
+        """SKILL.md's command blocks carry the tag as a literal a model
+        copies, so the version lives there too and drifts the same way."""
+        self.assertTrue(SKILL_MD.is_file(), f"SKILL.md not at {SKILL_MD}")
+        want = self._plugin_version_dashed()
+        found = set(re.findall(r"agentic\.skill\.floxify\.([0-9-]+)",
+                               SKILL_MD.read_text()))
+        self.assertTrue(found, "no agentic.skill.floxify tag in SKILL.md; "
+                               "the command-block prefixes were removed")
+        self.assertEqual(
+            found, {want},
+            f"SKILL.md tags {sorted(found)} disagree with plugin.json ({want})",
+        )
+
+    def test_every_flox_run_block_is_tagged(self):
+        """A `flox run` block without the prefix is an untagged invocation
+        the model will copy verbatim. Guards against one being added later
+        without the tag, which is silent rather than broken."""
+        blocks = [ln for ln in SKILL_MD.read_text().splitlines()
+                  if "flox run -p python313" in ln]
+        self.assertTrue(blocks, "no `flox run -p python313` block found")
+        text = SKILL_MD.read_text()
+        for ln in blocks:
+            with self.subTest(line=ln.strip()[:60]):
+                i = text.index(ln)
+                # the prefix sits on the line above, joined by a backslash
+                preceding = text[:i].rsplit("\n", 2)[-2] if i else ""
+                self.assertIn("FLOX_INVOCATION_SOURCE", preceding,
+                              f"untagged `flox run` block: {ln.strip()[:80]}")
 
 
 if __name__ == "__main__":
