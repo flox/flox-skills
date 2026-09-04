@@ -808,12 +808,13 @@ Valid system values: `"aarch64-darwin"`, `"x86_64-darwin"`, `"aarch64-linux"`, `
 Omit `systems` entirely for packages that work on all platforms.
 
 **A per-package `systems` value must be enabled at the environment level, and
-the default enabled set no longer includes `x86_64-darwin`** (dropped from
-Flox's default as of 1.15 — a fresh `flox init` templates only the other
-three). Naming a non-enabled system in any `<id>.systems` fails activation
-with "specifies disabled or unknown system". So whenever you emit a
-per-package `systems` scope that mentions `x86_64-darwin`, also declare it
-in `[options]`:
+the default enabled set no longer includes `x86_64-darwin`** on Flox >= 1.15:
+naming it in any `<id>.systems` with no `[options] systems` declaration
+fails activation with "specifies disabled or unknown system" — the
+activation behavior verified live, not inferred from `flox init`'s template
+(which corroborates by templating only the other three). So whenever you
+emit a per-package `systems` scope that mentions `x86_64-darwin`, also
+declare it in `[options]`:
 
 ```toml
 [options]

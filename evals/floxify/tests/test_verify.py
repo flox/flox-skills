@@ -1846,12 +1846,15 @@ systems = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
     def test_unpinned_fires_when_no_version_builds_a_declared_system(
         self, mock_run, mock_which,
     ):
-        # nodejs_24 with no .version pinned; default systems (no
-        # [options]) = all four. NONE of its three version rows has an
-        # x86_64-darwin build, so there is no version the resolver could
-        # co-resolve onto -- a real violation, and the case the unpinned
-        # fix must NOT suppress.
-        manifest = '[install]\nnodejs.pkg-path = "nodejs_24"\n'
+        # nodejs_24 with no .version pinned; x86_64-darwin is DECLARED
+        # (it left the default enabled set in flox 1.15, so the default
+        # no longer exercises this path). NONE of its three version rows
+        # has an x86_64-darwin build, so there is no version the resolver
+        # could co-resolve onto -- a real violation, and the case the
+        # unpinned fix must NOT suppress.
+        manifest = ('[install]\nnodejs.pkg-path = "nodejs_24"\n'
+                    '[options]\nsystems = ["aarch64-darwin", "x86_64-darwin", '
+                    '"aarch64-linux", "x86_64-linux"]\n')
         v = verify({}, manifest, check_catalog_live=True)["violations"]
         self.assertEqual(_rules(v), {"catalog-systems-mismatch"})
         self.assertIn("x86_64-darwin", v[0]["message"])
@@ -2375,11 +2378,13 @@ nodejs.pkg-path = "nodejs_24"
 nodejs.systems = [1]
 '''
         v = verify({}, manifest, check_catalog_live=True)["violations"]
-        self.assertEqual(_rules(v),
-                         {"malformed-systems", "catalog-systems-mismatch"})
-        mismatch = [x for x in v if x["rule"] == "catalog-systems-mismatch"][0]
-        self.assertIn("the all-systems default", mismatch["message"])
-        self.assertNotIn("nodejs.systems includes it", mismatch["message"])
+        # Since flox 1.15 the default enabled set has no x86_64-darwin,
+        # so the discarded declaration falls back to a default nodejs_24
+        # CAN cover -- only the malformed-systems finding remains, which
+        # is precisely the field-naming behavior this test pins.
+        self.assertEqual(_rules(v), {"malformed-systems"})
+        malformed = [x for x in v if x["rule"] == "malformed-systems"][0]
+        self.assertIn("nodejs.systems", malformed["message"])
 
     @patch("shutil.which", return_value="/usr/bin/flox")
     @patch(f"{_MODULE_KEY}._run_show_command", side_effect=_mock_show)
@@ -2440,16 +2445,19 @@ systems = ["x86_64-linux"]
     def test_never_built_message_is_exact(self, mock_run, mock_which):
         # The other half of `_uncovered_msg`, held to the same exact-text
         # convention as the split-coverage half above. `nodejs_24` has no
-        # x86_64-darwin build on any row, and no manifest line declares
-        # x86_64-darwin -- the all-systems default does, which the
-        # message now says rather than blaming `options.systems`.
-        manifest = '[install]\nnodejs.pkg-path = "nodejs_24"\n'
+        # x86_64-darwin build on any row. Since flox 1.15 the default
+        # enabled set no longer includes x86_64-darwin, so the system
+        # must be declared for the message to fire -- and the source
+        # clause names the declaring field, options.systems.
+        manifest = ('[install]\nnodejs.pkg-path = "nodejs_24"\n'
+                    '[options]\nsystems = ["aarch64-darwin", "x86_64-darwin", '
+                    '"aarch64-linux", "x86_64-linux"]\n')
         v = verify({}, manifest, check_catalog_live=True)["violations"]
         self.assertEqual(
             v[0]["message"],
             '[install] nodejs.pkg-path = "nodejs_24" has no catalog build for '
-            'x86_64-darwin at ANY version (newest is 24.18.0), but the '
-            'all-systems default (no systems declared anywhere) includes it',
+            'x86_64-darwin at ANY version (newest is 24.18.0), but '
+            'options.systems includes it',
         )
 
     @patch("shutil.which", return_value="/usr/bin/flox")
@@ -2888,8 +2896,10 @@ class TestCatalogUnknownIsScopedToWhatIsBlocked(unittest.TestCase):
         manifest = '[install]\np.pkg-path = "only-one-pkg"\n'
         v = verify({}, manifest, check_catalog_live=True)["violations"]
         self.assertEqual(_rules(v), {"catalog-systems-mismatch"})
+        # Default enabled set (flox >= 1.15): x86_64-darwin is no longer
+        # in it, so only aarch64-darwin is uncovered by default.
         self.assertIn(
-            "has no catalog build for aarch64-darwin, x86_64-darwin at ANY "
+            "has no catalog build for aarch64-darwin at ANY "
             "version (newest is 1.0.0)", v[0]["message"])
 
     def test_both_spellings_of_the_v_prefix_are_non_literal(self):
@@ -2911,8 +2921,8 @@ class TestCatalogUnknownIsScopedToWhatIsBlocked(unittest.TestCase):
         # .systems` sends the reader looking for a line that IS there and
         # is wrong -- the mirror image of blaming a default on
         # `[options]`.
-        manifest = ('[install]\nnodejs.pkg-path = "nodejs_24"\n'
-                    'nodejs.systems = [1]\n[options]\nsystems = [2]\n')
+        manifest = ('[install]\np.pkg-path = "only-one-pkg"\n'
+                    'p.systems = [1]\n[options]\nsystems = [2]\n')
         v = verify({}, manifest, check_catalog_live=True)["violations"]
         mismatch = [x for x in v if x["rule"] == "catalog-systems-mismatch"][0]
         self.assertIn("malformed and discarded", mismatch["message"])

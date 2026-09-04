@@ -286,6 +286,18 @@ class TestClearResults(unittest.TestCase):
             build_step._clear_results(tmpdir)
             self.assertEqual(list(Path(tmpdir).glob("result*")), [])
 
+    def test_symlinked_result_removed_via_unlink_not_rmtree(self):
+        # The shape production always hits: flox build leaves result-<x>
+        # as a symlink to the store; rmtree on a symlink raises OSError.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "store-payload"
+            (target / "bin").mkdir(parents=True)
+            link = Path(tmpdir) / "result-greet"
+            link.symlink_to(target)
+            build_step._clear_results(tmpdir)
+            self.assertFalse(link.is_symlink() or link.exists())
+            self.assertTrue(target.is_dir())  # only the link goes
+
 
 class TestBuildPrompt(unittest.TestCase):
     def test_prompt_carries_the_load_bearing_constraints(self):

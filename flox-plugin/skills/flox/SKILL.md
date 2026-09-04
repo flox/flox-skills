@@ -110,7 +110,9 @@ authoritative; use them inline without opening a reference file.
 
 **macOS frameworks**
 - `pkg-path = "darwin.apple_sdk.frameworks.<Name>"` (e.g. `…IOKit`), scoped with
-  `.systems = ["x86_64-darwin", "aarch64-darwin"]`.
+  `.systems = ["x86_64-darwin", "aarch64-darwin"]` — naming `x86_64-darwin`
+  requires declaring it in `[options] systems` too (Flox >= 1.15; see the
+  `systems` field notes and Platform-Specific Patterns below).
 
 **Services** — depth in `references/services.md`
 - A self-daemonizing process needs `is-daemon = true` and a `shutdown.command`
@@ -434,12 +436,13 @@ of verification.
 - Options: `"x86_64-linux"`, `"x86_64-darwin"`, `"aarch64-linux"`, `"aarch64-darwin"`
 - Defaults to manifest's `options.systems` if omitted
 - Every system named here must be enabled at the environment level, and
-  the DEFAULT enabled set excludes `x86_64-darwin` (dropped as of Flox
-  1.15 — a fresh `flox init` templates only the other three; verified
-  live 2026-09-03). A `<id>.systems` naming it without a matching
-  `[options] systems` declaration fails activation with "specifies
-  disabled or unknown system" — see the note under Platform-Specific
-  Patterns below
+  the DEFAULT enabled set excludes `x86_64-darwin` on Flox >= 1.15: a
+  `<id>.systems` naming it without a matching `[options] systems`
+  declaration fails activation with "specifies disabled or unknown
+  system" (verified live on 1.15.0, 2026-09-03 — the activation
+  behavior itself, not inferred from `flox init`'s template, which
+  merely corroborates by templating only the other three). See the note
+  under Platform-Specific Patterns below
 
 **priority**
 - Resolves file conflicts between packages

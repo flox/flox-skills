@@ -40,7 +40,7 @@ scripts the skill itself bundles: `detect.py` (grounds the skill's input) and
 
 ## The build-step suite (`build_step.py`)
 
-The other three registries measure the skill's stated job: the dev
+The three manifest registries measure the skill's stated job: the dev
 environment. `build_step.py` measures the step beyond it — can an agent with
 the flox skill's build guidance author a `[build.*]` target whose
 `flox build` produces a WORKING artifact? The question exists because the
@@ -85,12 +85,17 @@ fixture with a per-task CI config (an existing GitHub workflow, a
 agent through the whole conversation with a scripted user
 (`/floxify` → `migrate` → the offer answer). Grading is deterministic
 and covers the guidance's three claims: **consent** (the offer question
-appears in the transcript; a "n" produced no file), **conform** (a new
-`flox.yml` with the install action for GitHub Actions; a proposed
-snippet — never an edit — for GitLab; a which-CI question when nothing
-was detected), and **untouched** (every pre-existing CI file is
-byte-identical, checked by digest). Never gates; the check functions are
-gated by `tests/test_migrate_mode.py`.
+appears in the agent's OWN output — tool_results are excluded from
+grading, because the guidance file the agent reads contains every phrase
+being grepped for; a "n" produces no new CI file anywhere in the tree,
+checked against a pre-run snapshot), **conform** (a new `flox.yml` with
+the install action for GitHub Actions; a proposed snippet — never an
+edit — for GitLab; a which-CI question when nothing was detected), and
+**untouched** (every pre-existing CI file byte-identical by digest, and
+the migration commit must actually contain `.flox/env/manifest.toml`).
+Transcripts persist under `results/streams/<out-stem>/<task-id>.txt`,
+keyed to the summary file so runs never overwrite each other. Never
+gates; the check functions are gated by `tests/test_migrate_mode.py`.
 
 ```bash
 python3 migrate_mode.py               # full registry → results/migrate.json
@@ -369,7 +374,7 @@ to mean anything yet.
 |---|---|
 | `synthetic.jsonl`, `stretch.jsonl`, `real-world.jsonl`, `build.jsonl`, `migrate.jsonl` | The five registries |
 | `fixtures/<id>/` | Input repos, shipping no `.flox/`. Build-tier fixtures (`go-build`, `node-build`) also carry a `seed-manifest.toml` that `build_step.py` installs before the agent runs — it is stripped from the staged tree |
-| `expected/<id>.toml` | Reference manifest for the judge. **Not universal**: `script-started-postgres` has none, and `run_floxify.py` silently substitutes the literal string `"(no gold available)"` into the judge prompt, so that fixture is graded against a placeholder and its judge score is not comparable to the other six. **Dual use**: `rust-cargo.toml` and `python-uv.toml` are ALSO `build.jsonl` seed manifests, so an edit made for judge-grading reasons changes what the build tier seeds — `test_build_step.py` enforces that seeds carry no `[build]` section and must keep activating |
+| `expected/<id>.toml` | Reference manifest for the judge. **Not universal**: `script-started-postgres` has none, and `run_floxify.py` silently substitutes the literal string `"(no gold available)"` into the judge prompt, so that fixture is graded against a placeholder and its judge score is not comparable to the other six. **Dual use**: `rust-cargo.toml` and `python-uv.toml` are ALSO `build.jsonl` seed manifests, so an edit made for judge-grading reasons changes what the build tier seeds — `test_build_step.py` enforces valid TOML and the absence of a `[build]` section at unit time; whether a seed still ACTIVATES is checked only at run time by `_seed_env`, surfacing as `unverifiable-env` |
 | `expected/<id>-notes.md` | Provenance for a real-world reference: every pin traced to its source file, plus the `flox show` / `flox search` log that confirmed it |
 | `samples/` | Captured agent stream transcripts and one real run's manifest, parsed by tests. See [`samples/README.md`](samples/README.md) for how each was captured |
 | `baselines/` | `synthetic.json` (read by `--baseline`), `real-world.json` (read by nothing) — not written by a default run |

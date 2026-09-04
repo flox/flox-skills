@@ -113,6 +113,12 @@ Detected <CI system>. Want a CI job that verifies the dev environment —
 flox activate + your own test command — on every PR? [y/N]
 ```
 
+When the table matches NOTHING, the opening question is instead: "No CI
+config detected — which CI does this repo use, if any?" A named system
+re-enters this flow as if detected (offer, then the matching branch
+below); "none" ends the step with no CI files written and the "In CI"
+hint kept in step 7's summary.
+
 The job verifies the DEV environment only: it activates and runs the
 project's own checks inside it. It never runs `flox build` — packaging is a
 separate, deeper step that stays out of onboarding. If the user declines,
@@ -138,9 +144,9 @@ On a yes, conform to what you found:
   on that yes, compose the job in the system's idiom (the `flox/orb` orb
   for CircleCI; a job on the `ghcr.io/flox/flox` image for GitLab — the
   flox skill's `references/ci.md` § Other CI systems is the source of
-  truth) and show the exact snippet. Then STOP and ask a second,
-  file-naming question on its own — "Insert this into `.gitlab-ci.yml`?
-  [y/N]" — and edit only on a yes to THAT. Bundling the snippet with the
+  truth) and show the exact snippet. Then STOP and ask a second question
+  on its own, one that names the file being edited — "Insert this into
+  `.gitlab-ci.yml`? [y/N]" — and edit only on a yes to THAT. Bundling the snippet with the
   step-opening offer turns one yes into an unconsented edit of the
   maintainers' file (observed live in the migrate eval). Declined, or no
   answer: the file stays byte-identical and the snippet goes under Next
@@ -152,12 +158,6 @@ On a yes, conform to what you found:
   here: show the generic pattern (Flox in the runner image, then
   `flox activate -- <check command>`, per the flox skill's
   `references/ci.md` § Other CI systems) and let the user place it.
-
-- **No CI config at all** — ask rather than assume: "No CI config detected —
-  which CI does this repo use, if any?" If the answer is GitHub Actions (or
-  the repo's remote is on github.com and the user wants it), write the
-  workflow file above; otherwise leave the "In CI" hint in step 7's summary
-  and move on.
 
 Whichever branch you take, `<check command>` is the project's own test or
 build invocation, which Phase 1 already read from its existing CI config,
@@ -216,9 +216,14 @@ Next steps:
 ─────────────────────────────────────────────────────────────────
 ```
 
-Include the CI line only when step 5 wrote or edited a file. When step 5
-produced a snippet the user will place themselves, put the snippet under Next
-steps. When step 5 ended with no CI change at all, append this instead:
+Include the CI line only when step 5 wrote or edited a file. When a workflow
+file was written, also append one line to the summary: pushing this commit
+needs a git credential with the `workflow` scope — a PAT without it is
+rejected at push time ("refusing to allow a Personal Access Token to create
+or update workflow"), which lands AFTER floxify has reported success and
+reads like the user's own push breaking. When step 5 produced a snippet the
+user will place themselves, put the snippet under Next steps. When step 5
+ended with no CI change at all, append this instead:
 
 ```
   In CI (GitHub Actions, GitLab, CircleCI, etc.):
