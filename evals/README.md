@@ -98,9 +98,12 @@ something a runner does on its own. `floxify/baselines/real-world.json` has no
 reader at all: `real_world.py` has no `--baseline` flag and no regression diff,
 so it is a snapshot a human compares by hand.
 
-`floxify/` keeps its three registries (`synthetic.jsonl`, `stretch.jsonl`,
-`real-world.jsonl`) at the suite root rather than under `tasks/`; each runner's
-`--tasks` / `--registry` default points at the right one.
+`floxify/` keeps its five registries (`synthetic.jsonl`, `stretch.jsonl`,
+`real-world.jsonl`, `build.jsonl`, `migrate.jsonl`) at the suite root rather
+than under `tasks/`; each runner's `--tasks` / `--registry` default points at
+the right one. The two newest are the costliest per task: `build_step.py`
+runs one agent plus a from-scratch `flox build`, and `migrate_mode.py` runs a
+full multi-turn conversation (three or more agent calls per task).
 
 ## Deterministic vs probabilistic
 

@@ -105,6 +105,14 @@ HARD = "hard"
 ADVISORY = "advisory"
 
 ALL_SYSTEMS = {"aarch64-darwin", "aarch64-linux", "x86_64-darwin", "x86_64-linux"}
+# What an environment targets when [options].systems is ABSENT. Not the
+# same set as ALL_SYSTEMS: flox >= 1.15 dropped x86_64-darwin from the
+# default enabled set (verified live 2026-09-03 — naming it in
+# <id>.systems with no [options] declaration fails activation with
+# "specifies disabled or unknown system"). ALL_SYSTEMS remains the
+# catalog-notation universe: a `flox show` row with no parenthetical
+# means available on all four.
+DEFAULT_ENABLED_SYSTEMS = {"aarch64-darwin", "aarch64-linux", "x86_64-linux"}
 
 DISCLAIMER = (
     "verify.py checks the manifest against what detect.py found in this "
@@ -1568,9 +1576,9 @@ def _systems_source(install_id, raw_entry_systems, raw_default_systems):
     if _usable_systems(raw_default_systems):
         return "options.systems"
     if _declared_but_unusable(raw_entry_systems) or _declared_but_unusable(raw_default_systems):
-        return ("the all-systems default (the declared `systems` value was "
+        return ("the default enabled set (the declared `systems` value was "
                 "malformed and discarded)")
-    return "the all-systems default (no systems declared anywhere)"
+    return "the default enabled set (no systems declared anywhere)"
 
 
 def _uncovered_msg(install_id, pkg_path, declared_systems, resolution,
@@ -1725,11 +1733,12 @@ def check_catalog(manifest, flox_bin="flox", live=True, timeout=30):
     options = _table(manifest, "options")
     raw_default_systems = options.get("systems")
     default_systems = _coerce_systems(
-        raw_default_systems, ALL_SYSTEMS,
+        raw_default_systems, DEFAULT_ENABLED_SYSTEMS,
         on_malformed=lambda: violations.append(violation(
             "malformed-systems",
             f"[options].systems = {raw_default_systems!r} is not a list "
-            f"of system strings -- using all systems as the default",
+            f"of system strings -- using the default enabled set "
+            f"(flox >= 1.15: no x86_64-darwin)",
         )),
     )
 

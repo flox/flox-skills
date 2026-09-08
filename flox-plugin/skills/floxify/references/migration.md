@@ -81,18 +81,115 @@ If `NEEDS_ENTRY`: append to `.gitignore`:
 The `.flox/env/` directory (manifest, lockfile) IS committed — that's the point.
 The `.flox/cache/` directory (venvs, cargo target, etc.) is machine-local and should not be.
 
-**5. Stage and commit**
+**5. Wire CI to exercise the environment**
+
+The commit above makes a standing promise — the README now says `flox activate`
+is the setup command — and nothing in the repo verifies that promise stays true.
+Catalog drift, a hook broken by a dependency bump, a manifest a teammate's change
+no longer satisfies: each lands silently, and the first person to find out is the
+new contributor the environment was meant to protect. The CI job travels with
+the artifact: the workflow ships in the same commit as `.flox/env/`, so the
+promise and its check never separate.
+
+**Detect and conform — never force a CI system on the repo.** The repo's
+existing CI is the place the check belongs; a workflow file for a vendor the
+project doesn't use is clutter at best. Detect first:
+
+| Present in repo | CI system |
+|---|---|
+| `.github/workflows/` | GitHub Actions |
+| `.gitlab-ci.yml` | GitLab CI |
+| `.circleci/config.yml` | CircleCI |
+| `.buildkite/` | Buildkite |
+| `Jenkinsfile` | Jenkins |
+| `.woodpecker.yml`, `azure-pipelines.yml`, `.drone.yml` | Woodpecker / Azure / Drone |
+
+Then OFFER — never write CI config silently, whatever the system. One
+question, in the agent session, naming what was detected and what the job
+verifies:
+
+```
+Detected <CI system>. Want a CI job that verifies the dev environment —
+flox activate + your own test command — on every PR? [y/N]
+```
+
+When the table matches NOTHING, the opening question is instead: "No CI
+config detected — which CI does this repo use, if any?" A named system
+re-enters this flow as if detected (offer, then the matching branch
+below); "none" ends the step with no CI files written and the "In CI"
+hint kept in step 7's summary.
+
+The job verifies the DEV environment only: it activates and runs the
+project's own checks inside it. It never runs `flox build` — packaging is a
+separate, deeper step that stays out of onboarding. If the user declines,
+put the snippet for their system under Next steps in the summary and move on.
+
+On a yes, conform to what you found:
+
+- **GitHub Actions** — the one system where a standalone file conforms
+  cleanly: write `.github/workflows/flox.yml` as a NEW file (existing
+  workflows belong to the maintainers — leave every one untouched; if
+  `flox.yml` itself already exists, stop and ask for a different filename
+  rather than overwriting). The job is the flox skill's
+  `references/ci.md` § Complete workflow with three deltas: name it
+  `Flox`; set `branches:` to the default branch, not an assumed `main` —
+  `git symbolic-ref refs/remotes/origin/HEAD` prints a FULL ref
+  (`refs/remotes/origin/main`), so use its basename, and ask the user if
+  the ref is unset; and make the `run:` block the `<check command>` below.
+
+- **Single-file systems with an official Flox integration** (GitLab CI,
+  CircleCI) — there is no standalone file to add; the check goes inside
+  config the maintainers own, so this branch has TWO consents, and they
+  never share a message. The step-opening [y/N] covered composing only:
+  on that yes, compose the job in the system's idiom (the `flox/orb` orb
+  for CircleCI; a job on the `ghcr.io/flox/flox` image for GitLab — the
+  flox skill's `references/ci.md` § Other CI systems is the source of
+  truth) and show the exact snippet. Then STOP and ask a second question
+  on its own, one that names the file being edited — "Insert this into
+  `.gitlab-ci.yml`? [y/N]" — and edit only on a yes to THAT. Bundling the snippet with the
+  step-opening offer turns one yes into an unconsented edit of the
+  maintainers' file (observed live in the migrate eval). Declined, or no
+  answer: the file stays byte-identical and the snippet goes under Next
+  steps in the summary.
+
+- **Everything else** (Buildkite, Jenkins, Woodpecker, …) — no official
+  integration; community ones exist for some (e.g. Buildkite plugins) but
+  are unofficial — read one before recommending it. Don't write config
+  here: show the generic pattern (Flox in the runner image, then
+  `flox activate -- <check command>`, per the flox skill's
+  `references/ci.md` § Other CI systems) and let the user place it.
+
+Whichever branch you take, `<check command>` is the project's own test or
+build invocation, which Phase 1 already read from its existing CI config,
+Makefile, or package.json scripts (`go test ./...`, `pnpm test`,
+`cargo build`). Prefer the cheapest command that proves the environment
+provides the toolchain. If nothing is detectable, fall back to the runtimes'
+version flags and say so in the summary. The flox skill's `references/ci.md`
+(§ Pinning, § Install is not activation, the custom-shell pattern) is the
+source of truth for the mechanics — read it before writing or proposing CI
+config.
+
+If the repo already has a build target (a `[build.*]` section or
+`.flox/pkgs/*.nix` — floxify doesn't create these, but audit and migrate can
+meet one), leave it out of this step: the question above asked about the dev
+environment only, and a yes to that is not consent for a packaging job. Name
+the target in step 7's summary and point the maintainer at the flox skill's
+`references/builds.md` § The Build Job Travels With the Target — wiring
+build verification is its own separately consented change.
+
+**6. Stage and commit**
 
 ```bash
 cd "$TARGET_DIR"
 git add .flox/env/
 git add .gitignore
 git add README.md   # (or README.rst, CONTRIBUTING.md — whichever was modified)
+git add .github/workflows/flox.yml   # or whichever CI file step 5 wrote/edited, if any
 # If old tool files were git rm'd, they're already staged
 git commit -m "Add Flox development environment"
 ```
 
-**6. Print migration summary**
+**7. Print migration summary**
 
 ```
 ─────────────────────────────────────────────────────────────────
@@ -101,6 +198,8 @@ git commit -m "Add Flox development environment"
 
    Modified:  README.md  ← updated dev setup section
    Added:     .flox/env/manifest.toml
+   Added:     .github/workflows/flox.yml  ← CI runs <check command> inside the environment
+              (or: Modified: .gitlab-ci.yml / .circleci/config.yml — whichever step 5 touched)
    Removed:   devbox.json        ← (or "left in place" for Brewfile / devcontainer)
 
    Commit:    "Add Flox development environment"
@@ -114,11 +213,23 @@ Next steps:
   → teammates: flox activate -r <you>/<project-name>
   → first time? flox auth login
 
-  In CI (GitHub Actions, etc.):
+─────────────────────────────────────────────────────────────────
+```
+
+Include the CI line only when step 5 wrote or edited a file. When a workflow
+file was written, also append one line to the summary: pushing this commit
+requires the `workflow` scope on the user's GitHub authorization — without
+it, GitHub refuses any push that creates or updates a workflow file. That
+refusal lands AFTER floxify has reported success, so it reads like the
+user's own push breaking rather than a consequence of the CI step. When
+step 5 produced a snippet the user will place themselves, put the snippet
+under Next steps. When step 5 ended with no CI change at all, append this
+instead:
+
+```
+  In CI (GitHub Actions, GitLab, CircleCI, etc.):
   → install Flox, then: flox activate -- <your-test-command>
   → see: https://flox.dev/docs/install-flox/install
-
-─────────────────────────────────────────────────────────────────
 ```
 
 Then ask: "Ready to push to origin? I can run `git push -u origin add-flox-environment`."
@@ -128,6 +239,11 @@ Then ask: "Ready to push to origin? I can run `git push -u origin add-flox-envir
 - Never `git push` without explicit user confirmation
 - Never remove Brewfile or `.devcontainer/` — they serve different purposes
 - Always confirm before `git rm` on any file
+- CI is offered, never imposed: every CI change starts with step 5's [y/N]
+  question and conforms to the system the repo already uses (the detection
+  table). Any edit to existing CI config (`.gitlab-ci.yml`,
+  `.circleci/config.yml`, existing workflows) additionally requires showing
+  the snippet and getting an explicit yes
 - If git is not initialized (`git status` fails): skip branch creation, just update
   the README and note: "No git repo found — commit manually when ready"
 - Commit message is always exactly `"Add Flox development environment"` — no variations

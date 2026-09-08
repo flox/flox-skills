@@ -94,10 +94,12 @@ PackageDescriptor:
   the local platform. Read `[options] systems` from the
   manifest. If a package carries its own `.systems`, use
   that list for that descriptor instead. If `[options]
-  systems` is absent the environment targets **all four**
-  (`aarch64-darwin`, `aarch64-linux`, `x86_64-darwin`,
-  `x86_64-linux`) — confirm against `manifest.lock`,
-  where every locked package records its `system`.
+  systems` is absent the environment targets the DEFAULT
+  set — which as of Flox 1.15 is three systems
+  (`aarch64-darwin`, `aarch64-linux`, `x86_64-linux`);
+  `x86_64-darwin` is only targeted when declared
+  explicitly — confirm against `manifest.lock`, where
+  every locked package records its `system`.
 - `version`: the `version` value if present, null
   otherwise
 - Skip packages with a `flake` attribute — those are
