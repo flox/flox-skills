@@ -8,8 +8,8 @@ are already building, such as a CI agent image or a devcontainer.
 ## Installing Flox into an image
 
 **Prefer the official image.** `ghcr.io/flox/flox` ships Flox with a working
-Nix store and needs no setup. Pin a version tag; `latest` and a version tag do
-not currently resolve to the same digest.
+Nix store and needs no setup. Pin a version tag rather than `latest`, so a
+rebuild cannot move the CLI under a build that was passing.
 
 ```dockerfile
 FROM ghcr.io/flox/flox:v1.16.0
@@ -24,8 +24,8 @@ FROM buildkite/agent:3-ubuntu
 USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL https://get.flox.dev | FLOX_VERSION=1.16.0 sh
+    && curl -fsSL https://get.flox.dev | FLOX_VERSION=1.16.0 sh \
+    && rm -rf /var/lib/apt/lists/*
 ```
 
 Pin with `FLOX_VERSION` so the image is reproducible, and do not reconstruct
@@ -70,21 +70,27 @@ RUN mkdir -p /docker-entrypoint.d \
     && printf '%s\n' \
       '#!/usr/bin/env bash' \
       'set -euo pipefail' \
-      'for f in /etc/profile.d/nix*.sh; do [ -e "$f" ] && . "$f"; done' \
-      'daemon="$(command -v nix-daemon || true)"' \
-      '[ -z "$daemon" ] && for p in /nix/var/nix/profiles/default/bin/nix-daemon /usr/bin/nix-daemon; do [ -x "$p" ] && daemon="$p" && break; done' \
-      'if [ -n "$daemon" ] && ! pgrep -x nix-daemon >/dev/null 2>&1; then "$daemon" >/var/log/nix-daemon.log 2>&1 & fi' \
+      'daemon=/usr/sbin/nix-daemon' \
+      'if [ -x "$daemon" ] && ! pgrep -x nix-daemon >/dev/null 2>&1; then' \
+      '  "$daemon" >/var/log/nix-daemon.log 2>&1 &' \
+      'fi' \
       > /docker-entrypoint.d/10-nix-daemon \
     && chmod +x /docker-entrypoint.d/10-nix-daemon
 ```
 
-`nix-daemon` may not be on the entrypoint's `PATH` even when the profile script
-was sourced, hence the explicit fallback paths. Redirect its output: a daemon
-writing to the entrypoint's stdout interleaves with job logs.
+Address the binary by path, not through `PATH` or a profile script. The Flox
+packages move `nix-daemon` to `/usr/sbin` deliberately, because it runs as
+root, and they install nothing into `/etc/profile.d` — so a hook that sources
+`/etc/profile.d/nix*.sh` and then calls `command -v nix-daemon` finds nothing.
+Redirect its output as well: a daemon writing to the entrypoint's stdout
+interleaves with job logs.
 
-`NIX_REMOTE=auto` is still correct here: it uses the daemon socket when one is
-listening and falls back to direct store access when it is not, so the same
-image works whether or not the hook ran.
+`NIX_REMOTE=auto` stays set in this branch, though not for the reason its name
+suggests. `auto` first tests whether the Nix state directory is writable and
+talks to the store directly when it is; only when it is *not* writable does it
+fall back to the daemon socket. Root therefore gets direct access and a
+non-root job gets the daemon, which is precisely why the daemon has to be
+running before the first job starts.
 
 Getting this backwards is the common failure. Setting `NIX_REMOTE=auto` and
 skipping the daemon looks fine in a root shell during `docker build`, then
