@@ -41,9 +41,9 @@ on-activate = '''
 
 **Pinned package manager (`packageManager` field / `engines.pnpm`).** When the
 repo pins an exact pnpm/yarn (`"packageManager": "pnpm@10.24.0"`), search the
-catalog for that EXACT version FIRST — `flox show pnpm_<major>` /
-`flox show yarn-berry`, reading the full version list per
-"Reading `flox show` correctly" above, not just `Latest:`. If the exact patch resolves, install
+catalog for that EXACT version FIRST — `flox show pnpm_<major>` / `flox show
+yarn-berry`, reading the full version list per "Reading `flox show`
+correctly" above, not just `Latest:`. If the exact patch resolves, install
 it directly with `<id>.pkg-path` + `<id>.version` (see "Emitting an exact
 pin" above) — supabase pins `packageManager "pnpm@10.24.0"` and the catalog
 carries `pnpm_10@10.24.0` exactly, so the golden installs it directly with
