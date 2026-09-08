@@ -54,11 +54,70 @@ NEUTRAL_SUFFIX = (
 )
 
 # ---- deterministic hard-checks ---------------------------------------------
-# Flags hallucinated *Flox* install methods (the ai-13 bug). Only a curl|sh that
-# mentions flox counts — a legit `curl … | sh` for some other tool is fine.
-FAKE_INSTALL = re.compile(
-    r"install\.flox\.dev|flox\.dev/install|curl[^\n]*flox[^\n]*\|\s*(ba)?sh", re.I
+# Flags hallucinated *Flox* install methods (the ai-13 bug).
+#
+# This check used to ban the `curl … | sh` SHAPE, because when it was written
+# there was no such installer and `install.flox.dev` was something models
+# invented. Both facts changed (DEV-315): `get.flox.dev` serves the install
+# script, and `install.flox.dev` is a second CloudFront alias for the same
+# object. Banning the shape now fails the correct answer on the 22 tasks that
+# carry this check.
+#
+# So the check allows a known set of ENDPOINTS instead of banning a shape, on
+# two rules:
+#
+#   1. Only a host that serves the install *script* may be piped into a shell.
+#      `flox.dev/install` redirects to the /download/ HTML page, so piping it
+#      is the quiet failure — without -L curl emits nothing and sh exits 0,
+#      which reads as a successful install.
+#   2. No invented `*.flox.dev` host anywhere. `releases.flox.dev` and friends
+#      show up in baselines/ un-piped, so rule 1 alone would miss them.
+#
+# A `curl … | sh` for some other tool is still fine: rule 1 only looks at
+# flox.dev URLs, and rule 2 only at flox.dev hosts.
+REAL_FLOX_HOSTS = frozenset(
+    {
+        "flox.dev",           # docs, /download/, marketing
+        "get.flox.dev",       # the install script
+        "install.flox.dev",   # second alias for the same object (DEV-146)
+        "downloads.flox.dev", # .deb/.rpm/.pkg artifacts and checksums
+    }
 )
+# Only these serve the script itself, so only these may be piped to a shell.
+INSTALL_SCRIPT_HOSTS = frozenset({"get.flox.dev", "install.flox.dev"})
+# Positive form of the same fact, for the task that asks how to install Flox.
+# Naming a package manager is not wrong, but an answer that never mentions the
+# script has not learned what changed.
+_INSTALL_SCRIPT_URL = re.compile(r"https?://(?:get|install)\.flox\.dev", re.I)
+
+_URL = re.compile(r"https?://([A-Za-z0-9][A-Za-z0-9.-]*)", re.I)
+# The shell can sit behind env assignments and/or sudo — `… | FLOX_VERSION=1.14.0 sh`
+# is a form the install page publishes, and a naive `\| sh` would miss it.
+_PIPES_TO_SHELL = re.compile(
+    r"\|\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:sudo\s+)?(?:ba)?sh\b"
+)
+
+
+def _is_flox_host(host):
+    host = host.lower()
+    return host == "flox.dev" or host.endswith(".flox.dev")
+
+
+def _no_fake_install_url(answer):
+    """True (PASS) when every Flox install URL in the answer is a real one."""
+    for line in answer.splitlines():
+        hosts = [h for h in _URL.findall(line) if _is_flox_host(h)]
+        if not hosts:
+            continue
+        # Rule 2: an invented host is wrong however it is used.
+        if any(h.lower() not in REAL_FLOX_HOSTS for h in hosts):
+            return False
+        # Rule 1: piping into a shell demands a host that serves the script.
+        if _PIPES_TO_SHELL.search(line) and any(
+            h.lower() not in INSTALL_SCRIPT_HOSTS for h in hosts
+        ):
+            return False
+    return True
 ABS_PATH = re.compile(r'=\s*"(/home/|/Users/|/usr/local/|/opt/|/root/)', re.I)
 
 # --- hardcoded-secret detection ---------------------------------------------
@@ -720,7 +779,8 @@ def _no_range_version_pin(answer):
 
 
 CHECKS = {
-    "no_fake_install_url": lambda a: not FAKE_INSTALL.search(a),
+    "no_fake_install_url": _no_fake_install_url,
+    "names_install_script": lambda a: bool(_INSTALL_SCRIPT_URL.search(a)),
     "no_abs_paths": lambda a: not ABS_PATH.search(toml_blocks(a)),
     # Every `version` pin is a literal the catalog can be asked about — a
     # semver range is the ladder's last rung and is not verifiable.
