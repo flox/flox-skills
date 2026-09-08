@@ -1,5 +1,99 @@
 # Flox Containerization Guide
 
+Two directions, and they are easy to confuse. Most of this file covers
+`flox containerize`, which turns an environment **into** an image. The section
+directly below covers the opposite: getting the Flox CLI **into** an image you
+are already building, such as a CI agent image or a devcontainer.
+
+## Installing Flox into an image
+
+**Prefer the official image.** `ghcr.io/flox/flox` ships Flox with a working
+Nix store and needs no setup. Pin a version tag; `latest` and a version tag do
+not currently resolve to the same digest.
+
+```dockerfile
+FROM ghcr.io/flox/flox:v1.16.0
+```
+
+**When the base image is not yours to choose** — a vendor's CI agent image,
+say — run the install script in the build:
+
+```dockerfile
+FROM buildkite/agent:3-ubuntu
+
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL https://get.flox.dev | FLOX_VERSION=1.16.0 sh
+```
+
+Pin with `FLOX_VERSION` so the image is reproducible, and do not reconstruct
+the download by hand: an architecture `case` statement plus a
+`downloads.flox.dev` URL reimplements what the script already does, against a
+path convention you do not own.
+
+The base image must be glibc. The installer dispatches to `apt`/`dpkg` or
+`dnf`/`yum` and exits with an error when it finds neither, so Alpine — and the
+default musl `buildkite/agent:3` image — is out.
+
+### Then answer one question: does anything run as a non-root user?
+
+During `docker build` there is no `/run/systemd/system` and no running
+`systemctl`, so the installer takes its **single-user** path: Nix is installed
+without a daemon, and the store is owned by root. What you need next depends
+entirely on who runs the container.
+
+**Containers that run as root** (GitLab CI, most CI images, the official Flox
+image) need no daemon. Point Nix at the store directly:
+
+```dockerfile
+ENV NIX_REMOTE=auto
+```
+
+That is the same variable `ghcr.io/flox/flox` sets in its own image config, for
+the same reason.
+
+**Containers whose jobs run as a non-root user** — the Buildkite agent runs
+jobs as `buildkite-agent`, not root — need the daemon after all. A single-user
+store is root-owned, so a non-root user can read it but cannot realise anything
+into it, and any activation that has to fetch a package fails. The daemon runs
+as root and serves unprivileged clients over its socket, which is what makes
+the store usable from a non-root job.
+
+There is no systemd to start it, so start it from whatever the image runs
+before handing off. For the Buildkite agent image, that is `run-parts` over
+`/docker-entrypoint.d`:
+
+```dockerfile
+RUN mkdir -p /docker-entrypoint.d \
+    && printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'set -euo pipefail' \
+      'for f in /etc/profile.d/nix*.sh; do [ -e "$f" ] && . "$f"; done' \
+      'daemon="$(command -v nix-daemon || true)"' \
+      '[ -z "$daemon" ] && for p in /nix/var/nix/profiles/default/bin/nix-daemon /usr/bin/nix-daemon; do [ -x "$p" ] && daemon="$p" && break; done' \
+      'if [ -n "$daemon" ] && ! pgrep -x nix-daemon >/dev/null 2>&1; then "$daemon" >/var/log/nix-daemon.log 2>&1 & fi' \
+      > /docker-entrypoint.d/10-nix-daemon \
+    && chmod +x /docker-entrypoint.d/10-nix-daemon
+```
+
+`nix-daemon` may not be on the entrypoint's `PATH` even when the profile script
+was sourced, hence the explicit fallback paths. Redirect its output: a daemon
+writing to the entrypoint's stdout interleaves with job logs.
+
+`NIX_REMOTE=auto` is still correct here: it uses the daemon socket when one is
+listening and falls back to direct store access when it is not, so the same
+image works whether or not the hook ran.
+
+Getting this backwards is the common failure. Setting `NIX_REMOTE=auto` and
+skipping the daemon looks fine in a root shell during `docker build`, then
+fails only once a real job runs as the agent user.
+
+Once Flox is in the image, entering environments from CI jobs is
+`references/ci.md` — the install-is-not-activation split applies the same way
+inside a container as on a runner.
+
 ## Core Commands
 
 ```bash
