@@ -120,6 +120,9 @@ ask — there's nothing to invoke by hand. For example:
 
 - [`flox-plugin/skills/`](flox-plugin/skills/README.md) — the skill library: what
   each skill covers and how its reference material is organized.
+- [`docs/invocation-source-tags.md`](docs/invocation-source-tags.md) — the
+  `FLOX_INVOCATION_SOURCE` values the skills emit, and how to read them in
+  telemetry.
 - [`evals/`](evals/README.md) — how the skills are measured and the results behind
   the claims above, including the [floxify conversion evals](evals/floxify/README.md)
   and the [agent compatibility matrix](evals/agent-compatibility/README.md), which
