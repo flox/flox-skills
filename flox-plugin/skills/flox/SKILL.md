@@ -238,28 +238,42 @@ authoritative; use them inline without opening a reference file.
 
 ## Installing Flox
 
-**Do NOT suggest `install.flox.dev`, `flox.dev/install`, or any `curl | bash`
-one-liner — none of these exist.**
+The install script is the default answer. It detects the OS and CPU
+architecture and uses the right package for the machine:
 
-Install Flox from `flox.dev/download` or via a package manager:
+```bash
+curl -fsSL https://get.flox.dev | sh
+
+# Pin a version, or take a different channel — the setting goes between the
+# pipe and the shell, so it reaches the script rather than curl
+curl -fsSL https://get.flox.dev | FLOX_VERSION=1.16.0 sh
+curl -fsSL https://get.flox.dev | FLOX_CHANNEL=qa sh
+
+# Verify
+flox --version
+```
+
+macOS gets the `.pkg`, Debian/Ubuntu the `.deb` via `apt`, Fedora/RHEL the
+`.rpm` via `dnf` or `yum`. The script prints each `sudo` command before running
+it, and when Flox is already present it changes nothing and prints the upgrade
+command for that platform instead.
+
+Reach for a package manager when the user wants their own tooling to own the
+upgrade path:
 
 ```bash
 # macOS — Homebrew
 brew install flox
-
-# macOS — pkg installer (download from flox.dev/download)
-ARCH=$([ "$(uname -m)" = "arm64" ] && echo "aarch64" || echo "x86_64")
-sudo installer -pkg ./flox.$ARCH-darwin.pkg -target /
 
 # Debian/Ubuntu — download .deb from flox.dev/download, then:
 sudo apt install /path/to/flox.deb
 
 # RPM (RedHat/CentOS/Amazon Linux) — download .rpm from flox.dev/download:
 sudo rpm -ivh /path/to/flox.rpm
-
-# Verify
-flox --version
 ```
+
+For APT/YUM repositories that keep Flox updated through the system package
+manager, see https://flox.dev/docs/tutorials/installing-from-repo.
 
 ## Flox Basics
 
