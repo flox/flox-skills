@@ -787,8 +787,9 @@ that exact patch, so `nodejs.version = "24.18.0"` is a clean exact match
 whether the versioned `ruby_4_0` pkg-path carries that exact patch or only
 the nearest prior one at the time you run the skill, pin whichever `flox
 show` confirms, and record any gap in the trailing comment the same way
-the mastodon golden's comment does (`# catalog max is <X>; repo pins
-4.0.6 (<N> patch(es) ahead, verify live)`) — don't copy the specific
+the mastodon golden's comment does
+(`# catalog max is <X>; repo pins 4.0.6 (<N> patch(es) ahead, verify live)`) —
+don't copy the specific
 numbers from this guidance as if they were current.
 
 **Platform-conditional packages** — when a dependency is only relevant on certain
@@ -1034,12 +1035,19 @@ Wait for the user's response, then:
 
 **Monorepo** (pnpm-workspace.yaml, nx.json, turborepo.json, multiple go.mod files):
 Set up root environment with shared runtimes. Note in report:
-`This is a monorepo. Root environment covers shared runtimes.
-Individual services may benefit from their own — run /floxify <service-path>`
+
+```
+This is a monorepo. Root environment covers shared runtimes.
+Individual services may benefit from their own — run /floxify <service-path>
+```
 
 **Large pip dependency count (100+):**
-Note: `First activate installs <N> pip packages — takes a few minutes.
-Subsequent activates check the lockfile and skip if nothing changed.`
+Note:
+
+```
+First activate installs <N> pip packages — takes a few minutes.
+Subsequent activates check the lockfile and skip if nothing changed.
+```
 
 **Package not found in Flox catalog:**
 In ✗ section:
