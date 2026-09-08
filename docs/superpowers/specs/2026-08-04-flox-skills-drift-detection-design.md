@@ -1,8 +1,8 @@
-# AI-512 — Skill drift detection (working doc / paused design)
+# AI-512 — Skill drift detection (spec)
 
-**Status:** 🟡 ON HOLD — brainstorming done, design agreed, spec not yet finalized. Switching gears; resume from "Open questions / resume point" at the bottom.
+**Status:** 🟢 SPEC — both open questions answered 2026-09-08; ready to hand to `writing-plans`. Layer L0 is the deliverable.
 **Ticket:** [AI-512](https://linear.app/floxdotdev/issue/AI-512) — "Set up automation to detect drift between Flox docs, features, and skills" (Todo, 2 pts, project "Flox's Skills: Consolidate + Eval-Gate + Retire MCP", assignee Alan).
-**Last updated:** 2026-08-04.
+**Last updated:** 2026-09-08.
 
 ---
 
@@ -46,7 +46,9 @@ The existing `skill_toml_lint.py` only checks that TOML *snippets parse* — it 
 - **Checker** `evals/drift/check.py` — reads registry, verifies each claim against local `flox`, reports PASS/DRIFT naming skill file + line. Pure-stdlib, offline.
 - **Suggester** — `--suggest` mode on the checker; deterministic proposed edit where derivable.
 
-**Placement:** new `evals/drift/` suite (own `check.py`, `tasks/`, `tests/`), per the repo's "one directory per suite" convention. Sibling of `skill_toml_lint` (which checks shipped TOML; this checks shipped CLI claims) but spans both `flox` and `floxify` skills, so it earns its own dir. *(OPEN — see §8.)*
+**Placement:** new `evals/drift/` suite (own `check.py`, `tasks/`, `tests/`), per the repo's "one directory per suite" convention. Sibling of `skill_toml_lint` (which checks shipped TOML; this checks shipped CLI claims) but spans both `flox` and `floxify` skills, so it earns its own dir. **Decided 2026-09-08.**
+
+One argument arrived after the original writing and settles it: the `skill-toml-lint` CI job filters on `flox-plugin/skills/flox/**` (`.github/workflows/evals.yml`). A drift checker living in `evals/flox/` would either inherit that filter and never fire on a floxify change, or need a second filter next to it — which is the seam this placement avoids.
 
 ### Registry format (example)
 ```jsonl
@@ -94,11 +96,21 @@ Checker is a pure function of *(registry, flox-help-output)*. Unit tests mock th
 - **No pre-commit framework / no `core.hooksPath`** currently — the local hook is net-new.
 - **Runtime:** `flox activate` once from anywhere in the repo supplies `python3` (pinned `python311`) and `claude`; suites run as plain `python3 …`.
 
-## 8. Open questions / resume point
+## 8. Answered questions
 
-When we pick this back up, the brainstorming skill's next step is **write the finalized spec → self-review → user review → invoke `writing-plans`**. Two questions were still open:
+Both resolved 2026-09-08, each to the option the design recommended.
 
-1. **Placement:** `evals/drift/` as its own suite (recommended), or fold into `evals/flox/` next to `skill_toml_lint`?
-2. **Seed registry size:** start with ~8–10 hand-picked load-bearing claims (recommended) and grow, or aim for fuller CLI-claim coverage from day one?
+1. **Placement: its own `evals/drift/` suite.** Reasoning in §5, plus the CI-filter argument recorded there.
+2. **Seed registry: ~8 to 10 hand-picked load-bearing claims, then grow.** The registry is two-way linked, so each entry carries maintenance in both directions: the claim is verified against live flox, and its `quote` is verified to still exist in the skill file. Ten entries that stay true are worth more than forty that rot, and a stale entry is itself a finding rather than silent noise.
 
-Answer those two, then this doc becomes the spec (drop the "ON HOLD" banner, resolve the OPEN markers) and we hand off to `writing-plans`.
+## 9. What changed since this was written
+
+Five weeks passed between the design and the decisions. Two things to check before writing code rather than assume.
+
+**The `x86_64-darwin` default-systems change is the shape of drift v1 will NOT catch.** Flox 1.15 dropped `x86_64-darwin` from the default enabled set, which made a per-package `systems` entry naming it fail activation. `flox/SKILL.md` said otherwise and the error surfaced through a failing build eval rather than through a drift check. That claim is neither `command_exists` nor `flag_exists`; it lives in the deferred `enum_values` kind. Worth stating plainly so v1's coverage is not oversold: the deterministic surface gate catches commands and flags, and the manifest-semantics claims that actually broke this quarter are a later layer.
+
+**The `schema_version_current` limit still stands.** §6 records that a fresh `flox init` writes a commented template with no readable version line. Re-confirmed against flox 1.14.0 on 2026-09-08. The schema-version table in `flox/SKILL.md` therefore stays unchecked in v1, which is the second known gap.
+
+## 10. Resume point
+
+The design is settled and the deliverable is layer L0 from §5: registry, checker, `command_exists` and `flag_exists`, `--suggest`, unit tests written RED first, and a seed registry of roughly ten real claims. Next step is `writing-plans`.
