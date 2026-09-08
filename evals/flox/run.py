@@ -68,8 +68,11 @@ NEUTRAL_SUFFIX = (
 #
 #   1. Only a host that serves the install *script* may be piped into a shell.
 #      `flox.dev/install` redirects to the /download/ HTML page, so piping it
-#      is the quiet failure — without -L curl emits nothing and sh exits 0,
-#      which reads as a successful install.
+#      installs nothing. Measured, it fails loudly rather than silently: the
+#      302 body is 25 bytes and `sh` exits 127 ("Redirecting: command not
+#      found"), and following the redirect pipes HTML and exits 2. So this
+#      rule grades a wrong answer, not a dangerous one — worth failing a task
+#      over, not worth a warning in the skill.
 #   2. No invented `*.flox.dev` host anywhere. `releases.flox.dev` and friends
 #      show up in baselines/ un-piped, so rule 1 alone would miss them.
 #

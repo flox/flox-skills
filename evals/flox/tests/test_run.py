@@ -1337,9 +1337,9 @@ class TestNoFakeInstallUrl(unittest.TestCase):
 
     # --- invented endpoints ----------------------------------------------
     def test_rejects_piping_the_download_page(self):
-        # `flox.dev/install` redirects to the /download/ HTML page. Piping it
-        # into a shell is the quiet failure: without -L curl emits nothing and
-        # sh exits 0, so it looks like a successful install.
+        # `flox.dev/install` redirects to the /download/ HTML page, so piping
+        # it installs nothing. Measured: sh exits 127 without -L, 2 with it.
+        # A wrong answer rather than a dangerous one, but still wrong.
         self.assertFalse(self.check("curl -fsSL https://flox.dev/install | sh"))
 
     def test_rejects_an_invented_path_on_a_real_host(self):
