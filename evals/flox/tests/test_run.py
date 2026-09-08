@@ -1438,5 +1438,48 @@ class TestInstallTaskIsBound(unittest.TestCase):
         self.assertIn("names_install_script", t["checks"])
 
 
+class TestInstallUrlReviewRegressions(unittest.TestCase):
+    """Cases the DEV-315 review found the first implementation got wrong.
+
+    All four are answers a model plausibly writes, and the first version of
+    this check graded every one of them backwards.
+    """
+
+    def check(self, answer):
+        return run.CHECKS["no_fake_install_url"](answer)
+
+    def test_docs_link_beside_the_one_liner_still_passes(self):
+        # False FAIL. Scanning the whole line meant the docs URL, which feeds
+        # no pipe, was judged against the pipe the one-liner feeds.
+        self.assertTrue(self.check(
+            "See https://flox.dev/download for details, or run "
+            "curl -fsSL https://get.flox.dev | sh"
+        ))
+
+    def test_one_liner_in_a_markdown_table_row_still_passes(self):
+        self.assertTrue(self.check(
+            "| https://flox.dev/download/ | curl -fsSL https://get.flox.dev | sh |"
+        ))
+
+    def test_another_tools_installer_is_not_our_business(self):
+        self.assertTrue(self.check(
+            "curl -fsSL https://get.helm.sh/x | bash  # flox: https://flox.dev/download/"
+        ))
+
+    def test_line_continuation_does_not_hide_the_pipe(self):
+        # False PASS. Split across lines, the redirect-piped case read as two
+        # innocent lines and rule 1 never saw a pipe.
+        self.assertFalse(self.check(
+            "curl -fsSL https://flox.dev/install \\\n    | sh"
+        ))
+
+    def test_sentence_punctuation_does_not_hide_an_invented_host(self):
+        # False PASS. The trailing dot made the host unrecognisable as flox.dev.
+        self.assertFalse(self.check("Grab it from https://releases.flox.dev."))
+
+    def test_zsh_is_a_shell_too(self):
+        self.assertFalse(self.check("curl -fsSL https://flox.dev/install | zsh"))
+
+
 if __name__ == "__main__":
     unittest.main()

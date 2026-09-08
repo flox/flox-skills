@@ -60,7 +60,7 @@ NEUTRAL_SUFFIX = (
 # there was no such installer and `install.flox.dev` was something models
 # invented. Both facts changed (DEV-315): `get.flox.dev` serves the install
 # script, and `install.flox.dev` is a second CloudFront alias for the same
-# object. Banning the shape now fails the correct answer on the 22 tasks that
+# object. Banning the shape now fails the correct answer on the 24 tasks that
 # carry this check.
 #
 # So the check allows a known set of ENDPOINTS instead of banning a shape, on
@@ -73,8 +73,9 @@ NEUTRAL_SUFFIX = (
 #   2. No invented `*.flox.dev` host anywhere. `releases.flox.dev` and friends
 #      show up in baselines/ un-piped, so rule 1 alone would miss them.
 #
-# A `curl … | sh` for some other tool is still fine: rule 1 only looks at
-# flox.dev URLs, and rule 2 only at flox.dev hosts.
+# A `curl … | sh` for some other tool is still fine: both rules skip any host
+# that is not flox.dev, and rule 1 judges a host only against the pipe that
+# host's own URL feeds.
 REAL_FLOX_HOSTS = frozenset(
     {
         "flox.dev",           # docs, /download/, marketing
@@ -90,12 +91,17 @@ INSTALL_SCRIPT_HOSTS = frozenset({"get.flox.dev", "install.flox.dev"})
 # script has not learned what changed.
 _INSTALL_SCRIPT_URL = re.compile(r"https?://(?:get|install)\.flox\.dev", re.I)
 
-_URL = re.compile(r"https?://([A-Za-z0-9][A-Za-z0-9.-]*)", re.I)
-# The shell can sit behind env assignments and/or sudo — `… | FLOX_VERSION=1.14.0 sh`
+# Captures the HOST, not the whole URL — every rule below reasons about hosts.
+_URL_HOST = re.compile(r"https?://([A-Za-z0-9][A-Za-z0-9.-]*)", re.I)
+# The shell can sit behind env assignments and/or sudo — `… | FLOX_VERSION=1.16.0 sh`
 # is a form the install page publishes, and a naive `\| sh` would miss it.
 _PIPES_TO_SHELL = re.compile(
-    r"\|\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:sudo\s+)?(?:ba)?sh\b"
+    r"\|\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:sudo\s+)?(?:ba|z)?sh\b"
 )
+# A shell command can be split across lines with a trailing backslash. Rejoin
+# before scanning, or `curl … https://flox.dev/install \` + `| sh` reads as two
+# innocent lines and rule 1 never sees a pipe at all.
+_CONTINUATION = re.compile(r"\\\n\s*")
 
 
 def _is_flox_host(host):
@@ -105,19 +111,30 @@ def _is_flox_host(host):
 
 def _no_fake_install_url(answer):
     """True (PASS) when every Flox install URL in the answer is a real one."""
-    for line in answer.splitlines():
-        hosts = [h for h in _URL.findall(line) if _is_flox_host(h)]
-        if not hosts:
-            continue
-        # Rule 2: an invented host is wrong however it is used.
-        if any(h.lower() not in REAL_FLOX_HOSTS for h in hosts):
-            return False
-        # Rule 1: piping into a shell demands a host that serves the script.
-        if _PIPES_TO_SHELL.search(line) and any(
-            h.lower() not in INSTALL_SCRIPT_HOSTS for h in hosts
-        ):
-            return False
+    for line in _CONTINUATION.sub(" ", answer).splitlines():
+        found = list(_URL_HOST.finditer(line))
+        for i, m in enumerate(found):
+            # A trailing dot is sentence punctuation, not part of the host.
+            # Without stripping it, `see https://releases.flox.dev.` reads as
+            # a non-flox host and slips past rule 2 entirely.
+            host = m.group(1).lower().rstrip(".")
+            if not _is_flox_host(host):
+                continue
+            # Rule 2: an invented host is wrong however it is used.
+            if host not in REAL_FLOX_HOSTS:
+                return False
+            # Rule 1: pair each URL with the pipe it actually feeds — the span
+            # running to the next URL — rather than searching the whole line.
+            # One line legitimately carries both the correct one-liner and a
+            # docs link, and judging every host against every pipe failed it.
+            end = found[i + 1].start() if i + 1 < len(found) else len(line)
+            if _PIPES_TO_SHELL.search(line[m.end():end]) and (
+                host not in INSTALL_SCRIPT_HOSTS
+            ):
+                return False
     return True
+
+
 ABS_PATH = re.compile(r'=\s*"(/home/|/Users/|/usr/local/|/opt/|/root/)', re.I)
 
 # --- hardcoded-secret detection ---------------------------------------------
