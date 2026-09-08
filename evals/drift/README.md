@@ -21,6 +21,26 @@ python3 -m unittest discover -s tests -t .
 Deterministic, offline, free. Exit 0 when every claim holds, 1 on drift, 2 on
 a setup error.
 
+## Catch it at edit time
+
+```bash
+git config core.hooksPath .githooks
+```
+
+One command, once per clone. `.githooks/pre-commit` then runs the checker
+whenever a commit touches `flox-plugin/skills/`, and prints the current flox
+surface beside anything stale. The fix is one line, and the person who can
+make it correctly is the one who just edited the sentence.
+
+The hook never blocks for its own reasons. A missing `flox` or `python3` skips
+with a note rather than failing the commit: a gate that blocks because a tool
+is absent teaches people to reach for `--no-verify` by reflex, and then it is
+not a gate. Only a real finding stops a commit, and `git commit --no-verify`
+is there when the finding is the registry's fault rather than the skill's.
+
+Setting `core.hooksPath` replaces any other hooks directory for this clone.
+The repo has no other hooks today, so nothing is displaced.
+
 ## How it works
 
 `tasks/claims.jsonl` holds one load-bearing claim per line, each linked in
