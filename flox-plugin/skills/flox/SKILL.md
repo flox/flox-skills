@@ -244,10 +244,11 @@ architecture and uses the right package for the machine:
 ```bash
 curl -fsSL https://get.flox.dev | sh
 
-# Pin a version, or take a different channel — the setting goes between the
-# pipe and the shell, so it reaches the script rather than curl
-curl -fsSL https://get.flox.dev | FLOX_VERSION=1.16.0 sh
-curl -fsSL https://get.flox.dev | FLOX_CHANNEL=qa sh
+# Pin a version, or take a different channel. The assignment goes AFTER the
+# pipe, so the script receives it — `FLOX_VERSION=… curl … | sh` sets it on
+# curl instead, and installs current stable without complaint.
+curl -fsSL https://get.flox.dev | FLOX_VERSION=<version> sh
+curl -fsSL https://get.flox.dev | FLOX_CHANNEL=<channel> sh
 
 # Verify
 flox --version
@@ -256,10 +257,16 @@ flox --version
 macOS gets the `.pkg`, Debian/Ubuntu the `.deb` via `apt`, Fedora/RHEL the
 `.rpm` via `dnf` or `yum`. The script prints each `sudo` command before running
 it, and when Flox is already present it changes nothing and prints the upgrade
-command for that platform instead.
+command for that platform instead — it is an installer, not an upgrader.
 
-Reach for a package manager when the user wants their own tooling to own the
-upgrade path:
+It refuses rather than guessing on anything else: an existing Nix installation,
+immutable ostree distributions such as Silverblue, openSUSE and SLES, and RPM
+systems with neither `dnf` nor `yum`. Fall back to a package manager there.
+
+Package managers are also the answer when the user wants their own tooling to
+own upgrades — though of these, only Homebrew and the repositories below
+actually do that; a downloaded `.deb` or `.rpm` installs once and is upgraded
+by hand:
 
 ```bash
 # macOS — Homebrew
