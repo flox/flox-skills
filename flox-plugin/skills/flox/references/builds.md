@@ -486,6 +486,89 @@ command = '''
 version.command = "cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version'"
 ```
 
+## The Build Job Travels With the Target
+
+A build target ships with a CI job that runs it: the commit that adds a
+`[build.*]` section or a `.flox/pkgs/*.nix` also adds a job running
+`flox build <target>` from a clean checkout — in whatever CI system the repo
+already uses (detect it from the config files present; `references/ci.md`
+§ Other CI systems lists the official integrations per system). When you
+create a target for someone else's repo, offering that job is part of the
+deliverable — in the same change, not as advice for later, and as an offer
+the maintainer accepts, never a file written silently. If the repo's CI
+system is one you can't cleanly conform to, or the repo has no CI, recommend
+the job and ask the user where it should live rather than imposing a vendor.
+
+**This job is verification, not the release pipeline.** It exists to keep a
+pull request from landing the silent break; how artifacts are produced and
+distributed after merge is a separate concern this job neither performs nor
+forecloses. Flox's direction for that is the Factory — automatic builds once
+a package is registered — so mention it as where build/publish automation is
+headed, but don't present registration as a self-serve step available today,
+and don't tell users their CI is forbidden from building or caching. The
+distinction to keep sharp with users: the dev environment (`flox activate`,
+what floxify sets up, high confidence) and a working built artifact
+(`flox build`, a step deeper with more edge cases) are different promises —
+verify each with its own job, and never let a build failure be someone's
+first Flox experience.
+
+The reason is that the dev loop keeps passing while packaging rots. Two failure
+classes surface ONLY on a from-scratch build:
+
+- **Fetched-deps hash drift.** A Nix expression build pins its dependency
+  closure with a hash (`vendorHash`, `cargoHash`, `npmDepsHash`). Every
+  dependency bump invalidates it, and nothing in the dev loop notices —
+  `go build` and `go test` in the activated environment never consult the
+  hash. The break lands on `main` silently and is discovered by the next
+  person who follows the README's `flox build` instructions.
+- **Sandbox-only gaps.** A tool present in the dev environment (say, `git` on
+  `PATH`, or added at runtime by a `wrapProgram`) is absent from the build's
+  declared inputs, so a `checkPhase` that shells out to it fails only inside
+  the sandbox. Tests pass locally forever; the build is broken the whole time.
+
+The job itself is small — GitHub Actions shown as the worked example, same
+shape in any system (get `flox` onto the runner, run `flox build <target>`).
+This is a complete standalone workflow; when the repo already has a Flox
+workflow (e.g. floxify's `flox.yml`), add just the job block to it instead:
+
+```yaml
+name: Flox build
+
+on:
+  push:
+    branches: [<default branch>]
+  pull_request:
+
+jobs:
+  flox-build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@<full SHA> # <tag>
+      - uses: flox/install-flox-action@<full SHA> # <tag>
+      - run: flox build <target>
+```
+
+- No activation step: `flox build` acts on the environment directory, so it
+  needs `flox` on `PATH`, not the environment's contents — the same
+  install-is-not-activation split `references/ci.md` opens with. Pin the
+  action SHAs per that file's § Pinning.
+- Matrix over the platforms the package already declares — `meta.platforms`
+  for a Nix expression, the manifest's `options.systems` for a manifest
+  build. The job verifies what the package claims to support; it doesn't
+  expand the claim.
+- A green job only *blocks* regressions if the repo makes it a required
+  status check (branch protection). Without that it makes breakage visible,
+  not unmergeable — worth one line in your report when you wire the job for
+  someone else, since flipping that setting is theirs to do.
+
+Publishing from CI is the separate, later step — `references/publish.md`
+§ Continuous Integration Publishing.
+
 ## Debugging Build Issues
 
 ### Common Problems

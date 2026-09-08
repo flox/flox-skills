@@ -117,6 +117,20 @@ def _skill_identity(skill_dir):
 # Pinned model — match run.py for consistency across both harnesses.
 MODEL = "claude-opus-4-8"
 
+# The model/tool-surface/isolation flags every claude invocation in this
+# suite shares. Single source of truth on purpose: migrate_mode.py builds
+# its own resume-capable command from this same list, so an isolation
+# flag added here (the --setting-sources lesson) reaches every runner
+# instead of drifting out of a hand-copied set.
+CLAUDE_AGENT_COMMON_FLAGS = [
+    "--model", MODEL,
+    "--output-format", "stream-json",
+    "--verbose",
+    "--allowedTools", "Bash", "Read", "Write", "Edit", "Skill",
+    "--strict-mcp-config",
+    "--setting-sources", "project,local",
+]
+
 # Mirrors verify.py's own HARD/ADVISORY severity protocol. Not a static
 # import of that constant (verify.py is loaded dynamically per-task, per
 # --skill-dir — see _load_detect_and_verify) — these are the stable
@@ -466,15 +480,7 @@ def _run_claude_agent(prompt, skill_dir, arm="skills", timeout=600, retries=2):
     final envelope; the flag combination was verified live (PR body /
     samples/README.md carry the verification writeup).
     """
-    cmd = [
-        "claude", "-p", prompt,
-        "--model", MODEL,
-        "--output-format", "stream-json",
-        "--verbose",
-        "--allowedTools", "Bash", "Read", "Write", "Edit", "Skill",
-        "--strict-mcp-config",
-        "--setting-sources", "project,local",
-    ]
+    cmd = ["claude", "-p", prompt] + CLAUDE_AGENT_COMMON_FLAGS
     if arm != "baseline":
         cmd += ["--plugin-dir", str(skill_dir)]
     last = "unknown"

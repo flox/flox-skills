@@ -416,6 +416,11 @@ Teams install and reference via `$FLOX_ENV/etc/` or `$FLOX_ENV/share/`.
 
 ## Continuous Integration Publishing
 
+A publish job presumes the build already has its own CI verification — a
+`flox build <target>` job running on every PR, per `references/builds.md`
+§ The Build Job Travels With the Target. Wire that first; a publish-on-main
+job is a poor place to discover a stale `vendorHash`.
+
 ### GitHub Actions Example
 
 ```yaml
