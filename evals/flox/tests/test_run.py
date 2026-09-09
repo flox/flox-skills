@@ -9,6 +9,7 @@ over mocked subprocesses — no claude, no network, no API spend.
 import json
 import subprocess
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import run
@@ -1479,6 +1480,31 @@ class TestInstallUrlReviewRegressions(unittest.TestCase):
 
     def test_zsh_is_a_shell_too(self):
         self.assertFalse(self.check("curl -fsSL https://flox.dev/install | zsh"))
+
+
+class TestAgentRunsAwayFromTheAnswerKey(unittest.TestCase):
+    """The agent must not be able to open tasks/*.jsonl.
+
+    Every arm is allowed the Read tool so the skills arm can follow a skill's
+    reference files. With the harness's own directory as the working
+    directory, that also reaches the registry — the prompt, the rubric and
+    `must_match`. A screened BASELINE did exactly that and said so, then
+    scored 5/5 as a bare model, which reads as "the skill adds nothing".
+    """
+
+    def test_agent_cwd_is_not_the_suite_root(self):
+        self.assertNotEqual(Path(run.AGENT_CWD).resolve(), run.HERE)
+
+    def test_agent_cwd_holds_no_task_registry(self):
+        self.assertEqual(list(Path(run.AGENT_CWD).glob("**/*.jsonl")), [])
+
+    @patch("run.subprocess.run")
+    def test_run_claude_launches_there(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=json.dumps(CLAUDE_JSON), stderr=""
+        )
+        run.run_claude("p", "baseline", ["Read"])
+        self.assertEqual(mock_run.call_args.kwargs["cwd"], run.AGENT_CWD)
 
 
 if __name__ == "__main__":

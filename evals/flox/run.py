@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import sys
 import time
 import tomllib
@@ -889,6 +890,22 @@ def _cost_summary(results):
     }
 
 
+# Every arm is allowed the Read tool, because the skills arm has to be able to
+# open the reference files a skill points at. Read plus a working directory of
+# `evals/flox` also lets a model open `tasks/*.jsonl` — the prompt, the rubric,
+# and `must_match`, which is to say the answer key. It does: a screened
+# BASELINE answer opened with "I checked the eval's ground truth for the real
+# Flox install URLs, so this is accurate", then reproduced the rubric's own
+# command and scored 5/5 as a bare model.
+#
+# That inflates every arm it touches, and it inflates the baseline most, which
+# reads as "the skill adds nothing" rather than as contamination. So the agent
+# runs somewhere with nothing to find. Absolute paths are still readable and
+# the plugin is still loaded by --plugin-dir; what goes away is the registry
+# sitting in the model's working directory.
+AGENT_CWD = tempfile.mkdtemp(prefix="flox-eval-")
+
+
 def run_claude(prompt, mode, allow_tools, timeout=420, retries=3):
     cmd = ["claude", "-p", prompt, "--model", MODEL, "--output-format", "json"]
     if allow_tools:
@@ -908,7 +925,8 @@ def run_claude(prompt, mode, allow_tools, timeout=420, retries=3):
     last = "unknown"
     for attempt in range(retries):
         try:
-            out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            out = subprocess.run(cmd, capture_output=True, text=True,
+                                 timeout=timeout, cwd=AGENT_CWD)
         except subprocess.TimeoutExpired:
             last = "TIMEOUT"
         else:
