@@ -4,7 +4,7 @@ Two directions, and they are easy to confuse. This file is mostly about
 `flox containerize`, which turns an environment **into** an image. For the
 opposite — getting the Flox CLI **into** an image you are already building,
 such as a CI agent image or a devcontainer — see
-[Installing Flox into an image](#installing-flox-into-an-image) at the end.
+[Installing Flox Into an Image](#installing-flox-into-an-image) near the end.
 
 ## Core Commands
 
@@ -475,7 +475,7 @@ docker exec -it <container-id> /bin/bash
 docker exec <container-id> flox list
 ```
 
-## Installing Flox into an image
+## Installing Flox Into an Image
 
 **Prefer the official image.** `ghcr.io/flox/flox` ships Flox with a working
 Nix store and needs no setup. Pin a version tag rather than `latest`, so a
@@ -508,7 +508,7 @@ The base image must be glibc. The installer dispatches to `apt`/`dpkg` or
 `dnf`/`yum` and exits with an error when it finds neither, so Alpine — and the
 default musl `buildkite/agent:3` image — is out.
 
-### Why `NIX_REMOTE=auto`, and when it is not enough
+### Why `NIX_REMOTE=auto`, and When It Is Not Enough
 
 During `docker build` there is no `/run/systemd/system` and no running
 `systemctl`, so the installer takes its **single-user** path: Nix is installed
@@ -519,14 +519,21 @@ to the daemon socket only when it is not. The official image sets the same
 variable for the same reason.
 
 **A container running as root needs nothing further.** That covers most CI
-images, including `buildkite/agent:3-ubuntu`, whose config sets no `USER` and
-so runs as root — there is no `buildkite-agent` account in it, and a `USER
-root` line adds nothing.
+images, including `buildkite/agent:3-ubuntu`: its config sets no `USER`, there
+is no `buildkite-agent` account in it, and a `USER root` line adds nothing.
+
+But root is a property of the **deployment**, not of the image. `docker run
+--user`, a Compose `user:`, or a Kubernetes `securityContext.runAsUser` all
+override it, and the Buildkite Helm chart and agent-stack-k8s commonly do.
+Check before assuming — `docker run --rm <image> id`, and grep your Compose,
+Helm or agent config for `--user`, `user:` and `runAsUser`.
 
 **A container whose jobs run as a non-root user needs the daemon**, because
 the writability test above then fails and there is no daemon to fall back to:
 
 ```
+This command may have been run as non-root in a single-user Nix installation,
+or the Nix daemon may have crashed.
 error: opening lock file '/nix/var/nix/db/big-lock': Permission denied
 ```
 
