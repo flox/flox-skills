@@ -319,6 +319,10 @@ class TestSelect(unittest.TestCase):
         "trap-cpp-exact-pkgpaths",
         "trap-vars-no-interpolation",
         "trap-containerize-nopush-fixed",
+        # DEV-315: guards the claim that Flox has no `curl | bash` installer.
+        # It was true when written and outlived its facts, which is exactly
+        # the failure mode a regression guard exists for.
+        "install-flox-ubuntu",
     }
 
     def setUp(self):
