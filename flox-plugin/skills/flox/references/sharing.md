@@ -138,8 +138,8 @@ POSTGRES_PORT = "5433"   # non-standard port
 - Test each environment standalone (`flox activate`) before composing
 
 Included environments are captured at their current version when you add
-them — there is no inline version field. Pull later changes in with `flox
-include upgrade` (all includes) or `flox include upgrade <name>` (one):
+them — there is no inline version field. Pull later changes in with
+`flox include upgrade` (all includes) or `flox include upgrade <name>` (one):
 
 ```toml
 [include]
