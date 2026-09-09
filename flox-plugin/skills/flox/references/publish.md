@@ -496,8 +496,8 @@ without failing.
 Set `FLOX_FLOXHUB_TOKEN` as a masked CI/CD variable; GitLab exports it into the
 job, so `flox publish` picks it up with no separate login step. Run the job in
 `ghcr.io/flox/flox`, which already has the CLI; where the image is fixed,
-`curl -fsSL https://get.flox.dev | FLOX_VERSION=<version> sh` as the first
-script step is the supported fallback. As above, publishing needs the CLI on
+`curl -fsSL https://get.flox.dev | sh` as the first script step is the
+supported fallback. As above, publishing needs the CLI on
 `PATH`, not an activated environment.
 
 ## Package Metadata Best Practices

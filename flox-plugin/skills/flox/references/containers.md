@@ -361,7 +361,7 @@ docker push registry.company.com/myapp:v1.0
 ```yaml
 containerize:
   stage: build
-  # Flox is provided by the runner image; see flox.dev/download
+  # Flox comes from the job image (ghcr.io/flox/flox), not a step
   script:
     - flox containerize --tag $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG --runtime docker
     - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
@@ -478,11 +478,12 @@ docker exec <container-id> flox list
 ## Installing Flox Into an Image
 
 **Prefer the official image.** `ghcr.io/flox/flox` ships Flox with a working
-Nix store and needs no setup. Pin a version tag rather than `latest`, so a
-rebuild cannot move the CLI under a build that was passing.
+Nix store and needs no setup. `latest` is maintained and tracks the newest
+release, so take it unless the build has to be byte-identical across rebuilds
+— then pin a version tag.
 
 ```dockerfile
-FROM ghcr.io/flox/flox:v1.16.0
+FROM ghcr.io/flox/flox:latest
 ```
 
 **When the base image is not yours to choose** — a vendor's CI agent image,
@@ -493,16 +494,18 @@ FROM buildkite/agent:3-ubuntu
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
-    && curl -fsSL https://get.flox.dev | FLOX_VERSION=1.16.0 sh \
+    && curl -fsSL https://get.flox.dev | sh \
     && rm -rf /var/lib/apt/lists/*
 
 ENV NIX_REMOTE=auto
 ```
 
-That image is complete: `flox activate` works in it. Pin with `FLOX_VERSION`
-so the image is reproducible, and do not reconstruct the download by hand —
-an architecture `case` statement plus a `downloads.flox.dev` URL reimplements
-what the script already does, against a path convention you do not own.
+That image is complete: `flox activate` works in it. Do not reconstruct the
+download by hand — an architecture `case` statement plus a
+`downloads.flox.dev` URL reimplements what the script already does, against a
+path convention you do not own, and pins a version that goes stale. Take the
+current release unless something forces otherwise; `FLOX_VERSION` exists for
+that case and should not be reached for by default.
 
 The base image must be glibc. The installer dispatches to `apt`/`dpkg` or
 `dnf`/`yum` and exits with an error when it finds neither, so Alpine — and the

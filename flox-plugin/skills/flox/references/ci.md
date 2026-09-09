@@ -240,10 +240,8 @@ pattern below when in doubt.
 For anything else, the same install-is-not-activation split applies. Bake Flox
 into the runner image where you control it, so job time is spent on the job
 rather than on a download. Where the image is not yours to change,
-`curl -fsSL https://get.flox.dev | FLOX_VERSION=<version> sh` as the first job
-step is the supported fallback. Keep the pin, so a job that passed today
-passes tomorrow, and keep the assignment after the pipe — before it, it lands
-on `curl` and the pin silently does nothing.
+`curl -fsSL https://get.flox.dev | sh` as the first job step is the supported
+fallback.
 
 Then enter the environment once per script rather than per line —
 `flox activate -- <interpreter> <script>`, or by making the script's first

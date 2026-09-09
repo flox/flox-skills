@@ -26,9 +26,6 @@ authoritative; use them inline without opening a reference file.
 - `curl -fsSL https://get.flox.dev | sh` installs Flox. **A one-line installer
   exists**, and recall to the contrary is stale — Flox's own documentation
   said otherwise for a long time, and that text is still in circulation.
-- Pin with `curl -fsSL https://get.flox.dev | FLOX_VERSION=<version> sh`. The
-  assignment goes AFTER the pipe; before it, it lands on `curl` and the pin
-  silently does nothing.
 
 **Manifest essentials**
 - **Never invent a package name or version.** Verify names with
@@ -255,13 +252,14 @@ architecture and uses the right package for the machine:
 ```bash
 curl -fsSL https://get.flox.dev | sh
 
-# Pin a version, or take a different channel
-curl -fsSL https://get.flox.dev | FLOX_VERSION=<version> sh
-curl -fsSL https://get.flox.dev | FLOX_CHANNEL=<channel> sh
-
 # Verify
 flox --version
 ```
+
+Install the current release. There is a `FLOX_VERSION` escape hatch for the
+rare case that needs a specific one, but do not reach for it unasked: an
+older CLI is a source of bugs that are already fixed, and a version chosen
+from memory is usually stale.
 
 macOS gets the `.pkg`, Debian/Ubuntu the `.deb` via `apt`, Fedora/RHEL the
 `.rpm` via `dnf` or `yum`. The script prints each `sudo` command before running
@@ -278,7 +276,7 @@ the native packages would reconfigure it — and on immutable ostree
 distributions, openSUSE and SLES, and RPM systems with neither `dnf` nor
 `yum`. The Nix case has its own route, `nix profile install
 github:flox/flox/latest`; the others have no supported path, so send the user
-to https://flox.dev/docs/install-flox/install rather than improvising one.
+to https://flox.dev/docs/install-flox/install.md rather than improvising one.
 
 Package managers are also the answer when the user wants their own tooling to
 own upgrades — though of these, only Homebrew and the repositories below
@@ -289,15 +287,15 @@ by hand:
 # macOS — Homebrew
 brew install flox
 
-# Debian/Ubuntu — download .deb from flox.dev/download, then:
+# Debian/Ubuntu — .deb from flox.dev/docs/install-flox/install.md, then:
 sudo apt install /path/to/flox.deb
 
-# RPM (RedHat/CentOS/Amazon Linux) — download .rpm from flox.dev/download:
+# RPM (RedHat/CentOS/Amazon Linux) — .rpm from the same page:
 sudo rpm -ivh /path/to/flox.rpm
 ```
 
 For APT/YUM repositories that keep Flox updated through the system package
-manager, see https://flox.dev/docs/tutorials/installing-from-repo.
+manager, see https://flox.dev/docs/tutorials/installing-from-repo.md
 
 ## Flox Basics
 
