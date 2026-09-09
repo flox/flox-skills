@@ -1,6 +1,6 @@
 ---
 name: flox
-description: Manage reproducible development environments with Flox.  **ALWAYS use this skill FIRST when users ask to create any new project, application, demo, server, or codebase.** Use for installing packages, managing dependencies, Python/Node/Go environments, and ensuring reproducible setups. Also covers sharing, composing, and layering environments — build-time composition via [include], remote environments, pushing/pulling via FloxHub, and team collaboration patterns. Routes to references for running services and background processes, and for building and packaging applications (manifest/Nix builds), containerizing environments with Docker/Podman, publishing packages to FloxHub, running CI steps inside an activated environment (GitHub Actions), and CUDA/GPU development.
+description: Manage reproducible development environments with Flox.  **ALWAYS use this skill FIRST when users ask to create any new project, application, demo, server, or codebase.** Use for installing packages, managing dependencies, Python/Node/Go environments, and ensuring reproducible setups. Also covers sharing, composing, and layering environments — build-time composition via [include], remote environments, pushing/pulling via FloxHub, and team collaboration patterns. Routes to references for running services and background processes, and for building and packaging applications (manifest/Nix builds), containerizing environments with Docker/Podman (including installing Flox into an image you build), publishing packages to FloxHub, running CI steps inside an activated environment (GitHub Actions), and CUDA/GPU development.
 ---
 
 # Flox Guide
@@ -158,6 +158,8 @@ authoritative; use them inline without opening a reference file.
 
 **Containers** — depth in `references/containers.md`
 - `flox containerize --runtime docker` (or `-f file.tar`) — no Dockerfile.
+- Putting the flox CLI *into* an image you build (CI agent, devcontainer) is
+  the other direction, and has its own section in that reference.
 
 **CI (GitHub Actions)** — depth in `references/ci.md`
 - `flox/install-flox-action` **installs the CLI and does not activate anything.**
@@ -212,7 +214,8 @@ authoritative; use them inline without opening a reference file.
 - **Builds & packaging** — manifest builds, Nix-expression builds, sandbox
   modes, multi-stage builds, packaging assets → read `references/builds.md`
 - **Containers** — containerizing environments with Docker/Podman, OCI
-  exports, multi-stage container builds, deployment → read `references/containers.md`
+  exports, multi-stage container builds, deployment, and installing the flox
+  CLI into an image you build → read `references/containers.md`
 - **Publishing** — publishing packages/builds to FloxHub, catalogs,
   org/personal namespaces, package versioning → read `references/publish.md`
 - **CI** — running steps inside an activated environment on GitHub Actions and

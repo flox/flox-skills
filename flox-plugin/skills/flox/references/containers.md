@@ -1,5 +1,11 @@
 # Flox Containerization Guide
 
+Two directions, and they are easy to confuse. This file is mostly about
+`flox containerize`, which turns an environment **into** an image. For the
+opposite — getting the Flox CLI **into** an image you are already building,
+such as a CI agent image or a devcontainer — see
+[Installing Flox Into an Image](#installing-flox-into-an-image) near the end.
+
 ## Core Commands
 
 ```bash
@@ -468,6 +474,101 @@ docker exec -it <container-id> /bin/bash
 # Run specific command
 docker exec <container-id> flox list
 ```
+
+## Installing Flox Into an Image
+
+**Prefer the official image.** `ghcr.io/flox/flox` ships Flox with a working
+Nix store and needs no setup. Pin a version tag rather than `latest`, so a
+rebuild cannot move the CLI under a build that was passing.
+
+```dockerfile
+FROM ghcr.io/flox/flox:v1.16.0
+```
+
+**When the base image is not yours to choose** — a vendor's CI agent image,
+say — run the install script in the build:
+
+```dockerfile
+FROM buildkite/agent:3-ubuntu
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && curl -fsSL https://get.flox.dev | FLOX_VERSION=1.16.0 sh \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV NIX_REMOTE=auto
+```
+
+That image is complete: `flox activate` works in it. Pin with `FLOX_VERSION`
+so the image is reproducible, and do not reconstruct the download by hand —
+an architecture `case` statement plus a `downloads.flox.dev` URL reimplements
+what the script already does, against a path convention you do not own.
+
+The base image must be glibc. The installer dispatches to `apt`/`dpkg` or
+`dnf`/`yum` and exits with an error when it finds neither, so Alpine — and the
+default musl `buildkite/agent:3` image — is out.
+
+### Why `NIX_REMOTE=auto`, and When It Is Not Enough
+
+During `docker build` there is no `/run/systemd/system` and no running
+`systemctl`, so the installer takes its **single-user** path: Nix is installed
+with no daemon, and `/nix/store` and `/nix/var/nix` are owned by root.
+`NIX_REMOTE=auto` is what makes that store usable — Nix tests whether the state
+directory is writable and talks to the store directly when it is, falling back
+to the daemon socket only when it is not. The official image sets the same
+variable for the same reason.
+
+**A container running as root needs nothing further.** That covers most CI
+images, including `buildkite/agent:3-ubuntu`: its config sets no `USER`, there
+is no `buildkite-agent` account in it, and a `USER root` line adds nothing.
+
+But root is a property of the **deployment**, not of the image. `docker run
+--user`, a Compose `user:`, or a Kubernetes `securityContext.runAsUser` all
+override it, and the Buildkite Helm chart and agent-stack-k8s commonly do.
+Check before assuming — `docker run --rm <image> id`, and grep your Compose,
+Helm or agent config for `--user`, `user:` and `runAsUser`.
+
+**A container whose jobs run as a non-root user needs the daemon**, because
+the writability test above then fails and there is no daemon to fall back to:
+
+```
+This command may have been run as non-root in a single-user Nix installation,
+or the Nix daemon may have crashed.
+error: opening lock file '/nix/var/nix/db/big-lock': Permission denied
+```
+
+The daemon runs as root and serves unprivileged clients over its socket, which
+is what makes a root-owned store usable from a non-root job. Start it from
+whatever the image runs before handing off — for the Buildkite agent image
+that is `run-parts` over `/docker-entrypoint.d`, which its entrypoint executes
+with `--exit-on-error`, so a hook that fails takes the container down with it:
+
+```dockerfile
+RUN mkdir -p /docker-entrypoint.d \
+    && printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'set -euo pipefail' \
+      'daemon=/usr/sbin/nix-daemon' \
+      'if [ -x "$daemon" ] && ! pgrep -x nix-daemon >/dev/null 2>&1; then' \
+      '  "$daemon" >/var/log/nix-daemon.log 2>&1 &' \
+      'fi' \
+      > /docker-entrypoint.d/10-nix-daemon \
+    && chmod +x /docker-entrypoint.d/10-nix-daemon
+```
+
+Address the binary by path. The Flox packages install `nix-daemon` to
+`/usr/sbin` (a symlink into the store) because it runs as root, and they put
+nothing in `/etc/profile.d` — so a hook that sources `/etc/profile.d/nix*.sh`
+and then calls `command -v nix-daemon` finds neither. Redirect its output, or
+the daemon interleaves with job logs.
+
+Getting this backwards is the failure that hides: an image whose jobs run as a
+non-root user looks fine in a root shell at build time and fails on the first
+real job.
+
+Once Flox is in the image, entering environments from CI jobs is
+`references/ci.md` — the install-is-not-activation split applies the same way
+inside a container as on a runner.
 
 ## Best Practices
 
