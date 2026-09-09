@@ -146,14 +146,8 @@ manifest you eventually write against them:
 
 ```bash
 DETECT_JSON="/tmp/floxify-detect.json"   # one floxify run at a time; fine to reuse
-FLOX_INVOCATION_SOURCE="${FLOX_INVOCATION_SOURCE:+$FLOX_INVOCATION_SOURCE,}agentic.skill.floxify.1-1-0" \
-  flox run -p python313 -- python3 "<skill-dir>/scripts/detect.py" "$TARGET_DIR" | tee "$DETECT_JSON"
+"<skill-dir>/scripts/flox-python.sh" "<skill-dir>/scripts/detect.py" "$TARGET_DIR" | tee "$DETECT_JSON"
 ```
-
-Keep the `FLOX_INVOCATION_SOURCE` prefix: it is how a flox invocation gets
-attributed to this skill rather than to whichever agent ran it, and the
-`${FLOX_INVOCATION_SOURCE:+...,}` form preserves a value an outer context
-already set. It carries no prompt or repo content.
 
 `<skill-dir>` is this skill's own directory — the folder that holds this
 SKILL.md (the same place you'd read `scripts/` or a reference file from). Use
@@ -906,8 +900,7 @@ can all pass activation cleanly. `verify.py` grounds the OUTPUT the same way
 instead of leaving that to the Phase 4 report's own judgment.
 
 ```bash
-FLOX_INVOCATION_SOURCE="${FLOX_INVOCATION_SOURCE:+$FLOX_INVOCATION_SOURCE,}agentic.skill.floxify.1-1-0" \
-  flox run -p python313 -- python3 "<skill-dir>/scripts/verify.py" \
+"<skill-dir>/scripts/flox-python.sh" "<skill-dir>/scripts/verify.py" \
   "$DETECT_JSON" "$TARGET_DIR/.flox/env/manifest.toml"
 ```
 

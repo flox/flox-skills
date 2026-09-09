@@ -23,6 +23,7 @@ REPO_ROOT = SUITE.parent.parent
 PLUGIN_JSON = REPO_ROOT / "flox-plugin" / ".claude-plugin" / "plugin.json"
 VERIFY = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
 SKILL_MD = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "SKILL.md"
+WRAPPER = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "flox-python.sh"
 
 # No sys_modules_key: nothing here patches by string name, so this gets a
 # private instance rather than competing for the shared "verify" key.
@@ -109,35 +110,40 @@ class TestVersionMatchesPluginJson(unittest.TestCase):
             f"plugin.json ({want}); update the literal.",
         )
 
-    def test_skill_md_command_blocks_match(self):
-        """SKILL.md's command blocks carry the tag as a literal a model
-        copies, so the version lives there too and drifts the same way."""
-        self.assertTrue(SKILL_MD.is_file(), f"SKILL.md not at {SKILL_MD}")
+    def test_wrapper_script_matches(self):
+        """The tag also lives in scripts/flox-python.sh, which is what
+        carries it for the two scripts SKILL.md prescribes."""
+        self.assertTrue(WRAPPER.is_file(), f"wrapper not at {WRAPPER}")
         want = self._plugin_version_dashed()
         found = set(re.findall(r"agentic\.skill\.floxify\.([0-9-]+)",
-                               SKILL_MD.read_text()))
-        self.assertTrue(found, "no agentic.skill.floxify tag in SKILL.md; "
-                               "the command-block prefixes were removed")
+                               WRAPPER.read_text()))
+        self.assertTrue(found, "no agentic.skill.floxify tag in the wrapper")
         self.assertEqual(
             found, {want},
-            f"SKILL.md tags {sorted(found)} disagree with plugin.json ({want})",
+            f"wrapper tags {sorted(found)} disagree with plugin.json ({want})",
         )
 
-    def test_every_flox_run_block_is_tagged(self):
-        """A `flox run` block without the prefix is an untagged invocation
-        the model will copy verbatim. Guards against one being added later
-        without the tag, which is silent rather than broken."""
-        blocks = [ln for ln in SKILL_MD.read_text().splitlines()
-                  if "flox run -p python313" in ln]
-        self.assertTrue(blocks, "no `flox run -p python313` block found")
+    def test_skill_md_carries_no_tag_of_its_own(self):
+        """The tag is implementation detail and belongs in the scripts. A
+        literal reappearing in SKILL.md means a command block was written
+        the long way again, and it will drift from the wrapper silently."""
+        found = re.findall(r"agentic\.skill\.floxify", SKILL_MD.read_text())
+        self.assertEqual(found, [],
+                         "SKILL.md names the tag; it belongs in the wrapper")
+
+    def test_prescribed_scripts_are_reached_through_the_wrapper(self):
+        """Every command block invoking detect.py or verify.py must go
+        through flox-python.sh. One added the long way carries no tag, and
+        nothing else in the suite would notice."""
         text = SKILL_MD.read_text()
-        for ln in blocks:
-            with self.subTest(line=ln.strip()[:60]):
-                i = text.index(ln)
-                # the prefix sits on the line above, joined by a backslash
-                preceding = text[:i].rsplit("\n", 2)[-2] if i else ""
-                self.assertIn("FLOX_INVOCATION_SOURCE", preceding,
-                              f"untagged `flox run` block: {ln.strip()[:80]}")
+        for n, ln in enumerate(text.splitlines(), 1):
+            if "scripts/detect.py" not in ln and "scripts/verify.py" not in ln:
+                continue
+            if ln.lstrip().startswith(("-", "*", ">")) or "`" in ln:
+                continue          # prose and the documented fallback
+            with self.subTest(line=n):
+                self.assertIn("flox-python.sh", ln,
+                              f"SKILL.md:{n} reaches a script without the wrapper")
 
 
 if __name__ == "__main__":

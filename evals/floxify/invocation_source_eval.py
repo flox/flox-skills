@@ -1,30 +1,31 @@
 #!/usr/bin/env python3
-"""Conformance eval: does /floxify tag the flox invocations it makes?
+"""Conformance eval: does /floxify run its scripts through the wrapper?
 
-AI-597 wires the skill's invocation-source tag in two places. verify.py
-sets FLOX_INVOCATION_SOURCE at module load, which is deterministic and
-needs no eval. SKILL.md's `flox run` command blocks carry the tag as a
-literal prefix, and that half depends on a model copying a line it was
-shown — so without a measurement there is no way to tell "the skill did
-not comply" from "the skill was not used", which is the ambiguity the
-tag exists to remove.
+This suite used to ask a different question. When the invocation-source
+tag was a literal prefix in SKILL.md's command blocks, whether a flox call
+got attributed to this skill depended on a model copying that line, and
+this measured how often it did.
 
-This asserts on the SKILL.md half only. It reads the agent's own Bash
-calls out of the stream and asks, of the `flox run` invocations the skill
-prescribes, how many carried the prefix.
+`scripts/flox-python.sh` moved the tag inside a script, so that question
+is answered by construction. What remains is one step out: the model has
+to invoke the wrapper rather than reaching for `flox run` or a bare
+`python3` itself. A hand-written invocation runs the same script and
+produces the same manifest, so nothing else in the suite would notice,
+and the flox call it makes carries no tag.
 
-Compliance is a RATE, not a gate. A model that drops the prefix on one of
-two blocks is a real signal about the guidance, not a broken build, and
-this suite is opt-in like its siblings: it spawns a real `claude` agent
-and never runs in the fast gate.
+So this reports how the prescribed scripts were actually reached. Reaching
+them any other way is not a defect on its own -- the documented fallback
+for a Flox older than 1.13 does exactly that -- which is why this reports
+a rate rather than gating.
+
+Opt-in like its siblings: spawns a real `claude`, never in the fast gate.
 
 Usage:
     python3 invocation_source_eval.py                  # default fixture
     python3 invocation_source_eval.py --fixture ruby
-    python3 invocation_source_eval.py --skill-dir /path/to/flox-plugin
 
-Exit 0 if every prescribed `flox run` carried the tag, 1 if any did not,
-2 on a setup error. Pure stdlib.
+Exit 0 if every reach went through the wrapper, 1 if any bypassed it, 2
+if the run never reached the scripts at all. Pure stdlib.
 """
 import argparse
 import re
@@ -46,32 +47,21 @@ PHASE3_PROMPT = (
     "Phase 4 report and do not ask for user input — stop once Step 4 has run."
 )
 
-# The two scripts SKILL.md invokes through `flox run`. A `flox run` for
-# anything else (a one-off `php -m`, say) is not prescribed by the tagged
-# blocks and is not scored.
-_PRESCRIBED = re.compile(r"\bflox\s+run\b[^\n]*?\b(detect|verify)\.py\b")
-
-# Matches the tag on the same command, whether the model copied the
-# preserving form or collapsed it to a bare assignment.
-_TAGGED = re.compile(r"FLOX_INVOCATION_SOURCE=[^\n]*agentic\.skill\.floxify\.")
+# The two scripts SKILL.md prescribes. A `flox run` for anything else (the
+# `php -m` example, say) is not one of these and is not scored.
+_PRESCRIBED = re.compile(r"\b(detect|verify)\.py\b")
+_VIA_WRAPPER = re.compile(r"\bflox-python\.sh\b")
+# Reading the file is not running it.
+_EXECUTES = re.compile(r"(?:\bflox-python\.sh\b|\bpython3?\b|\bflox\s+run\b)")
 
 
-def _is_prescribed_flox_run(cmd):
-    return bool(_PRESCRIBED.search(cmd or ""))
+def _reaches_a_prescribed_script(cmd):
+    c = cmd or ""
+    return bool(_PRESCRIBED.search(c) and _EXECUTES.search(c))
 
 
-def _is_tagged(cmd):
-    return bool(_TAGGED.search(cmd or ""))
-
-
-def _preserves_existing(cmd):
-    """Did the model keep the append form, or hardcode a bare value?
-
-    Reported, never failed: a bare assignment still attributes the call to
-    this skill and only loses an outer context's own tag, which is a
-    weaker defect than no tag at all.
-    """
-    return ":+$FLOX_INVOCATION_SOURCE," in (cmd or "")
+def _via_wrapper(cmd):
+    return bool(_VIA_WRAPPER.search(cmd or ""))
 
 
 def run(skill_dir, fixture, model, timeout):
@@ -100,37 +90,30 @@ def run(skill_dir, fixture, model, timeout):
                   file=sys.stderr)
 
         commands = list(_bash_commands(stream))
-        prescribed = [c for c in commands if _is_prescribed_flox_run(c)]
-        tagged = [c for c in prescribed if _is_tagged(c)]
-        preserving = [c for c in tagged if _preserves_existing(c)]
+        reaches = [c for c in commands if _reaches_a_prescribed_script(c)]
+        wrapped = [c for c in reaches if _via_wrapper(c)]
 
-        print(f"\nBash calls: {len(commands)} · prescribed `flox run`: "
-              f"{len(prescribed)} · tagged: {len(tagged)} · "
-              f"append-preserving: {len(preserving)}")
+        print(f"\nBash calls: {len(commands)} · reached a prescribed script: "
+              f"{len(reaches)} · through the wrapper: {len(wrapped)}")
 
-        if not prescribed:
-            # Distinguishable from non-compliance on purpose: the run never
-            # reached the tagged blocks, so it measures nothing either way.
-            print("INCONCLUSIVE — the run made no `flox run` call against "
-                  "detect.py or verify.py, so there was nothing to tag. "
-                  "Check the fallback paths (system python3) were not taken.")
+        if not reaches:
+            print("INCONCLUSIVE — the run never reached detect.py or "
+                  "verify.py, so there was nothing to attribute either way.")
             return 2
 
-        for c in prescribed:
-            mark = "tagged  " if _is_tagged(c) else "UNTAGGED"
+        for c in reaches:
+            mark = "wrapper " if _via_wrapper(c) else "BYPASSED"
             print(f"  {mark} {c.strip()[:150]}")
 
-        if len(tagged) < len(prescribed):
-            print(f"\nFAIL — {len(prescribed) - len(tagged)} of "
-                  f"{len(prescribed)} prescribed invocations carried no tag. "
-                  "The SKILL.md prefix is being dropped.")
+        if len(wrapped) < len(reaches):
+            print(f"\n{len(reaches) - len(wrapped)} of {len(reaches)} reached a "
+                  "prescribed script without the wrapper, so those flox calls "
+                  "carry no skill attribution. Check whether the run took the "
+                  "documented pre-1.13 fallback before reading this as a "
+                  "compliance failure.")
             return 1
 
-        print(f"\nPASS — all {len(prescribed)} prescribed invocations tagged.")
-        if len(preserving) < len(tagged):
-            print(f"  NOTE: {len(tagged) - len(preserving)} collapsed the "
-                  "append form to a bare assignment — attribution still "
-                  "works, an outer context's own tag would be lost.")
+        print(f"\nPASS — all {len(reaches)} went through the wrapper.")
         return 0
     except subprocess.TimeoutExpired:
         print(f"FAIL — timed out after {timeout}s", file=sys.stderr)
