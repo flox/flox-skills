@@ -478,7 +478,7 @@ something the environment *provides* — see `references/ci.md`.
 ```yaml
 publish:
   stage: deploy
-  # Flox is provided by the runner image; see flox.dev/download
+  # Flox comes from the job image (ghcr.io/flox/flox), not a step
   variables:
     GIT_DEPTH: 0        # GitLab shallow-clones by default; see Prerequisites
   only:

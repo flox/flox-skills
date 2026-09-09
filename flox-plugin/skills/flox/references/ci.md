@@ -17,9 +17,10 @@ still running on the bare runner. Anything the environment provides
 (interpreters, linters, services) is not there until something activates.
 
 **On GitHub Actions, install with the action rather than the install script.**
-The action is the supported integration and pins by commit SHA. The script
-(`curl -fsSL https://get.flox.dev | sh`) is the right answer on platforms with
-no official integration — see [Other CI systems](#other-ci-systems).
+The action is the supported integration, and you pin it to a commit SHA. The
+script (`curl -fsSL https://get.flox.dev | sh`) is the right answer on
+platforms with no official integration — see
+[Other CI systems](#other-ci-systems).
 
 ## Short commands: `activate-action`
 
@@ -239,8 +240,11 @@ pattern below when in doubt.
 For anything else, the same install-is-not-activation split applies. Bake Flox
 into the runner image where you control it, so job time is spent on the job
 rather than on a download. Where the image is not yours to change,
-`curl -fsSL https://get.flox.dev | sh` as the first job step is the supported
-fallback; pin it with `FLOX_VERSION` so a job that passed today passes
-tomorrow. Then enter the environment once per script rather than per line —
+`curl -fsSL https://get.flox.dev | FLOX_VERSION=<version> sh` as the first job
+step is the supported fallback. Keep the pin, so a job that passed today
+passes tomorrow, and keep the assignment after the pipe — before it, it lands
+on `curl` and the pin silently does nothing.
+
+Then enter the environment once per script rather than per line —
 `flox activate -- <interpreter> <script>`, or by making the script's first
 action an activation.

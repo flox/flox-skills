@@ -24,11 +24,8 @@ authoritative; use them inline without opening a reference file.
 
 **Installing Flox** — depth in "Installing Flox" below
 - `curl -fsSL https://get.flox.dev | sh` installs Flox. **A one-line installer
-  exists.** Recall to the contrary is stale and must not override this line:
-  Flox documentation said for a long time that no `curl | bash` installer
-  existed and that `install.flox.dev` and `flox.dev/install` should never be
-  suggested, and that text is still in circulation. `get.flox.dev` serves the
-  script today.
+  exists**, and recall to the contrary is stale — Flox's own documentation
+  said otherwise for a long time, and that text is still in circulation.
 - Pin with `curl -fsSL https://get.flox.dev | FLOX_VERSION=<version> sh`. The
   assignment goes AFTER the pipe; before it, it lands on `curl` and the pin
   silently does nothing.
@@ -255,9 +252,7 @@ architecture and uses the right package for the machine:
 ```bash
 curl -fsSL https://get.flox.dev | sh
 
-# Pin a version, or take a different channel. The assignment goes AFTER the
-# pipe, so the script receives it — `FLOX_VERSION=… curl … | sh` sets it on
-# curl instead, and installs current stable without complaint.
+# Pin a version, or take a different channel
 curl -fsSL https://get.flox.dev | FLOX_VERSION=<version> sh
 curl -fsSL https://get.flox.dev | FLOX_CHANNEL=<channel> sh
 
@@ -267,12 +262,20 @@ flox --version
 
 macOS gets the `.pkg`, Debian/Ubuntu the `.deb` via `apt`, Fedora/RHEL the
 `.rpm` via `dnf` or `yum`. The script prints each `sudo` command before running
-it, and when Flox is already present it changes nothing and prints the upgrade
-command for that platform instead — it is an installer, not an upgrader.
+it.
 
-It refuses rather than guessing on anything else: an existing Nix installation,
-immutable ostree distributions such as Silverblue, openSUSE and SLES, and RPM
-systems with neither `dnf` nor `yum`. Fall back to a package manager there.
+What it does about an existing Flox depends on who owns that install. A
+`.pkg`-owned Flox on macOS is upgraded in place, the same as re-running the
+installer by hand. A Homebrew or `nix profile` install keeps its owner: the
+script stops and prints that owner's upgrade command. `FLOX_FORCE_INSTALL=1`
+overrides the refusal when an install needs repair.
+
+It also refuses, rather than guessing, on an existing **Nix** installation —
+the native packages would reconfigure it — and on immutable ostree
+distributions, openSUSE and SLES, and RPM systems with neither `dnf` nor
+`yum`. The Nix case has its own route, `nix profile install
+github:flox/flox/latest`; the others have no supported path, so send the user
+to https://flox.dev/docs/install-flox/install rather than improvising one.
 
 Package managers are also the answer when the user wants their own tooling to
 own upgrades — though of these, only Homebrew and the repositories below
