@@ -23,9 +23,9 @@ High-value specifics that are easy to get wrong from memory. These are
 authoritative; use them inline without opening a reference file.
 
 **Manifest essentials**
-- **Never invent a package name or version.** Verify names with `flox search
-  <term>` and versions with `flox show <pkg>`; pin only to a version `flox show`
-  actually lists — pick the closest available if the exact one is absent. The
+- **Never invent a package name or version.** Verify names with
+  `flox search <term>` and versions with `flox show <pkg>`; pin only to a version
+  `flox show` actually lists — pick the closest available if the exact one is absent. The
   same rule covers tool versions you put in hooks (`gem install bundler -v …`,
   `npm i -g pkg@…`, `pip install pkg==…`): take the version from the project's
   lockfile (`Gemfile.lock` → BUNDLED WITH, `package-lock.json`, `uv.lock`),
@@ -300,8 +300,8 @@ many versions:
 - **Never guess — verify before you pin.** Pin only to a name and version that
   `flox show <pkg>` actually lists; if the exact version isn't there, pick the
   closest available (or override — see below). Do not invent a version string.
-  This applies equally to versions placed in hooks (e.g. `gem install bundler
-  -v <X>`): read them from the project's lockfile, never a guess. Hallucinated
+  This applies equally to versions placed in hooks
+  (e.g. `gem install bundler -v <X>`): read them from the project's lockfile, never a guess. Hallucinated
   version pins pass a manifest-shape check but fail the moment the env activates.
 - **`flox search <term>` returns only the *latest* version of each name.** Use
   `flox show <pkg>` to see all available versions *and* per-architecture
