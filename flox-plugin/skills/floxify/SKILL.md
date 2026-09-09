@@ -1026,11 +1026,18 @@ Wait for the user's response, then:
   after the report. Read `references/migration.md` and follow it. Never run
   migration automatically — only on this explicit request.
 - **3 (Leave it):** Say: "No problem — run `flox activate` whenever you're ready. Say 'migrate' to commit it."
-- **4 (Remove it):** Run `rm -rf "<absolute-target-dir>/.flox"`, substituting the
-  path itself rather than a variable. Each Bash call starts a fresh shell, so
-  `$TARGET_DIR` from Phase 0 is not in scope here; left as a variable it expands
-  to the empty string and the command becomes a delete at the filesystem root.
-  Then confirm it's gone: "Done. Zero trace — nothing else was touched."
+- **4 (Remove it):** Substitute the absolute target path into both lines, then
+  run:
+
+  ```bash
+  rm -rf "<absolute-target-dir>/.flox"
+  test -d "<absolute-target-dir>/.flox" && echo STILL_THERE || echo REMOVED
+  ```
+
+  Do not leave `$TARGET_DIR` in the command: unsubstituted it targets `/.flox`
+  rather than the user's project, and `rm -rf` reports success either way, so the
+  second line is what tells you which happened. Say "Done. Zero trace — nothing
+  else was touched." only on `REMOVED`.
 
 ---
 
