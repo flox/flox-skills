@@ -323,6 +323,9 @@ class TestSelect(unittest.TestCase):
         # It was true when written and outlived its facts, which is exactly
         # the failure mode a regression guard exists for.
         "install-flox-ubuntu",
+        # DEV-315: guards the container recipe — NIX_REMOTE=auto, and the
+        # daemon only where jobs run unprivileged.
+        "install-flox-into-ci-image",
     }
 
     def setUp(self):
