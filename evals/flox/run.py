@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import sys
 import time
 import tomllib
@@ -54,11 +55,90 @@ NEUTRAL_SUFFIX = (
 )
 
 # ---- deterministic hard-checks ---------------------------------------------
-# Flags hallucinated *Flox* install methods (the ai-13 bug). Only a curl|sh that
-# mentions flox counts — a legit `curl … | sh` for some other tool is fine.
-FAKE_INSTALL = re.compile(
-    r"install\.flox\.dev|flox\.dev/install|curl[^\n]*flox[^\n]*\|\s*(ba)?sh", re.I
+# Flags hallucinated *Flox* install methods (the ai-13 bug).
+#
+# This check used to ban the `curl … | sh` SHAPE, because when it was written
+# there was no such installer and `install.flox.dev` was something models
+# invented. Both facts changed (DEV-315): `get.flox.dev` serves the install
+# script, and `install.flox.dev` is a second CloudFront alias for the same
+# object. Banning the shape now fails the correct answer on the 24 tasks that
+# carry this check.
+#
+# So the check allows a known set of ENDPOINTS instead of banning a shape, on
+# two rules:
+#
+#   1. Only a host that serves the install *script* may be piped into a shell.
+#      `flox.dev/install` redirects to the /download/ HTML page, so piping it
+#      installs nothing. Measured, it fails loudly rather than silently: the
+#      302 body is 25 bytes and `sh` exits 127 ("Redirecting: command not
+#      found"), and following the redirect pipes HTML and exits 2. So this
+#      rule grades a wrong answer, not a dangerous one — worth failing a task
+#      over, not worth a warning in the skill.
+#   2. No invented `*.flox.dev` host anywhere. `releases.flox.dev` and friends
+#      show up in baselines/ un-piped, so rule 1 alone would miss them.
+#
+# A `curl … | sh` for some other tool is still fine: both rules skip any host
+# that is not flox.dev, and rule 1 judges a host only against the pipe that
+# host's own URL feeds.
+REAL_FLOX_HOSTS = frozenset(
+    {
+        "flox.dev",           # docs, /download/, marketing
+        "get.flox.dev",       # the install script
+        "install.flox.dev",   # second alias for the same object (DEV-146)
+        "downloads.flox.dev", # .deb/.rpm/.pkg artifacts and checksums
+    }
 )
+# Only these serve the script itself, so only these may be piped to a shell.
+INSTALL_SCRIPT_HOSTS = frozenset({"get.flox.dev", "install.flox.dev"})
+# Positive form of the same fact, for the task that asks how to install Flox.
+# Naming a package manager is not wrong, but an answer that never mentions the
+# script has not learned what changed.
+_INSTALL_SCRIPT_URL = re.compile(r"https?://(?:get|install)\.flox\.dev", re.I)
+
+# Captures the HOST, not the whole URL — every rule below reasons about hosts.
+_URL_HOST = re.compile(r"https?://([A-Za-z0-9][A-Za-z0-9.-]*)", re.I)
+# The shell can sit behind env assignments and/or sudo — `… | FLOX_VERSION=1.16.0 sh`
+# is a form the install page publishes, and a naive `\| sh` would miss it.
+_PIPES_TO_SHELL = re.compile(
+    r"\|\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:sudo\s+)?(?:ba|z)?sh\b"
+)
+# A shell command can be split across lines with a trailing backslash. Rejoin
+# before scanning, or `curl … https://flox.dev/install \` + `| sh` reads as two
+# innocent lines and rule 1 never sees a pipe at all.
+_CONTINUATION = re.compile(r"\\\n\s*")
+
+
+def _is_flox_host(host):
+    host = host.lower()
+    return host == "flox.dev" or host.endswith(".flox.dev")
+
+
+def _no_fake_install_url(answer):
+    """True (PASS) when every Flox install URL in the answer is a real one."""
+    for line in _CONTINUATION.sub(" ", answer).splitlines():
+        found = list(_URL_HOST.finditer(line))
+        for i, m in enumerate(found):
+            # A trailing dot is sentence punctuation, not part of the host.
+            # Without stripping it, `see https://releases.flox.dev.` reads as
+            # a non-flox host and slips past rule 2 entirely.
+            host = m.group(1).lower().rstrip(".")
+            if not _is_flox_host(host):
+                continue
+            # Rule 2: an invented host is wrong however it is used.
+            if host not in REAL_FLOX_HOSTS:
+                return False
+            # Rule 1: pair each URL with the pipe it actually feeds — the span
+            # running to the next URL — rather than searching the whole line.
+            # One line legitimately carries both the correct one-liner and a
+            # docs link, and judging every host against every pipe failed it.
+            end = found[i + 1].start() if i + 1 < len(found) else len(line)
+            if _PIPES_TO_SHELL.search(line[m.end():end]) and (
+                host not in INSTALL_SCRIPT_HOSTS
+            ):
+                return False
+    return True
+
+
 ABS_PATH = re.compile(r'=\s*"(/home/|/Users/|/usr/local/|/opt/|/root/)', re.I)
 
 # --- hardcoded-secret detection ---------------------------------------------
@@ -720,7 +800,8 @@ def _no_range_version_pin(answer):
 
 
 CHECKS = {
-    "no_fake_install_url": lambda a: not FAKE_INSTALL.search(a),
+    "no_fake_install_url": _no_fake_install_url,
+    "names_install_script": lambda a: bool(_INSTALL_SCRIPT_URL.search(a)),
     "no_abs_paths": lambda a: not ABS_PATH.search(toml_blocks(a)),
     # Every `version` pin is a literal the catalog can be asked about — a
     # semver range is the ladder's last rung and is not verifiable.
@@ -809,6 +890,22 @@ def _cost_summary(results):
     }
 
 
+# Every arm is allowed the Read tool, because the skills arm has to be able to
+# open the reference files a skill points at. Read plus a working directory of
+# `evals/flox` also lets a model open `tasks/*.jsonl` — the prompt, the rubric,
+# and `must_match`, which is to say the answer key. It does: a screened
+# BASELINE answer opened with "I checked the eval's ground truth for the real
+# Flox install URLs, so this is accurate", then reproduced the rubric's own
+# command and scored 5/5 as a bare model.
+#
+# That inflates every arm it touches, and it inflates the baseline most, which
+# reads as "the skill adds nothing" rather than as contamination. So the agent
+# runs somewhere with nothing to find. Absolute paths are still readable and
+# the plugin is still loaded by --plugin-dir; what goes away is the registry
+# sitting in the model's working directory.
+AGENT_CWD = tempfile.mkdtemp(prefix="flox-eval-")
+
+
 def run_claude(prompt, mode, allow_tools, timeout=420, retries=3):
     cmd = ["claude", "-p", prompt, "--model", MODEL, "--output-format", "json"]
     if allow_tools:
@@ -828,7 +925,8 @@ def run_claude(prompt, mode, allow_tools, timeout=420, retries=3):
     last = "unknown"
     for attempt in range(retries):
         try:
-            out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            out = subprocess.run(cmd, capture_output=True, text=True,
+                                 timeout=timeout, cwd=AGENT_CWD)
         except subprocess.TimeoutExpired:
             last = "TIMEOUT"
         else:

@@ -151,6 +151,12 @@ def _advisory_verify_violations(violations):
 
 # --- deterministic hard-check patterns (reuse run.py patterns) ----------------
 
+# DELIBERATELY NOT the endpoint allowlist that `evals/flox/run.py` now uses
+# (DEV-315). That suite grades PROSE, where `curl -fsSL https://get.flox.dev | sh`
+# became the correct answer. This one greps the generated MANIFEST, where any
+# instruction to install Flox is wrong whatever URL it names — you do not
+# bootstrap Flox from inside a Flox environment. Same name, same pattern,
+# different scope: keep the shape ban here.
 FAKE_INSTALL = re.compile(
     r"install\.flox\.dev|flox\.dev/install|curl[^\n]*flox[^\n]*\|\s*(ba)?sh", re.I
 )
