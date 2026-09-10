@@ -1,0 +1,51 @@
+#!/usr/bin/env sh
+# Run the drift checker when a commit touches the skills.
+#
+# The checker verifies that the skills' claims about the flox CLI are still
+# true of the installed flox. Catching that here rather than in review is the
+# point: the fix is one line, and the person who can make it correctly is the
+# one who just edited the sentence.
+#
+# Install:  git config core.hooksPath .githooks
+# Bypass:   git commit --no-verify
+#
+# NEVER blocks for its own reasons. A missing flox or python is this hook's
+# problem, not the committer's, so both skip with a note. Only a real drift
+# finding stops a commit.
+set -eu
+
+SKILLS_PREFIX='flox-plugin/skills/'
+CHECKER='evals/drift/check.py'
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR | grep "^${SKILLS_PREFIX}" || true)
+[ -n "$staged" ] || exit 0
+
+# `command -v` rather than `which`: POSIX, and no dependency on a binary that
+# is itself sometimes missing.
+if ! command -v flox >/dev/null 2>&1; then
+    echo "drift: flox not on PATH, skipping the skill-claim check." >&2
+    exit 0
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "drift: python3 not on PATH, skipping the skill-claim check." >&2
+    exit 0
+fi
+[ -f "$CHECKER" ] || { echo "drift: $CHECKER not found, skipping." >&2; exit 0; }
+
+echo "drift: a skill changed, checking its CLI claims against flox..."
+if python3 "$CHECKER" --suggest; then
+    exit 0
+fi
+
+cat >&2 <<'MSG'
+
+drift: a claim in the skills no longer matches the installed flox.
+
+Either the skill is stale and the suggestion above shows the current
+surface, or the registry entry is stale and should be updated in
+evals/drift/tasks/claims.jsonl. The checker cannot tell which; both ends
+are worth a look before editing either.
+
+To commit anyway: git commit --no-verify
+MSG
+exit 1
