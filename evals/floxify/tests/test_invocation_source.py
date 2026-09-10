@@ -11,6 +11,7 @@ Run from the suite root (`evals/floxify/`):
     python3 -m unittest tests.test_invocation_source -v
 """
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -21,6 +22,8 @@ SUITE = HERE.parent
 REPO_ROOT = SUITE.parent.parent
 PLUGIN_JSON = REPO_ROOT / "flox-plugin" / ".claude-plugin" / "plugin.json"
 VERIFY = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
+SKILL_MD = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "SKILL.md"
+WRAPPER = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "flox-python.sh"
 
 # No sys_modules_key: nothing here patches by string name, so this gets a
 # private instance rather than competing for the shared "verify" key.
@@ -95,14 +98,52 @@ class TestVersionMatchesPluginJson(unittest.TestCase):
     opencode bare skill dirs with no plugin root). This is the only thing
     keeping the literal honest, so it asserts rather than skips."""
 
-    def test_matches(self):
+    def _plugin_version_dashed(self):
         self.assertTrue(PLUGIN_JSON.is_file(), f"plugin.json not at {PLUGIN_JSON}")
-        version = json.loads(PLUGIN_JSON.read_text())["version"]
+        return json.loads(PLUGIN_JSON.read_text())["version"].replace(".", "-")
+
+    def test_verify_py_matches(self):
+        want = self._plugin_version_dashed()
         self.assertEqual(
-            verify.SKILL_VERSION, version.replace(".", "-"),
+            verify.SKILL_VERSION, want,
             f"verify.py SKILL_VERSION ({verify.SKILL_VERSION}) has drifted from "
-            f"plugin.json version ({version}); update the literal.",
+            f"plugin.json ({want}); update the literal.",
         )
+
+    def test_wrapper_script_matches(self):
+        """The tag also lives in scripts/flox-python.sh, which is what
+        carries it for the two scripts SKILL.md prescribes."""
+        self.assertTrue(WRAPPER.is_file(), f"wrapper not at {WRAPPER}")
+        want = self._plugin_version_dashed()
+        found = set(re.findall(r"agentic\.skill\.floxify\.([0-9-]+)",
+                               WRAPPER.read_text()))
+        self.assertTrue(found, "no agentic.skill.floxify tag in the wrapper")
+        self.assertEqual(
+            found, {want},
+            f"wrapper tags {sorted(found)} disagree with plugin.json ({want})",
+        )
+
+    def test_skill_md_carries_no_tag_of_its_own(self):
+        """The tag is implementation detail and belongs in the scripts. A
+        literal reappearing in SKILL.md means a command block was written
+        the long way again, and it will drift from the wrapper silently."""
+        found = re.findall(r"agentic\.skill\.floxify", SKILL_MD.read_text())
+        self.assertEqual(found, [],
+                         "SKILL.md names the tag; it belongs in the wrapper")
+
+    def test_prescribed_scripts_are_reached_through_the_wrapper(self):
+        """Every command block invoking detect.py or verify.py must go
+        through flox-python.sh. One added the long way carries no tag, and
+        nothing else in the suite would notice."""
+        text = SKILL_MD.read_text()
+        for n, ln in enumerate(text.splitlines(), 1):
+            if "scripts/detect.py" not in ln and "scripts/verify.py" not in ln:
+                continue
+            if ln.lstrip().startswith(("-", "*", ">")) or "`" in ln:
+                continue          # prose and the documented fallback
+            with self.subTest(line=n):
+                self.assertIn("flox-python.sh", ln,
+                              f"SKILL.md:{n} reaches a script without the wrapper")
 
 
 if __name__ == "__main__":

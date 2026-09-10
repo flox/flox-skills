@@ -146,7 +146,7 @@ manifest you eventually write against them:
 
 ```bash
 DETECT_JSON="/tmp/floxify-detect.json"   # one floxify run at a time; fine to reuse
-flox run -p python313 -- python3 "<skill-dir>/scripts/detect.py" "$TARGET_DIR" | tee "$DETECT_JSON"
+"<skill-dir>/scripts/flox-python.sh" "<skill-dir>/scripts/detect.py" "$TARGET_DIR" | tee "$DETECT_JSON"
 ```
 
 `<skill-dir>` is this skill's own directory — the folder that holds this
@@ -901,7 +901,7 @@ can all pass activation cleanly. `verify.py` grounds the OUTPUT the same way
 instead of leaving that to the Phase 4 report's own judgment.
 
 ```bash
-flox run -p python313 -- python3 "<skill-dir>/scripts/verify.py" \
+"<skill-dir>/scripts/flox-python.sh" "<skill-dir>/scripts/verify.py" \
   "$DETECT_JSON" "$TARGET_DIR/.flox/env/manifest.toml"
 ```
 
