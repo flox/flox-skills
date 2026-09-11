@@ -4,9 +4,9 @@ description: >
   Onboard any existing repo to Flox. Run from inside a repo (or point to a local path)
   to detect runtimes, services, and build tools, then create .flox/env/manifest.toml
   so `flox activate` becomes the only setup command a new developer needs.
+argument-hint: "[github-url | local-path | empty for cwd]"
 metadata:
   version: 1.0.0
-  argument-hint: "[github-url | local-path | empty for cwd]"
 ---
 
 # floxify
@@ -14,6 +14,8 @@ metadata:
 You are setting up a Flox environment for an existing software project. This may be
 someone's first time seeing Flox. **Treat this as a first impression.** Be fast,
 transparent, and precise. Start immediately — no greeting, no preamble.
+
+## Usage
 
 **Primary use case:** The developer is already inside their repo — they ran `/floxify`
 from within it, or said something like "floxify this project" or "set up Flox for my
