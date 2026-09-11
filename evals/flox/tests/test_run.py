@@ -9,6 +9,7 @@ over mocked subprocesses — no claude, no network, no API spend.
 import json
 import subprocess
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import run
@@ -1299,6 +1300,211 @@ class TestVersionPinGateIsBound(unittest.TestCase):
         # discouraged form, and the check judges every fenced block.
         t = self.by_id["version-range-tradeoff"]
         self.assertNotIn("no_range_version_pin", t["checks"])
+
+
+class TestNoFakeInstallUrl(unittest.TestCase):
+    """`no_fake_install_url` — True means PASS (no invented install URL).
+
+    The check predates the installer. When it was written there was no
+    `curl | sh` path at all, so banning the shape outright was correct and
+    `install.flox.dev` really was a hallucination. Both facts changed:
+    `get.flox.dev` serves the script, and `install.flox.dev` is a second
+    alias for the same object. What is still worth catching is a URL the
+    model made up, so the check moved from banning a *shape* to allowing
+    a known set of *endpoints*.
+    """
+
+    def check(self, answer):
+        return run.CHECKS["no_fake_install_url"](answer)
+
+    # --- the real installer, in the forms the docs actually publish -------
+    def test_accepts_the_canonical_one_liner(self):
+        self.assertTrue(self.check("curl -fsSL https://get.flox.dev | sh"))
+
+    def test_accepts_the_install_flox_dev_alias(self):
+        self.assertTrue(self.check("curl -fsSL https://install.flox.dev | sh"))
+
+    def test_accepts_a_pinned_version_through_the_environment(self):
+        # Documented on the install page; the env assignment sits between the
+        # pipe and the shell, which a naive `\| sh` pattern would miss.
+        self.assertTrue(
+            self.check("curl -fsSL https://get.flox.dev | FLOX_VERSION=1.14.0 sh")
+        )
+
+    def test_accepts_a_channel_override(self):
+        self.assertTrue(
+            self.check("curl -fsSL https://get.flox.dev | FLOX_CHANNEL=qa sh")
+        )
+
+    # --- invented endpoints ----------------------------------------------
+    def test_rejects_piping_the_download_page(self):
+        # `flox.dev/install` redirects to the /download/ HTML page, so piping
+        # it installs nothing. Measured: sh exits 127 without -L, 2 with it.
+        # A wrong answer rather than a dangerous one, but still wrong.
+        self.assertFalse(self.check("curl -fsSL https://flox.dev/install | sh"))
+
+    def test_rejects_an_invented_path_on_a_real_host(self):
+        # Observed in evals/flox/baselines/screen-opus.json.
+        self.assertFalse(
+            self.check(
+                "curl -fsSL https://downloads.flox.dev/by-env/stable/install/flox-installer.sh | sh"
+            )
+        )
+
+    def test_rejects_an_invented_host(self):
+        # Observed in evals/flox/baselines/screen-haiku.json. Not piped into a
+        # shell at all, so the pipe rule alone would let it through.
+        self.assertFalse(
+            self.check(
+                "curl -L https://releases.flox.dev/flox/latest/linux/flox -o ~/.local/bin/flox"
+            )
+        )
+
+    # --- things that are not install instructions -------------------------
+    def test_accepts_the_real_download_host_when_not_piped(self):
+        # The .deb/.rpm/checksum URLs the install docs link are legitimate.
+        self.assertTrue(
+            self.check(
+                "curl -fsSL https://downloads.flox.dev/by-env/stable/deb/"
+                "flox-1.15.0.x86_64-linux.deb -o /tmp/flox.deb"
+            )
+        )
+
+    def test_accepts_package_manager_instructions(self):
+        self.assertTrue(self.check("brew install flox"))
+
+    def test_accepts_docs_links(self):
+        self.assertTrue(
+            self.check("See https://flox.dev/docs/install-flox/install for options.")
+        )
+
+    def test_accepts_an_answer_with_no_install_instructions(self):
+        self.assertTrue(self.check("version = 1\n\n[install]\nripgrep.pkg-path = \"ripgrep\""))
+
+    def test_accepts_unrelated_curl_usage(self):
+        # `flox run -p curl` and healthchecks pipe nothing and install nothing.
+        self.assertTrue(
+            self.check("healthcheck = \"curl -f http://localhost:8000/health || exit 1\"")
+        )
+
+
+class TestInstallHostRegistry(unittest.TestCase):
+    """The endpoint sets are the check's whole contract — pin them."""
+
+    def test_only_the_two_aliases_may_be_piped_to_a_shell(self):
+        self.assertEqual(
+            run.INSTALL_SCRIPT_HOSTS, frozenset({"get.flox.dev", "install.flox.dev"})
+        )
+
+    def test_script_hosts_are_a_subset_of_real_hosts(self):
+        self.assertTrue(run.INSTALL_SCRIPT_HOSTS <= run.REAL_FLOX_HOSTS)
+
+
+class TestNamesInstallScript(unittest.TestCase):
+    """`names_install_script` — the positive half of the install task."""
+
+    def check(self, answer):
+        return run.CHECKS["names_install_script"](answer)
+
+    def test_accepts_either_alias(self):
+        self.assertTrue(self.check("curl -fsSL https://get.flox.dev | sh"))
+        self.assertTrue(self.check("curl -fsSL https://install.flox.dev | sh"))
+
+    def test_rejects_a_package_manager_only_answer(self):
+        # Correct as far as it goes, but it is the pre-DEV-315 answer.
+        self.assertFalse(self.check("brew install flox\nsudo apt install ./flox.deb"))
+
+    def test_rejects_the_download_page_alone(self):
+        self.assertFalse(self.check("Get it from https://flox.dev/download/"))
+
+
+class TestInstallTaskIsBound(unittest.TestCase):
+    """DEV-315: the install claim only ever surfaced incidentally, inside
+    environment-setup answers. It now has a task of its own, on the gate."""
+
+    @classmethod
+    def setUpClass(cls):
+        path = run.HERE / "tasks" / "tasks.jsonl"
+        cls.by_id = {
+            json.loads(line)["id"]: json.loads(line)
+            for line in path.read_text().splitlines()
+            if line.strip()
+        }
+
+    def test_install_task_binds_the_gate(self):
+        t = self.by_id["install-flox-ubuntu"]
+        self.assertEqual(t.get("tier"), "should")
+        self.assertFalse(t.get("trigger_test"), "must bind the gate")
+        self.assertIn("no_fake_install_url", t["checks"])
+        self.assertIn("names_install_script", t["checks"])
+
+
+class TestInstallUrlReviewRegressions(unittest.TestCase):
+    """Cases the DEV-315 review found the first implementation got wrong.
+
+    All four are answers a model plausibly writes, and the first version of
+    this check graded every one of them backwards.
+    """
+
+    def check(self, answer):
+        return run.CHECKS["no_fake_install_url"](answer)
+
+    def test_docs_link_beside_the_one_liner_still_passes(self):
+        # False FAIL. Scanning the whole line meant the docs URL, which feeds
+        # no pipe, was judged against the pipe the one-liner feeds.
+        self.assertTrue(self.check(
+            "See https://flox.dev/download for details, or run "
+            "curl -fsSL https://get.flox.dev | sh"
+        ))
+
+    def test_one_liner_in_a_markdown_table_row_still_passes(self):
+        self.assertTrue(self.check(
+            "| https://flox.dev/download/ | curl -fsSL https://get.flox.dev | sh |"
+        ))
+
+    def test_another_tools_installer_is_not_our_business(self):
+        self.assertTrue(self.check(
+            "curl -fsSL https://get.helm.sh/x | bash  # flox: https://flox.dev/download/"
+        ))
+
+    def test_line_continuation_does_not_hide_the_pipe(self):
+        # False PASS. Split across lines, the redirect-piped case read as two
+        # innocent lines and rule 1 never saw a pipe.
+        self.assertFalse(self.check(
+            "curl -fsSL https://flox.dev/install \\\n    | sh"
+        ))
+
+    def test_sentence_punctuation_does_not_hide_an_invented_host(self):
+        # False PASS. The trailing dot made the host unrecognisable as flox.dev.
+        self.assertFalse(self.check("Grab it from https://releases.flox.dev."))
+
+    def test_zsh_is_a_shell_too(self):
+        self.assertFalse(self.check("curl -fsSL https://flox.dev/install | zsh"))
+
+
+class TestAgentRunsAwayFromTheAnswerKey(unittest.TestCase):
+    """The agent must not be able to open tasks/*.jsonl.
+
+    Every arm is allowed the Read tool so the skills arm can follow a skill's
+    reference files. With the harness's own directory as the working
+    directory, that also reaches the registry — the prompt, the rubric and
+    `must_match`. A screened BASELINE did exactly that and said so, then
+    scored 5/5 as a bare model, which reads as "the skill adds nothing".
+    """
+
+    def test_agent_cwd_is_not_the_suite_root(self):
+        self.assertNotEqual(Path(run.AGENT_CWD).resolve(), run.HERE)
+
+    def test_agent_cwd_holds_no_task_registry(self):
+        self.assertEqual(list(Path(run.AGENT_CWD).glob("**/*.jsonl")), [])
+
+    @patch("run.subprocess.run")
+    def test_run_claude_launches_there(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=json.dumps(CLAUDE_JSON), stderr=""
+        )
+        run.run_claude("p", "baseline", ["Read"])
+        self.assertEqual(mock_run.call_args.kwargs["cwd"], run.AGENT_CWD)
 
 
 if __name__ == "__main__":
