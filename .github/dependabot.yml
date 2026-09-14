@@ -1,0 +1,83 @@
+# Every dependency manifest in this repository lives under
+# evals/floxify/fixtures/. Those manifests are INPUTS to the floxify eval
+# suite: deliberately-shaped repos that the skill is scored on reading
+# correctly. Changing a version in one changes what the eval measures, and it
+# would do so invisibly, so Dependabot must never rewrite them.
+#
+# Each block below exists only to carry its `ignore` rule, and covers all
+# fixtures for that ecosystem including ones added later.
+#
+#   `ignore` applies to security updates as well as version updates, so it is
+#   what stops a security-update pull request from editing a fixture lock file
+#   if security updates are ever switched on for this repository. That is the
+#   real exposure: security updates are a repository setting and act on every
+#   manifest in the dependency graph whether or not this file mentions it.
+#
+#   `open-pull-requests-limit: 0` is the documented way to turn version updates
+#   off. It is stated separately because it does not cover security updates,
+#   which are explicitly exempt from the open pull request limit.
+#
+# `exclude-paths` is deliberately NOT used here. It is documented as applying
+# to version updates only, so it would leave the security-update path open.
+#
+# This file has no effect on Dependabot ALERTS, and is not trying to have one.
+# The fixture alerts stay visible in the Security tab on purpose: that feed is
+# read for SOC 2 evidence, so these alerts need to be triaged with a recorded
+# reason rather than hidden. That is a repository-level auto-triage rule, set
+# under Settings, and cannot be expressed in this file.
+
+version: 2
+updates:
+  - package-ecosystem: bundler
+    directories:
+      - "/evals/floxify/fixtures/**"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
+
+  - package-ecosystem: cargo
+    directories:
+      - "/evals/floxify/fixtures/**"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
+
+  - package-ecosystem: gomod
+    directories:
+      - "/evals/floxify/fixtures/**"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
+
+  - package-ecosystem: npm
+    directories:
+      - "/evals/floxify/fixtures/**"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
+
+  - package-ecosystem: pip
+    directories:
+      - "/evals/floxify/fixtures/**"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
+
+  - package-ecosystem: uv
+    directories:
+      - "/evals/floxify/fixtures/**"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    ignore:
+      - dependency-name: "*"
