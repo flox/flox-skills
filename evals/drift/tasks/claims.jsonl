@@ -1,0 +1,12 @@
+{"id": "activate-command", "kind": "command_exists", "command": ["activate"], "skill_ref": {"file": "skills/flox/SKILL.md", "quote": "flox activate -m dev|run"}}
+{"id": "activate-mode-flag", "kind": "flag_exists", "command": ["activate"], "flag": "--mode", "skill_ref": {"file": "skills/flox/SKILL.md", "quote": "flox activate -m dev|run"}}
+{"id": "activate-start-services-flag", "kind": "flag_exists", "command": ["activate"], "flag": "--start-services", "skill_ref": {"file": "skills/flox/references/services.md", "quote": "flox services status/logs/restart"}}
+{"id": "run-command", "kind": "command_exists", "command": ["run"], "skill_ref": {"file": "skills/flox/SKILL.md", "quote": "flox run -p <pkg> -- <cmd>"}}
+{"id": "containerize-command", "kind": "command_exists", "command": ["containerize"], "skill_ref": {"file": "skills/flox/SKILL.md", "quote": "flox containerize --runtime docker"}}
+{"id": "containerize-runtime-flag", "kind": "flag_exists", "command": ["containerize"], "flag": "--runtime", "skill_ref": {"file": "skills/flox/SKILL.md", "quote": "flox containerize --runtime docker"}}
+{"id": "search-command", "kind": "command_exists", "command": ["search"], "skill_ref": {"file": "skills/flox/SKILL.md", "quote": "Verify names with `flox search"}}
+{"id": "show-command", "kind": "command_exists", "command": ["show"], "skill_ref": {"file": "skills/flox-debug/SKILL.md", "quote": "`flox show` lists as"}}
+{"id": "build-command", "kind": "command_exists", "command": ["build"], "skill_ref": {"file": "skills/flox/SKILL.md", "quote": "flox publish"}}
+{"id": "publish-command", "kind": "command_exists", "command": ["publish"], "skill_ref": {"file": "skills/flox/SKILL.md", "quote": "flox publish"}}
+{"id": "services-command", "kind": "command_exists", "command": ["services"], "skill_ref": {"file": "skills/flox/references/services.md", "quote": "flox services status/logs/restart"}}
+{"id": "include-command", "kind": "command_exists", "command": ["include"], "skill_ref": {"file": "skills/flox/references/sharing.md", "quote": "flox include upgrade <name>"}}
