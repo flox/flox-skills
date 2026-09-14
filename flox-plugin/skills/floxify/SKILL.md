@@ -4,9 +4,9 @@ description: >
   Onboard any existing repo to Flox. Run from inside a repo (or point to a local path)
   to detect runtimes, services, and build tools, then create .flox/env/manifest.toml
   so `flox activate` becomes the only setup command a new developer needs.
+argument-hint: "[github-url | local-path | empty for cwd]"
 metadata:
   version: 1.0.0
-  argument-hint: "[github-url | local-path | empty for cwd]"
 ---
 
 # floxify
@@ -14,6 +14,8 @@ metadata:
 You are setting up a Flox environment for an existing software project. This may be
 someone's first time seeing Flox. **Treat this as a first impression.** Be fast,
 transparent, and precise. Start immediately — no greeting, no preamble.
+
+## Usage
 
 **Primary use case:** The developer is already inside their repo — they ran `/floxify`
 from within it, or said something like "floxify this project" or "set up Flox for my
@@ -146,7 +148,7 @@ manifest you eventually write against them:
 
 ```bash
 DETECT_JSON="/tmp/floxify-detect.json"   # one floxify run at a time; fine to reuse
-flox run -p python313 -- python3 "<skill-dir>/scripts/detect.py" "$TARGET_DIR" | tee "$DETECT_JSON"
+"<skill-dir>/scripts/flox-python.sh" "<skill-dir>/scripts/detect.py" "$TARGET_DIR" | tee "$DETECT_JSON"
 ```
 
 `<skill-dir>` is this skill's own directory — the folder that holds this
@@ -901,7 +903,7 @@ can all pass activation cleanly. `verify.py` grounds the OUTPUT the same way
 instead of leaving that to the Phase 4 report's own judgment.
 
 ```bash
-flox run -p python313 -- python3 "<skill-dir>/scripts/verify.py" \
+"<skill-dir>/scripts/flox-python.sh" "<skill-dir>/scripts/verify.py" \
   "$DETECT_JSON" "$TARGET_DIR/.flox/env/manifest.toml"
 ```
 
@@ -1026,8 +1028,18 @@ Wait for the user's response, then:
   after the report. Read `references/migration.md` and follow it. Never run
   migration automatically — only on this explicit request.
 - **3 (Leave it):** Say: "No problem — run `flox activate` whenever you're ready. Say 'migrate' to commit it."
-- **4 (Remove it):** Run `rm -rf "$TARGET_DIR/.flox/"`, confirm it's gone:
-  "Done. Zero trace — nothing else was touched."
+- **4 (Remove it):** Substitute the absolute target path into both lines, then
+  run:
+
+  ```bash
+  rm -rf "<absolute-target-dir>/.flox"
+  test -d "<absolute-target-dir>/.flox" && echo STILL_THERE || echo REMOVED
+  ```
+
+  Do not leave `$TARGET_DIR` in the command: unsubstituted it targets `/.flox`
+  rather than the user's project, and `rm -rf` reports success either way, so the
+  second line is what tells you which happened. Say "Done. Zero trace — nothing
+  else was touched." only on `REMOVED`.
 
 ---
 
