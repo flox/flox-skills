@@ -16,7 +16,11 @@ After `install-flox-action`, `flox` is on `PATH` — but the subsequent steps ar
 still running on the bare runner. Anything the environment provides
 (interpreters, linters, services) is not there until something activates.
 
-**Never install Flox in CI with a `curl … | bash` one-liner.** Use the action.
+**On GitHub Actions, install with the action rather than the install script.**
+The action is the supported integration, and you pin it to a commit SHA. The
+script (`curl -fsSL https://get.flox.dev | sh`) is the right answer on
+platforms with no official integration — see
+[Other CI systems](#other-ci-systems).
 
 ## Short commands: `activate-action`
 
@@ -206,7 +210,7 @@ which is the failure this section exists to prevent.
 | A multiline script in `activate-action`'s `command:` | Interpolated into `-c '…'`; an embedded `'` breaks the wrapper | Use the custom `shell:` |
 | Custom shell without `-e -o pipefail` | Step passes as long as the last line passes | Keep both flags |
 | Custom shell without `--noprofile --norc` | Diverges from GitHub's default shell invocation for no reason | Keep both flags |
-| `curl … \| bash` to install Flox | Not a supported install path | `flox/install-flox-action` |
+| The install script in a GitHub Actions job | Works, but bypasses the supported SHA-pinned integration | `flox/install-flox-action` |
 | `uses: flox/install-flox-action@v2` | Moving tag; supply-chain risk | Pin the full SHA |
 | A made-up 40-character SHA | Fails at `uses:` resolution, and looks correct | Read it from the releases page or `git ls-remote` |
 
@@ -233,9 +237,12 @@ Community integrations exist for other systems (e.g. Buildkite plugins) —
 unofficial, so read the plugin before recommending it, and prefer the generic
 pattern below when in doubt.
 
-For anything else, the same install-is-not-activation split applies. Provide
-Flox in the runner image, via the platform's package manager or a prebuilt
-image, rather than piping an installer into a shell at job time. Then enter
-the environment once per script rather than per line —
+For anything else, the same install-is-not-activation split applies. Bake Flox
+into the runner image where you control it, so job time is spent on the job
+rather than on a download. Where the image is not yours to change,
+`curl -fsSL https://get.flox.dev | sh` as the first job step is the supported
+fallback.
+
+Then enter the environment once per script rather than per line —
 `flox activate -- <interpreter> <script>`, or by making the script's first
 action an activation.

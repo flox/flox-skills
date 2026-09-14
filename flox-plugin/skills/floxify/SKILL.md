@@ -4,9 +4,9 @@ description: >
   Onboard any existing repo to Flox. Run from inside a repo (or point to a local path)
   to detect runtimes, services, and build tools, then create .flox/env/manifest.toml
   so `flox activate` becomes the only setup command a new developer needs.
+argument-hint: "[github-url | local-path | empty for cwd]"
 metadata:
   version: 1.0.0
-  argument-hint: "[github-url | local-path | empty for cwd]"
 ---
 
 # floxify
@@ -14,6 +14,8 @@ metadata:
 You are setting up a Flox environment for an existing software project. This may be
 someone's first time seeing Flox. **Treat this as a first impression.** Be fast,
 transparent, and precise. Start immediately — no greeting, no preamble.
+
+## Usage
 
 **Primary use case:** The developer is already inside their repo — they ran `/floxify`
 from within it, or said something like "floxify this project" or "set up Flox for my
@@ -787,8 +789,9 @@ that exact patch, so `nodejs.version = "24.18.0"` is a clean exact match
 whether the versioned `ruby_4_0` pkg-path carries that exact patch or only
 the nearest prior one at the time you run the skill, pin whichever `flox
 show` confirms, and record any gap in the trailing comment the same way
-the mastodon golden's comment does (`# catalog max is <X>; repo pins
-4.0.6 (<N> patch(es) ahead, verify live)`) — don't copy the specific
+the mastodon golden's comment does
+(`# catalog max is <X>; repo pins 4.0.6 (<N> patch(es) ahead, verify live)`) —
+don't copy the specific
 numbers from this guidance as if they were current.
 
 **Platform-conditional packages** — when a dependency is only relevant on certain
@@ -1025,8 +1028,18 @@ Wait for the user's response, then:
   after the report. Read `references/migration.md` and follow it. Never run
   migration automatically — only on this explicit request.
 - **3 (Leave it):** Say: "No problem — run `flox activate` whenever you're ready. Say 'migrate' to commit it."
-- **4 (Remove it):** Run `rm -rf "$TARGET_DIR/.flox/"`, confirm it's gone:
-  "Done. Zero trace — nothing else was touched."
+- **4 (Remove it):** Substitute the absolute target path into both lines, then
+  run:
+
+  ```bash
+  rm -rf "<absolute-target-dir>/.flox"
+  test -d "<absolute-target-dir>/.flox" && echo STILL_THERE || echo REMOVED
+  ```
+
+  Do not leave `$TARGET_DIR` in the command: unsubstituted it targets `/.flox`
+  rather than the user's project, and `rm -rf` reports success either way, so the
+  second line is what tells you which happened. Say "Done. Zero trace — nothing
+  else was touched." only on `REMOVED`.
 
 ---
 
@@ -1034,12 +1047,19 @@ Wait for the user's response, then:
 
 **Monorepo** (pnpm-workspace.yaml, nx.json, turborepo.json, multiple go.mod files):
 Set up root environment with shared runtimes. Note in report:
-`This is a monorepo. Root environment covers shared runtimes.
-Individual services may benefit from their own — run /floxify <service-path>`
+
+```
+This is a monorepo. Root environment covers shared runtimes.
+Individual services may benefit from their own — run /floxify <service-path>
+```
 
 **Large pip dependency count (100+):**
-Note: `First activate installs <N> pip packages — takes a few minutes.
-Subsequent activates check the lockfile and skip if nothing changed.`
+Note:
+
+```
+First activate installs <N> pip packages — takes a few minutes.
+Subsequent activates check the lockfile and skip if nothing changed.
+```
 
 **Package not found in Flox catalog:**
 In ✗ section:
