@@ -1,8 +1,8 @@
 ---
 name: flox-debug
 description: >-
-  Use when a Flox environment does not resolve the packages
-  you expect. Symptoms: `flox install` or `flox upgrade`
+  Use when a Flox environment does not resolve the expected
+  packages. Symptoms: `flox install` or `flox upgrade`
   gives a different version than `flox show` lists as
   available; a newly published package does not show up;
   adding one package makes a working environment fail with
