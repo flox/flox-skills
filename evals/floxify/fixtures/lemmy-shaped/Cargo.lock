@@ -5,15 +5,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "diesel"
-version = "2.3.7"
+version = "2.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "tokio"
-version = "1.40.0"
+version = "1.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "serde"
-version = "1.0.210"
+version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
