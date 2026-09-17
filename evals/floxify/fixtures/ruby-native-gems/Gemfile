@@ -4,10 +4,13 @@ ruby "3.3.4"
 
 # Native-extension gems — the hard part of Ruby onboarding.
 # nokogiri compiles against libxml2/libxslt, pg against libpq.
-gem "nokogiri", "~> 1.16"
-gem "pg", "~> 1.5"
-gem "puma", "~> 6.4"
-gem "rake", "~> 13.1"
+# force_ruby_platform keeps Bundler on the source gems: both publish
+# precompiled platform variants that would otherwise be selected here and
+# silently skip the native build this fixture exists to exercise.
+gem "nokogiri", "~> 1.19", force_ruby_platform: true
+gem "pg", "~> 1.6", force_ruby_platform: true
+gem "puma", "~> 8.0"
+gem "rake", "~> 13.4"
 
 group :development, :test do
   gem "rspec", "~> 3.13"
