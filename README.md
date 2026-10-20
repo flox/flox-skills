@@ -92,6 +92,20 @@ codex plugin add flox@flox-skills
 codex plugin list                # verify
 ```
 
+### Flox environments
+
+The plugin is packaged in the agent-stacks catalog. Install it into a Flox
+environment beside your agent, then launch the agent through `agent-stacks`,
+which hands it the plugin without writing to the agent's own config:
+
+```bash
+flox install agent-stacks/agent-stacks agent-stacks/claude-code agent-stacks/agent-plugin-flox
+flox activate -- agent-stacks launch claude
+```
+
+`agent-stacks/agent-plugin-flox` is rebuilt from this repository automatically.
+The older `flox/skills-flox` package is no longer published.
+
 ### Other agents (Cursor, Copilot, Windsurf, Gemini, and more)
 
 For any agent that supports the [skills.sh](https://skills.sh) standard, install
