@@ -43,15 +43,7 @@
     "vars": {
       "NO_UPDATE_NOTIFIER": "1"
     },
-    "options": {},
-    "build": {
-      "skills-flox": {
-        "command": "  mkdir -p \"$out/share/claude-code/plugins/flox\"\n  cp -R flox-plugin/. \"$out/share/claude-code/plugins/flox/\"\n  source .flox/nix/flox-agent-layout.sh\n  flox_agent_layout \"flox\" \"$out/share\"\n",
-        "runtime-packages": [],
-        "version": "1.1.0",
-        "description": "Flox skills (flox, floxify, flox-debug) packaged for Claude Code, Codex, Pi, and OpenCode"
-      }
-    }
+    "options": {}
   },
   "packages": [
     {
