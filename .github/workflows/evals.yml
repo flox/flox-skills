@@ -344,6 +344,10 @@ jobs:
         working-directory: evals/floxify
         env:
           FLOX_DISABLE_METRICS: "true"
+          # FloxHub now requires a login to resolve packages, and the lint's
+          # `flox install` calls fail without one. Fork PRs get no secrets,
+          # so this job stays red for them.
+          FLOX_FLOXHUB_TOKEN: ${{ secrets.MANAGED_FLOX_FLOXHUB_TOKEN }}
         shell: flox activate -- bash --noprofile --norc -e -o pipefail {0}
         run: |
           # Same checker as the free `evals` step, but WITH flox+network,
