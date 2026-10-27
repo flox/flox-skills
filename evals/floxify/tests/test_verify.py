@@ -302,6 +302,91 @@ python3.pkg-path = "python313"
             manifest = f'[install]\ngo.pkg-path = "{pkg_path}"\n'
             self.assertEqual(_violations(detect, manifest), [], pkg_path)
 
+    def test_node_bare_current_and_historical_names_satisfy(self):
+        facts = {"runtimes": [
+            {"language": "node", "version": ">=4.0", "source": "package.json (engines.node)"},
+        ]}
+        for pkg_path in ("nodejs", "nodejs_20", "nodejs-10_x"):
+            with self.subTest(pkg_path=pkg_path):
+                manifest = f'[install]\nruntime.pkg-path = "{pkg_path}"\n'
+                self.assertEqual(_violations(facts, manifest), [])
+
+    def test_elixir_bare_current_and_historical_names_satisfy(self):
+        facts = {"runtimes": [
+            {"language": "elixir", "version": "~> 1.4", "source": "mix.exs"},
+        ]}
+        for pkg_path in ("elixir", "elixir_1_19", "elixir_1_7"):
+            with self.subTest(pkg_path=pkg_path):
+                manifest = f'[install]\nruntime.pkg-path = "{pkg_path}"\n'
+                self.assertEqual(_violations(facts, manifest), [])
+
+    def test_runtime_lookalikes_do_not_satisfy(self):
+        lookalikes = {
+            "node": (
+                "nodejs-dev", "nodejs_20-dev", "nodejs-10", "nodejs-_x",
+                "nodejs-10_x-dev", "nodejs-10_xy", "nodejs_10_x",
+                "nodejs_20Packages.npm", "nodejs-10_xPackages.npm",
+            ),
+            "elixir": (
+                "elixir-ls", "elixir_1", "elixir_1_", "elixir__7",
+                "elixir_1_7-dev", "elixir_1_7_4", "elixir_1_7Packages.mix",
+            ),
+        }
+        for language, pkg_paths in lookalikes.items():
+            facts = {"runtimes": [{"language": language, "source": "test"}]}
+            for pkg_path in pkg_paths:
+                with self.subTest(language=language, pkg_path=pkg_path):
+                    manifest = f'[install]\n{language}.pkg-path = "{pkg_path}"\n'
+                    v = _violations(facts, manifest)
+                    self.assertEqual(_rules(v), {"runtime-not-installed"})
+                    self.assertEqual(v[0]["severity"], "hard")
+
+    def test_missing_runtime_or_unrelated_pkg_path_still_fires(self):
+        for language in ("node", "elixir"):
+            facts = {"runtimes": [{"language": language, "source": "test"}]}
+            for manifest in ("", f'[install]\n{language}.pkg-path = "hello"\n'):
+                with self.subTest(language=language, manifest=manifest):
+                    self.assertEqual(_rules(_violations(facts, manifest)),
+                                     {"runtime-not-installed"})
+
+    def test_historical_names_at_detector_to_manifest_boundary(self):
+        # Small synthetic inputs reproduce the public-project naming gaps
+        # without vendoring their sources or executing manifest hooks.
+        cases = (
+            ("package.json", '{"engines": {"node": ">=4.0"}}',
+             "node", ">=4.0", "nodejs-10_x"),
+            ("mix.exs", 'def project, do: [elixir: "~> 1.4"]\n',
+             "elixir", "~> 1.4", "elixir_1_7"),
+        )
+        for filename, content, language, version, pkg_path in cases:
+            with self.subTest(language=language), tempfile.TemporaryDirectory() as tmp:
+                (Path(tmp) / filename).write_text(content)
+                facts = detect.scan(tmp)
+                self.assertEqual([(r["language"], r["version"]) for r in facts["runtimes"]],
+                                 [(language, version)])
+                manifest = f'[install]\nruntime.pkg-path = "{pkg_path}"\n'
+                self.assertEqual(_violations(facts, manifest), [])
+                # Recognizing the runtime must preserve independent checks.
+                manifest += '\n[hook]\non-activate = "git submodule update --init"\n'
+                v = _violations(facts, manifest)
+                self.assertEqual({x["rule"]: x["severity"] for x in v}, {
+                    "hook-mutates-tree": "hard", "hook-network-fetch": "advisory",
+                })
+
+    def test_runtime_presence_does_not_enforce_version_compatibility(self):
+        # This invariant checks presence; package/version resolution and
+        # choosing a compatible runtime remain separate responsibilities.
+        for language, version, pkg_path in (
+            ("node", "20", "nodejs-10_x"),
+            ("elixir", "~> 1.19", "elixir_1_7"),
+        ):
+            with self.subTest(language=language):
+                facts = {"runtimes": [
+                    {"language": language, "version": version, "source": "test"},
+                ]}
+                manifest = f'[install]\nruntime.pkg-path = "{pkg_path}"\n'
+                self.assertEqual(_violations(facts, manifest), [])
+
     # --- Important review finding: bare "python3" and "rustup" are real,
     # resolvable pkg-paths (confirmed live: `flox show python3` ->
     # python3@3.14.6, `flox show rustup` -> rustup@1.29.0) that the
@@ -3013,6 +3098,26 @@ RUBY_VIPS_DETECT = {
 
 
 class TestNativeGroupCoherence(unittest.TestCase):
+    def test_historical_node_runtime_participates_in_native_group_check(self):
+        facts = {"service_clients": [
+            {"package": "sharp", "search_terms": ["vips"], "source": "package.json"},
+        ]}
+        for group in ("toplevel", "node-runtime"):
+            with self.subTest(group=group):
+                manifest = f'''
+[install]
+node.pkg-path = "nodejs-10_x"
+node.pkg-group = "{group}"
+vips.pkg-path = "vips"
+vips.outputs = ["out", "dev"]
+'''
+                v = _violations(facts, manifest)
+                if group == "toplevel":
+                    self.assertEqual(v, [])
+                else:
+                    self.assertEqual(_rules(v), {"native-group-split"})
+                    self.assertEqual(v[0]["severity"], "advisory")
+
     def test_fires_advisory_when_runtime_and_native_dep_split(self):
         manifest = '''
 [install]

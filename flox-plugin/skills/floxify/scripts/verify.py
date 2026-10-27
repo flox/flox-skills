@@ -319,13 +319,15 @@ def check_malformed_detect_facts(detect):
 # live, it resolves to Python 2.7 in the catalog. Matching it would make
 # this check pass a manifest that installed Python 2 for a repo needing
 # Python 3, which is worse than not checking at all.
+# Catalog runtime names also include historical forms such as
+# `nodejs-10_x` and `elixir_1_7`; keep their numeric suffixes bounded.
 RUNTIME_PKG_PATTERNS = {
     "python": re.compile(r"^python3(\d{2})?(Full|FreeThreading)?$"),
-    "node": re.compile(r"^nodejs(_\d+)?$"),
+    "node": re.compile(r"^nodejs(_\d+|-\d+_x)?$"),
     "ruby": re.compile(r"^ruby(_\d+_\d+)?$"),
     "go": re.compile(r"^go(_\d+_\d+)?$"),
     "rust": re.compile(r"^(cargo|rustc|rustup)$"),
-    "elixir": re.compile(r"^elixir$"),
+    "elixir": re.compile(r"^elixir(_\d+_\d+)?$"),
     "php": re.compile(r"^php\d*(Packages\..+)?$"),
     "deno": re.compile(r"^deno$"),
     "dotnet": re.compile(r"^dotnet(-sdk)?(_\d+)?$"),
