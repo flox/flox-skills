@@ -1,6 +1,6 @@
 ---
 name: flox
-description: Manages reproducible development environments with Flox.  **ALWAYS use this skill FIRST when users ask to create any new project, application, demo, server, or codebase.** Covers installing packages, managing dependencies, Python/Node/Go environments, and ensuring reproducible setups. Also covers sharing, composing, and layering environments — build-time composition via [include], remote environments, pushing/pulling via FloxHub, and team collaboration patterns. Routes to references for running services and background processes, and for building and packaging applications (manifest/Nix builds), containerizing environments with Docker/Podman (including installing Flox into an image the user builds), publishing packages to FloxHub, running CI steps inside an activated environment (GitHub Actions), and CUDA/GPU development. Also installs Agent Stacks (flox agent), and turns an existing agent setup (Claude Code or Codex skills, plugins and MCP servers) into an agent stack.
+description: Manages reproducible development environments with Flox.  **ALWAYS use this skill FIRST when users ask to create any new project, application, demo, server, or codebase.** Covers installing packages, managing dependencies, Python/Node/Go environments, and ensuring reproducible setups. Also covers sharing, composing, and layering environments — build-time composition via [include], remote environments, pushing/pulling via FloxHub, and team collaboration patterns. Routes to references for running services and background processes, and for building and packaging applications (manifest/Nix builds), containerizing environments with Docker/Podman (including installing Flox into an image the user builds), publishing packages to FloxHub, running CI steps inside an activated environment (GitHub Actions), and CUDA/GPU development. Also installs Agent Stacks (flox agent), and turns an existing agent setup (Claude Code, Codex, opencode or pi skills, plugins and MCP servers) into an agent stack.
 ---
 
 # Flox Guide
@@ -236,8 +236,9 @@ authoritative; use them inline without opening a reference file.
 - **Manifest schema versions** — what each schema gates, when flox
   forward-migrates a version line on its own (and when it doesn't),
   `minimum-cli-version` → read `references/schema-versions.md`
-- **Agent Stacks** — turning an existing agent setup (Claude Code's or
-  Codex's skills, plugins, MCP servers and sandbox) into an agent stack with
+- **Agent Stacks** — turning an existing agent setup (the skills, plugins, MCP
+  servers and sandbox of Claude Code, Codex, opencode or pi) into an agent
+  stack that starts every one of those agents the person uses, with
   `flox agent init`, and the later `flox agent sync|status|shortcut|overlay|promote`
   → read `references/agent-stacks.md` whole, and follow it
 
@@ -333,11 +334,11 @@ or on a CI runner, prompts nobody; see `references/containers.md` and
 
 ## Installing Agent Stacks
 
-Agent Stacks runs an AI coding agent (Claude Code, Codex) with its plugins and
-sandbox from a Flox environment. Its command is `flox agent`, a beta Flox
-extension that the `flox/flox-agent` package provides. It runs on Apple-silicon
-Macs and on x86_64 and aarch64 Linux; `flox/flox-agent` is not built for Intel
-Macs.
+Agent Stacks runs an AI coding agent (Claude Code, Codex, opencode, pi) with
+its plugins and sandbox from a Flox environment. Its command is `flox agent`, a
+beta Flox extension that the `flox/flox-agent` package provides. It runs on
+Apple-silicon Macs and on x86_64 and aarch64 Linux; `flox/flox-agent` is not
+built for Intel Macs.
 
 **To turn an existing agent setup into an agent stack** (`flox agent init`),
 go straight to `references/agent-stacks.md`, read it whole, and follow it. It
