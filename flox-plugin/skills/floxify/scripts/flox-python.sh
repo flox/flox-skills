@@ -15,7 +15,7 @@ set -eu
 # APPEND, never overwrite: a nested context (flox-mcp-server, CI) sets its
 # own tag and both should survive. Matches what verify.py does at module
 # load for the `flox show` calls it makes directly.
-FLOX_INVOCATION_SOURCE="${FLOX_INVOCATION_SOURCE:+$FLOX_INVOCATION_SOURCE,}agentic.skill.floxify.1-1-0"
+FLOX_INVOCATION_SOURCE="${FLOX_INVOCATION_SOURCE:+$FLOX_INVOCATION_SOURCE,}agentic.skill.floxify.1-2-0"
 export FLOX_INVOCATION_SOURCE
 
 # exec: this is a wrapper, so the child's exit status is the whole result

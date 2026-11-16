@@ -80,7 +80,7 @@ except ImportError:  # pragma: no cover - fallback for < 3.11
 #
 # Dashes because dot is the hierarchy separator: a consumer truncating to
 # three fields coalesces every version of this skill.
-SKILL_VERSION = "1-1-0"
+SKILL_VERSION = "1-2-0"
 INVOCATION_SOURCE = f"agentic.skill.floxify.{SKILL_VERSION}"
 
 
