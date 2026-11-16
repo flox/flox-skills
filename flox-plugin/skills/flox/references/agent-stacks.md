@@ -8,6 +8,7 @@ Ask only what you have to.
 
 Read this file whole before the first command, then follow it from start to finish.
 SKILL.md, where this file names it, is the `flox` skill's own file, which sent you here.
+If the person asked only to install Agent Stacks, and not for a stack, this file is not for that: follow SKILL.md's "Installing Agent Stacks".
 
 Start by telling the person, in two or three lines, what happens: you check this machine and set up what is missing, asking first; then you read their setup, propose a stack, and build it once they agree; nothing of theirs is uploaded or published unless they choose that, though planning looks up their skills' sources on GitHub and in the Flox Catalog.
 
@@ -19,7 +20,8 @@ If they asked for something under Later, for a stack they already have, do 1 (se
   In other agents, ask in chat with the same words: the question, then each option numbered as `<label>: <description>`, label and description in full and unchanged, with no option added or left out.
   Every question of a step goes in one message.
   Then stop and wait for the answer.
-  A reply that is none of the numbers or labels is never a yes: for the Create question it is an answer in their own words (see 3); for any other, ask again.
+  A reply that is none of the numbers or labels is never a yes: for the Create question it is an answer in their own words (see 3); for a Stack question, a name means `Make another stack` with that name; for any other, ask again.
+  Where a question here asks for a name, such as an organization's, with no options, any name they give is the answer.
   Never pick an answer for the person.
 - **Showing.** Show the engine's text as it prints it, in a `text` block, and the `summary` of its JSON the same way.
   Add one sentence at most.
@@ -27,7 +29,8 @@ If they asked for something under Later, for a stack they already have, do 1 (se
 - **Running.** One command per shell call.
   Write `<bootstrap>` and every other path out in full: a variable set in one call is gone in the next.
   These commands use the network, and write under the home directory and to `/nix/store`.
-  If your shell runs in a sandbox, the `flox` and engine commands need to run outside it: say why once, and request each through your agent's own approval prompt.
+  If your shell runs in a sandbox, the `flox`, `curl` and engine commands need to run outside it: say why once, and request each through your agent's own approval prompt.
+  A command the sandbox stopped has not answered anything: never read its failure as a step's result.
   Never change your sandbox or approval settings, and never suggest restarting the agent with its checks off.
   Where your shell tool takes a timeout, give 10 minutes: the first `init plan`, getting flox-agent and `init apply` can take minutes.
 - **The person's commands.** You cannot answer a password prompt or finish a browser login.
@@ -193,7 +196,7 @@ It prints JSON: `plan` (the plan file), `summary`, `ask`, `shortcut`, `harness` 
   - `Stop`: "Changes nothing."
 
   For the first, run `<engine> sync --stack <dir>`, then `<engine> status --stack <dir>`, show both, and go to Later.
-  For the second, plan again with `--name` and that name.
+  For the second, plan again with `--name` and the name they gave, or `<name>-2` when they gave none.
 - Show `summary`, then ask the questions in `ask`.
   Its last question, `Create`, is whether to make the stack, and whether on their other computers too.
 
@@ -207,8 +210,9 @@ Pass every answer as `--answer "<header>=<label>"`, the label without ` (Recomme
 
 It prints JSON: `confirmed`, `share`, `summary` and, once the plan is confirmed, the `shortcut` question.
 
-To **ask again**: decide remakes the plan's questions after a change, and its JSON does not carry them.
-Read `<plan>`, the plan file, and ask the questions in its `questions` as they now stand (the last is Create): each with its `header` and `question`, multiSelect false, and only the `label` and `description` of each option.
+To **ask again**: decide remakes the plan's questions after a change, and, until the plan is confirmed, its JSON carries them as `ask`, in AskUserQuestion's shape.
+Ask the questions in decide's latest `ask` (the last is Create).
+If it has none, run `<engine> init decide <plan> --json` with no answers: it changes nothing and prints `ask`.
 Never ask from plan's first `ask` again: its descriptions may no longer say what the stack shares.
 
 - **Show every item first**: run `<engine> init decide <plan> --details`, with no answers: it changes nothing and prints every item.
@@ -328,6 +332,8 @@ curl -fsSL https://raw.githubusercontent.com/agent-stacks/agent-pkgs/main/pkgs/a
 
 It matches when the command succeeds and the file's `src.owner` and `src.repo` are the marketplace's `<owner>` and `<repo>`, in any case: the catalog's package `agent-stacks/agent-plugin-<plugin>` is made from the same repository.
 A plugin of the same name from another repository is another plugin, and does not match.
+When curl fails with "The requested URL returned error: 404", the catalog has no package of that name: no match.
+When it fails any other way, the lookup failed, not the match: show what it printed, and stop.
 `<version>` is the file's `version`.
 Every plugin that does not match stays here.
 
@@ -345,7 +351,7 @@ Ask, with header `Stack` and question "`<dir>` is already a stack. What now?":
 - `Stop`: "Changes nothing."
 
 For the first, go to [Finish, without the engine](#finish-without-the-engine).
-For the second, start this step again with that name.
+For the second, start this step again with the name they gave, or `<name>-2` when they gave none.
 
 Show the stack you propose, in a `text` block, in this shape:
 
@@ -381,6 +387,7 @@ Make the change, show the stack again, and ask again.
 
    [install]
    flox-agent.pkg-path = "flox/flox-agent"
+   flox-agent.version = "<flox-agent-version>"
    flox-agent.pkg-group = "flox-agent"
    <id>.pkg-path = "<agent-pkg>"
    <id>.pkg-group = "<id>"
@@ -392,6 +399,7 @@ Make the change, show the stack again, and ask again.
    EOF
    ```
 
+   `<flox-agent-version>` is the `<version>` you found for flox-agent in 1, the build the catalog is known to serve; leave the `flox-agent.version` line out when there was none.
    Write the two `agent-plugin-<plugin>` lines once for each plugin from the catalog, and not at all when there is none.
    Each package has a group of its own: in one group, packages must all resolve together, and these do not.
    If it fails naming a plugin's package, which the catalog may not serve, or not build for one of these systems, take that plugin out, say so, and run it again.
@@ -413,7 +421,8 @@ End with:
 ### Later, without the engine
 
 - `flox activate -d <dir> -- flox-agent list`: what the stack's agent gets.
-- To add or take out a catalog plugin: `flox edit -d <dir>` opens the manifest, where each plugin has its two lines, as in Build.
+- To add or take out a catalog plugin: `flox list -c -d <dir>` prints the manifest, where each plugin has its two lines, as in Build.
+  Add or take out those lines, and write the whole manifest back with `flox edit -d <dir> -f -` and a heredoc, as in Build; never run `flox edit` without `-f`, which opens an editor your shell cannot use.
   After a change to a stack on FloxHub, `flox push -d <dir>` shares it.
 - On another computer, after a push: `flox activate -r <handle>/<name> -- flox-agent launch <agent>`.
 

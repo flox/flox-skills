@@ -18,9 +18,10 @@ are authoritative on their own. Open a reference only when the user needs depth
 beyond what is here.
 
 If you downloaded this file rather than having the skill installed,
-`references/` is not beside it. Download the reference you need with
-`curl -fsSL https://raw.githubusercontent.com/flox/flox-skills/main/flox-plugin/skills/flox/references/<name>.md`
-and read it whole, not a summary of it.
+`references/` is not beside it. Save the reference you need there, with
+`curl -fsSL --create-dirs -o <this file's folder>/references/<name>.md https://raw.githubusercontent.com/flox/flox-skills/main/flox-plugin/skills/flox/references/<name>.md`,
+then read that file whole with your file-reading tool, not a summary of it:
+a shell tool may cut long output short.
 
 ## Quick Reference — Exact Facts
 
@@ -313,45 +314,64 @@ sudo rpm -ivh /path/to/flox.rpm
 For APT/YUM repositories that keep Flox updated through the system package
 manager, see https://flox.dev/docs/tutorials/installing-from-repo.md
 
+**When you install it for the person, on their machine:**
+
+- Check first: run `flox --version`. If Flox is already installed, say which
+  version, and install over it only if the person wants it upgraded or
+  repaired.
+- The install script, the `.pkg`, a `.deb` or `.rpm`, and the Homebrew cask
+  all ask for a password through `sudo`. An agent's shell cannot answer that
+  prompt, and neither can Claude Code's `! <command>`. Give the person the
+  command to run in a terminal of their own, and wait until they say it
+  finished. Never ask for their password, and never pass one to `sudo`.
+- Then check with `flox --version`. A fresh install may not be on your `PATH`
+  yet: try `/usr/local/bin/flox --version`, then `/usr/bin/flox --version`.
+
+This is about a person's own machine. Installing Flox into an image you build,
+or on a CI runner, prompts nobody; see `references/containers.md` and
+`references/ci.md`.
+
 ## Installing Agent Stacks
 
 Agent Stacks runs an AI coding agent (Claude Code, Codex) with its plugins and
 sandbox from a Flox environment. Its command is `flox agent`, a beta Flox
 extension that the `flox/flox-agent` package provides. It runs on Apple-silicon
 Macs and on x86_64 and aarch64 Linux; `flox/flox-agent` is not built for Intel
-Macs. Check each requirement in order, and ask before installing anything or
-changing a setting:
+Macs.
 
-```bash
-flox --version                        # 1.18 or later; else install or upgrade, as above
-flox auth status                      # exits 0 when logged in; else flox auth login
-flox config --set features.beta true  # flox agent is a beta extension
-```
+**To turn an existing agent setup into an agent stack** (`flox agent init`),
+go straight to `references/agent-stacks.md`, read it whole, and follow it. It
+checks and installs what onboarding needs itself, with the questions to ask,
+so do not do the steps below first.
 
-Then flox-agent, pinned to the newest build the catalog is known to serve:
+**To install Agent Stacks alone**, check each requirement in order. Ask before
+you install anything or change a setting, and stop once `flox agent` runs:
 
-```bash
-curl -fsSL https://downloads.agent-stacks.org/agent-stacks/by-commit/LATEST  # that build's commit
-flox show flox/flox-agent             # pin the version ending -g<hex> that the commit starts with
-```
+1. **Flox 1.18 or later.** Run `flox --version`. Install or upgrade it as
+   "Installing Flox" says, with the person running the installer.
+2. **A FloxHub login**, which installing from the catalog needs.
+   `flox auth status` exits 0 when they are logged in. Otherwise the person
+   runs `flox auth login` in a terminal of their own: it waits for a login in
+   the browser, which your shell cannot finish. Wait until they say it
+   finished, then check again.
+3. **Beta features**, because `flox agent` is a beta extension. They are on
+   when `flox config -l | grep '^features'` shows `beta = true`. Otherwise,
+   once the person agrees, run `flox config --set features.beta true`.
+4. **flox-agent**, in the Flox environment the person names: a project's,
+   their default one, or a new one (`flox init -d <dir>`). Run
+   `flox install -d <dir> flox/flox-agent`, or `-r <owner>/<name>` for one on
+   FloxHub. If that fails naming flox-agent, the catalog's newest build may
+   not be served yet. Install the newest build it is known to serve instead,
+   `flox/flox-agent@<version>`:
+   `curl -fsSL https://downloads.agent-stacks.org/agent-stacks/by-commit/LATEST`
+   prints that build's commit, and `<version>` is the one
+   `flox show flox/flox-agent` lists whose `-g<hex>` ending, seven or more hex
+   digits, the commit starts with.
 
-When either fails, or no version matches, take the catalog's newest, which it
-may not serve yet. It goes in a Flox environment of its own,
-`${XDG_CACHE_HOME:-$HOME/.cache}/agent-stacks/bootstrap`, for this system
-alone; `references/agent-stacks.md` has its manifest and the steps. Run it from
-there as
-`flox activate -d <bootstrap> -m run -- flox-agent <command>`.
-In an environment that installs `flox/flox-agent`, `flox agent <command>` runs
-the same.
-
-The Flox installer asks for a password through `sudo`, and `flox auth login`
-waits for a login in the browser. An agent's shell cannot answer either, and
-neither can Claude Code's `! <command>`: give the person the command to run in
-a terminal of their own, wait until they say it finished, then check again.
-
-To turn an existing agent setup into an agent stack (`flox agent init`), go
-straight to `references/agent-stacks.md`: it does these steps too, with the
-questions to ask.
+`flox agent <command>` then runs wherever that environment is active, for
+example `flox activate -d <dir> -- flox agent list`; with beta features off,
+`flox-agent <command>` does. Tell the person so, and stop there: making a
+stack from their setup is `flox agent init`, a request of its own.
 
 ## Flox Basics
 
