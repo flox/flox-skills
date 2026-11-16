@@ -19,7 +19,9 @@ build — and diagnosing it when the catalog doesn't give you the build you expe
   packages and pins toolchains (Python, Node, Go, Rust, and more), sets up
   services and databases, builds and containerizes applications, publishes to
   FloxHub, and composes/layers environments across teams. Reach for it first when
-  starting any new project.
+  starting any new project. It also installs Agent Stacks (`flox agent`) and
+  turns the agent setup you already have (Claude Code or Codex skills, plugins
+  and MCP servers) into an agent stack.
 - **`floxify`** — Onboard an *existing* repo to Flox. It detects your runtimes,
   services, and build tools, then writes `.flox/env/manifest.toml` so that
   `flox activate` becomes the only setup command a new developer needs. It

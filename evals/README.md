@@ -194,7 +194,7 @@ a short reply is not free. Do the arithmetic before a whole-registry run:
 | Command | Calls |
 |---|---|
 | `run.py` over `tasks/tasks.jsonl` | 36 tasks × 2 = **72** |
-| `screen.py --reps 5` over `tasks/screening.jsonl` | 54 candidates × 4 × 5 reps = **1080** |
+| `screen.py --reps 5` over `tasks/screening.jsonl` | 57 candidates × 4 × 5 reps = **1140** |
 | `run_floxify.py` over `synthetic.jsonl` | 7 fixtures × 2 = **14** |
 
 The screening figure is the expected invocation, not an edge case: `--reps` ≥ 5
@@ -502,7 +502,7 @@ Subsets come from stable entry metadata, never from a second file:
 
 | Selector | Entry field | Example |
 |---|---|---|
-| `--area` (repeatable) | `area` — `triggering`, `freshness`, `environments`, `builds`, `services`, `composition`, `sharing`, `publish`, `cuda`, `containers`, `resolution`, `install` | `--area triggering --area freshness` |
+| `--area` (repeatable) | `area` — `triggering`, `freshness`, `environments`, `builds`, `services`, `composition`, `sharing`, `publish`, `cuda`, `containers`, `resolution`, `install`, `agent-stacks` | `--area triggering --area freshness` |
 | `--regression` | `regression: true` — kept to guard a specific check or skill fix | `--regression` |
 | `--only` | `id` | `--only trap-vars-no-interpolation` |
 
@@ -597,7 +597,7 @@ kept on purpose, not ordinary run output.
 |---|---|---|---|
 | `skills.json` | `run.py --mode skills` over the gated registry | 27 of 36 tasks | `run.py`'s regression diff |
 | `baseline.json` | `run.py --mode baseline` — the unassisted arm, with the isolation caveat above | 27 of 36 tasks | `run.py`'s regression diff |
-| `screen-opus.json`, `screen-sonnet.json`, `screen-haiku.json` | `screen.py` at n=5 per model | 19 of 54 candidates | `gen_screening_report.py --results`, by hand |
+| `screen-opus.json`, `screen-sonnet.json`, `screen-haiku.json` | `screen.py` at n=5 per model | 19 of 57 candidates | `gen_screening_report.py --results`, by hand |
 
 **These snapshots lag their registries.** Both `run.py` baselines were recorded
 against a 27-task registry that has since grown to 33, so every run opens its
