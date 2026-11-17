@@ -183,15 +183,14 @@ Then run:
 
 If the person named the stack, add `--name <name>`.
 A directory they name for it goes to plan too, as `--stack <dir>`, written out in full.
-Never pass `--dir`: flox-agent takes that flag for itself, so the engine never sees it.
+Never pass `--dir`: the engine refuses it.
 
-It prints JSON: `plan` (the plan file), `summary`, `ask`, `shortcut`, `harness`, `harnesses` and `checks.problems`.
+It prints JSON: `plan` (the plan file), `summary`, `ask`, `harness`, `harnesses` and `checks`.
 `harnesses` lists the command of every agent the stack starts, such as `claude` and `codex`, and `harness` is the first of them, the one they start most.
 
 - If `checks.problems` is not empty, show each line.
-  For any line but the one below, stop: the person does what it says (a command with sudo or a login is theirs to run, in a terminal), then you plan again.
-- When the only line says `<dir>` "is already an onboarded stack", an earlier onboarding made that stack.
-  `<dir>` is that directory with `~` written out, and `<name>` its last part.
+  Unless the only one is about `checks.existing` (below), stop: the person does what it says (a command with sudo or a login is theirs to run, in a terminal), then you plan again.
+- When `checks.existing` is set and its line is the only problem, an earlier onboarding made a stack in that directory, `<dir>`, and `<name>` is its last part.
   Ask, with header `Stack` and question "`<dir>` is already a stack from an earlier onboarding. What now?":
   - `Bring it up to date (Recommended)`: "Runs sync on that stack: it takes in your edits and rebuilds what changed. It publishes and pushes nothing."
   - `Make another stack`: "Plans a new stack beside it, named `<name>-2` or a name you give."
@@ -201,7 +200,6 @@ It prints JSON: `plan` (the plan file), `summary`, `ask`, `shortcut`, `harness`,
   For the second, plan again with `--name` and the name they gave, or `<name>-2` when they gave none.
 - Show `summary`, then ask the questions in `ask`.
   Its last question, `Create`, is whether to make the stack, and whether on their other computers too.
-  When `harnesses` has more than one command and `summary` does not name every agent, spend your one sentence on naming them, the first being the main one, such as "The stack brings Claude Code, its main agent, and Codex."
 
 ## 3. Record the answers
 
@@ -211,7 +209,8 @@ Pass every answer as `--answer "<header>=<label>"`, the label without ` (Recomme
 <engine> init decide <plan> --json --answer "Create=Create it, on all my computers" …
 ```
 
-It prints JSON: `confirmed`, `share`, `summary` and, once the plan is confirmed, the `shortcut` question.
+It prints JSON: `confirmed`, `share`, `summary` and, once the plan is confirmed, the `shortcut` question when there is one.
+There is none when their default environment is on FloxHub and they keep the stack on this computer: that environment can include only a stack on FloxHub too, and `summary` ends with a `Shortcut: …` line saying so.
 
 To **ask again**: decide remakes the plan's questions after a change, and, until the plan is confirmed, its JSON carries them as `ask`, in AskUserQuestion's shape.
 Ask the questions in decide's latest `ask` (the last is Create).
@@ -234,17 +233,21 @@ Once decide's `confirmed` is true, build the stack, which takes a few minutes th
 <engine> init apply <plan> --json
 ```
 
-Meanwhile, ask decide's `shortcut` question exactly as given (plan's, if decide gave none): whether the commands of the stack's agents start the stack from now on, through the person's default Flox environment.
+Meanwhile, ask decide's `shortcut` question exactly as given: whether the commands of the stack's agents start the stack from now on, through the person's default Flox environment.
 Its labels name every one of those commands, as in "Make claude and codex start it".
 
 - In an agent that can run a command in the background and tells you when it ends, such as Claude Code, start apply that way, and ask the question in the same message.
   Do not wait for apply with a loop or poll it.
 - In any other agent, ask the question first and wait for the answer.
   Then say the build can take several minutes the first time, run apply, and wait for it.
+- When decide gave no `shortcut`, ask nothing: the `Shortcut: …` line you showed says why.
+  Say the build can take several minutes the first time, run apply, and wait for it.
 
 When apply has finished, read its JSON.
 If it failed, show its error and the log it names, and stop.
 Show each entry of its `notes` the way you show the engine's text.
+A note that Flox.app will not list the stack is expected when the stack starts both Claude Code and Codex, or neither: the app lists a stack with exactly one of the two.
+Say in one sentence that the stack works all the same, and go on.
 
 ## 5. Finish
 
@@ -263,18 +266,15 @@ Keep this order: `shortcut` is refused while a sync of the stack runs.
   `commands` lists the commands it makes start the stack, and `on` and `pending` say when:
   - `on` is true: `commands` start the stack in every terminal opened from now on.
   - `pending` is true: their default environment is on FloxHub, and includes the stack once the stack is there too, which the sync below does.
-  - Neither is true: it changed nothing, and `summary` says why.
+  - Neither is true: it changed nothing, and `summary` says why and what to do; do not restate it.
     - **Their shell activates no default environment.**
-      `summary` says how to set one up.
       Say that setting one up is the person's to do, in a terminal of their own, because it edits their shell's startup file; never run those commands, and never edit the file, yourself.
-      When apply's `share` is false, also say that `flox init -D` and `flox pull -D` make a default environment on FloxHub, which includes this stack only once they share it (see Later), while one in their home directory, made with `flox init -d ~` and activated by the same line with `-d ~` in place of `-D`, includes it at once.
     - **Their default environment is on FloxHub, and the stack is kept on this computer.**
-      That environment can include the stack only once the stack is on FloxHub too, which takes sharing it (see Later).
-      Share it only if the person asks.
+      Share the stack only if the person asks (see Later).
 
   Do not wait for the person: go on below.
 - **When they say they have set up a default environment**, now or later, run `<engine> shortcut --stack <dir> --json` again, without `--push`, and act on it as above.
-  For one on FloxHub, its `summary` also says how the change reaches their other computers: that push is the person's.
+  When `on` is true for one on FloxHub, its `summary` also says how the change reaches their other computers: that push is the person's.
 - **If apply's `share` is true** (they chose all their computers), start the sync and show what it prints:
 
   ```sh
@@ -290,8 +290,8 @@ Keep this order: `shortcut` is refused while a sync of the stack runs.
   Then, with `<agent-stacks>` being apply's `agent` as it is (it works once this session is over), and `<commands>` the commands in `harnesses`:
   - "After you edit a skill, run `<agent-stacks> sync --stack <dir>`";
   - when sharing: "`<agent-stacks> status --stack <dir>` shows how the upload to your other computers is going";
-  - when `shortcut` found no default environment: "Once you have set up a default environment, `<agent-stacks> shortcut --stack <dir>` makes `<commands>` start the stack", followed, when `share` is false, by ": at once for one in a directory, and for one on FloxHub once you have shared the stack";
-  - when `shortcut` changed nothing because the stack is not on FloxHub: "Once you have shared the stack, with `<agent-stacks> sync --stack <dir> --publish --push`, `<agent-stacks> shortcut --stack <dir>` makes `<commands>` start the stack".
+  - when `shortcut` found no default environment: "Once you have set up a default environment, `<agent-stacks> shortcut --stack <dir>` makes `<commands>` start the stack";
+  - when decide gave no `shortcut`, or `shortcut` changed nothing because the stack is not on FloxHub: "Once you have shared the stack, with `<agent-stacks> sync --stack <dir> --publish --push`, `<agent-stacks> shortcut --stack <dir>` makes `<commands>` start the stack".
 
 ## Later
 
@@ -488,8 +488,7 @@ Do not retry an outward step (a publish, a push, a shortcut) on your own.
 - **`shortcut` changed nothing**, its `on` and `pending` both false: act on its `summary` as 5 says.
   Meanwhile, apply's `launches` start the stack.
   With no default environment, setting one up is the person's to do, in a terminal of their own, since it edits their startup file; never yours.
-  Once they have, `shortcut` includes the stack at once for one in a directory; for one on FloxHub, which `flox init -D` and `flox pull -D` make, only once the stack is on FloxHub too.
-- **`shortcut` changed nothing because the stack is not on FloxHub**: their default environment is on FloxHub, and can include only a stack that is there too, and this one is kept on this computer.
+- **`shortcut` changed nothing because the stack is not on FloxHub**, or decide gave no `shortcut`: their default environment is on FloxHub, and can include only a stack that is there too, and this one is kept on this computer.
   If the person asks to share it, do so as Later says; once `status` says the stack is on FloxHub, run `shortcut` again.
 - **`claude` (or another of the stack's commands) still starts the agent without the stack** in a terminal open before `shortcut`: open a new terminal, or run `exec $SHELL` in it.
 - **One of the stack's commands starts the agent without the stack in one folder**: that folder's own Flox environment installs that agent, which comes first there.
