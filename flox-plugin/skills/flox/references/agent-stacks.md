@@ -34,6 +34,7 @@ If they asked for something under Later, for a stack they already have, do 1 (se
   A command the sandbox stopped has not answered anything: never read its failure as a step's result.
   Never change your sandbox or approval settings, and never suggest restarting the agent with its checks off.
   Where your shell tool takes a timeout, give 10 minutes: the first `init plan`, getting flox-agent and `init apply` can take minutes.
+  Give `status --wait` the longest it allows: it waits for an upload.
 - **The person's commands.** You cannot answer a password prompt or finish a browser login.
   A command that needs one is the person's to run, in a terminal window of their own: not with Claude Code's `! <command>`, which has no terminal to prompt in either.
   Give them the command, wait until they say it finished, then check again.
@@ -41,6 +42,8 @@ If they asked for something under Later, for a stack they already have, do 1 (se
   Nothing leaves the machine, and no file outside the stack is changed, unless the person picked an option that says so: `sync --publish --push` only after "Create it, on all my computers", or once they ask to share the stack and say yes to it (see Later); `shortcut` only after "Make … start it", or once they ask for it (see Later), and `shortcut --push` only after "Make … start it, on all my computers"; `promote` only for the packages they picked to share with an organization (see Later); without the engine, `flox push` only after "Create it, on all my computers".
 - Never read, print or copy a secret: never run `flox auth token`, and never print `flox config -l` whole.
 - Never add `--home` to an engine command.
+- Never add `--dir` to an engine command: it is not the stack's directory, and the engine accepts it and ignores it, so the command would act on the default stack.
+  `--stack <dir>` names the stack.
 - Never run `init` without a verb: with none, it asks its questions on a terminal, which your shell does not have.
 
 ## 1. Set up
@@ -164,9 +167,11 @@ On yes:
 env -u FLOX_EXTENSION_NAME flox activate -d <bootstrap> -m run -- flox-agent init --help
 ```
 
-It exits 0 and prints a usage that starts `Usage: flox-agent init`.
-If it prints flox-agent's general usage instead, `Usage: flox-agent [flags] <command>`, with no `init` among its commands, this flox-agent has no `init` yet: go to [Without the engine](#without-the-engine), in place of 2 to 5 and Later.
-If it fails any other way, show what it printed, and stop.
+- **The engine is there** when it exits 0 and prints a line that starts `Usage: flox-agent init`.
+  That line need not be the first: a description comes before it.
+- **There is no engine yet** when it prints flox-agent's general usage instead, without `init`: `Usage: flox-agent [flags] <command>` and commands that do not include `init` (exiting 1), or `error: unrecognized subcommand 'init'` and then `Usage: flox-agent [OPTIONS] [COMMAND]` (exiting 2).
+  Go to [Without the engine](#without-the-engine), in place of 2 to 5 and Later.
+- **Anything else**, such as Flox failing to activate `<bootstrap>`: show what it printed, and stop.
 
 From here on, `<engine>` is `env -u FLOX_EXTENSION_NAME flox activate -d <bootstrap> -m run -- flox-agent`, with `<bootstrap>` written out, and the `PATH` prefix in front when Flox needed one.
 `<engine> init plan`, `init decide` and `init apply` make the stack; `<engine> sync`, `status`, `shortcut`, `overlay` and `promote` act on it afterwards.
@@ -182,8 +187,7 @@ Then run:
 ```
 
 If the person named the stack, add `--name <name>`.
-A directory they name for it goes to plan too, as `--stack <dir>`, written out in full.
-Never pass `--dir`: the engine refuses it.
+A directory they name for it goes to plan too, as `--stack <dir>`, written out in full, never as `--dir` (see Rules).
 
 It prints JSON: `plan` (the plan file), `summary`, `ask`, `harness`, `harnesses` and `checks`.
 `harnesses` lists the command of every agent the stack starts, such as `claude` and `codex`, and `harness` is the first of them, the one they start most.
@@ -275,31 +279,41 @@ Keep this order: `shortcut` is refused while a sync of the stack runs.
   Do not wait for the person: go on below.
 - **When they say they have set up a default environment**, now or later, run `<engine> shortcut --stack <dir> --json` again, without `--push`, and act on it as above.
   When `on` is true for one on FloxHub, its `summary` also says how the change reaches their other computers: that push is the person's.
-- **If apply's `share` is true** (they chose all their computers), start the sync and show what it prints:
+- **If apply's `share` is true** (they chose all their computers), start the sync:
 
   ```sh
   <engine> sync --stack <dir> --publish --push --yes --background
   ```
 
-  It returns at once, then uploads their own packages and puts the stack on FloxHub by itself.
-  Do not wait for it.
-- End with how to try the stack, naming every agent it starts.
-  Apply's `harnesses` lists their commands, the one they start most first, and its `launches` gives the command that starts the stack with each of them; `harness` and `launch` are the first of each.
-  When `shortcut`'s `on` was true: each command in `harnesses`, in a new terminal.
-  Otherwise, with no shortcut, or one that is `pending` or changed nothing: each command's entry in `launches`, one line each, in the order of `harnesses`; when `pending` was true, add that the commands themselves start the stack in a new terminal once the upload finishes.
-  Then, with `<agent-stacks>` being apply's `agent` as it is (it works once this session is over), and `<commands>` the commands in `harnesses`:
-  - "After you edit a skill, run `<agent-stacks> sync --stack <dir>`";
-  - when sharing: "`<agent-stacks> status --stack <dir>` shows how the upload to your other computers is going";
-  - when `shortcut` found no default environment: "Once you have set up a default environment, `<agent-stacks> shortcut --stack <dir>` makes `<commands>` start the stack";
-  - when decide gave no `shortcut`, or `shortcut` changed nothing because the stack is not on FloxHub: "Once you have shared the stack, with `<agent-stacks> sync --stack <dir> --publish --push`, `<agent-stacks> shortcut --stack <dir>` makes `<commands>` start the stack".
+  It returns at once, and the sync goes on by itself: it uploads their own packages, puts the stack on FloxHub and then, when `shortcut` was `pending`, adds the stack to their default environment.
+  If it fails, show what it printed, say the stack works on this computer all the same, and go on as **Otherwise** below.
+  If it started, do not show what it prints, which says how to follow the sync: you follow it for them.
+  Say in one line instead that the upload takes a few minutes, and that you will say when it is done.
+  Then wait for it:
+
+  ```sh
+  <engine> status --stack <dir> --wait --json
+  ```
+
+  It waits until the sync has ended, writing each step as the sync starts it, and prints the stack's status as JSON last.
+  In an agent that can run a command in the background and tells you when it ends, such as Claude Code, run it that way; in any other, run it and wait.
+  Never poll the sync in a loop, or with `status` without `--wait`: `--wait` does the waiting.
+  If your shell stopped it at its time limit, the sync goes on without it: run it again.
+  If the person stops it, the upload goes on by itself: say so, and that they can ask you how it is going, then go on as **Otherwise** below.
+  When its `sync.state` is `stopped`, show `sync.error` and the log `sync.log` names, and say the stack works on this computer all the same, and that asking you again shares it.
+- **Otherwise**, run `<engine> status --stack <dir> --json`.
+- End with status's `start`, which says how to start the stack: each of its lines as it is, as lines of your message, not in a `text` block, so that its commands show as code.
+  Add one short sentence at most, naming no command: that after they change a skill, they can ask you to bring the stack up to date.
+  Name no other command, and do not repeat what `shortcut` or the sync said.
 
 ## Later
 
 `<dir>` is the stack repository; without `--stack`, a command finds the one stack in `~/.local/share/agent-stacks/stacks`.
 
-- `<engine> status --stack <dir>`: what is where, what changed, how the last sync went, and what each of the stack's commands, such as `claude`, starts.
+- `<engine> status --stack <dir>`: what is where, what changed, how the last sync went, what each of the stack's commands, such as `claude`, starts, and how to start the stack.
+  With `--wait`, it first waits for a sync of the stack that is running, as in 5.
 - `<engine> sync --stack <dir>`: take in their edits, with no flags publishing and pushing nothing.
-- `<engine> sync --stack <dir> --publish --push --yes --background`, then `<engine> status --stack <dir>`: share the stack with their other computers, or share it again after a sync stopped.
+- `<engine> sync --stack <dir> --publish --push --yes --background`, then `<engine> status --stack <dir> --wait --json`, as in 5, ending with status's `start`: share the stack with their other computers, or share it again after a sync stopped.
   Run it only when the person asks for it.
   When `<engine> status --stack <dir>` says the stack is "not on FloxHub yet", first ask whether to share it, with header `Share` and question "Put this stack on FloxHub?":
   - `Share it`: "Uploads your own packages to your FloxHub catalog, which only you can see, and puts the stack on FloxHub under your handle. That page is public: its name, package names and versions, and, for packages of your own, your skills' one-line descriptions and the path on this computer they were published from, which includes your user name. The Flox CLI cannot delete it."
@@ -442,8 +456,9 @@ Make the change, show the stack again, and ask again.
 
 End with:
 
-- How to start the stack here, one line for each `<command>` in `<commands>`: `flox activate -d <dir> -- flox-agent launch <command>`.
-- After a push, on any computer logged in to FloxHub as them, this computer included, one line for each `<command>` too: `flox activate -r <handle>/<name> -- flox-agent launch <command>`.
+- How to start the stack: one command for each `<command>` in `<commands>`, one per line.
+  After a push, it is `flox activate -r <handle>/<name> -- flox-agent launch <command>`, which works on any computer logged in to FloxHub as them, this one included; without one, `flox activate -d <dir> -- flox-agent launch <command>`.
+  Keep `flox-agent launch` in it: this stack has no script of its own named `<command>`, so `<command>` alone starts the agent without the stack's plugins.
 - When the stack brings Claude Code: on this computer, Claude Code also loads its own copy of a plugin the stack brings too.
   The person can turn theirs off with `/plugin` in Claude Code; never change their settings yourself.
 - Once flox-agent has onboarding, asking for it again, or pasting the same prompt again, makes the full stack, which packages their own skills and can make `<commands>` start it.
@@ -465,6 +480,7 @@ Do not retry an outward step (a publish, a push, a shortcut) on your own.
 
 - **Your shell tool stopped a command at its time limit**: run it again with the longest limit it allows.
   An apply stopped partway picks up where it left off; never add `--force` for this.
+  A `status --wait` stopped so leaves the sync running.
 - **"Resolving packages requires logging in to FloxHub"**, or a sync's "… could not be checked" naming `flox auth login`: the login expired.
   The person runs `flox auth login` in a terminal, then you run that command again.
 - **git asks to accept the Xcode licence**: onboarding does not need Apple's git; it uses Flox's when Apple's does not run.
@@ -475,7 +491,7 @@ Do not retry an outward step (a publish, a push, a shortcut) on your own.
   Offer to leave that item out: `init decide` with `<item>=keep`, ask again (see 3), then run `init apply` again with `--force`.
 - **The stack does not lock**, with a package missing for a system: the catalog changed since the plan; plan again.
 - **"a sync of … is already running"** (or a promote, or a shortcut): one at a time per stack.
-  `status` says what it is doing; run the command again once it ends.
+  Wait for it with `<engine> status --stack <dir> --wait --json`, as in 5, then run the command again.
 - **status says the last sync stopped**: show its error and its log.
   To share it again, the person asks, as Later says; what was published is not published again.
 - **"… was published twice, and the catalog still cannot serve it"**: FloxHub took the package but has not finished storing it.
@@ -486,19 +502,20 @@ Do not retry an outward step (a publish, a push, a shortcut) on your own.
   Show the message; the person decides, and runs the command it names in a terminal themselves; never run it.
 - **"note: the stack's FloxHub page now also shows the path …"**: show it as it is: the page is public.
 - **`shortcut` changed nothing**, its `on` and `pending` both false: act on its `summary` as 5 says.
-  Meanwhile, apply's `launches` start the stack.
+  Meanwhile, status's `start` says how to start the stack.
   With no default environment, setting one up is the person's to do, in a terminal of their own, since it edits their startup file; never yours.
 - **`shortcut` changed nothing because the stack is not on FloxHub**, or decide gave no `shortcut`: their default environment is on FloxHub, and can include only a stack that is there too, and this one is kept on this computer.
   If the person asks to share it, do so as Later says; once `status` says the stack is on FloxHub, run `shortcut` again.
-- **`claude` (or another of the stack's commands) still starts the agent without the stack** in a terminal open before `shortcut`: open a new terminal, or run `exec $SHELL` in it.
+- **`claude` (or another of the stack's commands) still starts the agent without the stack** in a terminal open before `shortcut`: a terminal keeps the command it had until it is reopened.
+  Open a new terminal, or, in the open one, start the stack with the `flox activate …` command in status's `start`.
 - **One of the stack's commands starts the agent without the stack in one folder**: that folder's own Flox environment installs that agent, which comes first there.
   The person decides whether to take it out, never you.
 - **`shortcut`'s `pending` is true**: their default environment is on FloxHub, and can include only a stack that is there too.
-  The background sync adds it; `status` says when.
+  The background sync adds it, and 5 waits for that.
 - **Another computer**: after "Make … start it, on all my computers", `flox pull -D` there, then a new terminal.
   After "Make … start it on this computer only", or `shortcut` run again without `--push` once they set up a default environment on FloxHub, the person runs `flox push -D` here (it sends any other change of theirs too), then `flox pull -D` there; `shortcut`'s `summary` gives the flags for their environment.
   Never run `flox push` for them.
-  Otherwise, once the stack is on FloxHub, they start it there with the `flox activate -r …` command in the stack repository's `README.md`.
+  Otherwise, once the stack is on FloxHub, they start it there with the `flox activate -r …` command in status's `start`.
 - **"Not sent to FloxHub: …"**: show the line; it says what the person runs.
 - **"could not bring … up to date from FloxHub first"**: this computer's copy and FloxHub's both changed.
   Pulling or pushing with `--force` drops one side's changes: the person chooses which, never you.
