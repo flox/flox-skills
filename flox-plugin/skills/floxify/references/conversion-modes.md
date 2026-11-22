@@ -134,14 +134,14 @@ APPLY='d: map (p: { name = p.pname or p.name; version = p.version or ""; }) (bui
 # flake.nix (repeat per system; the flake must be tracked by git to be visible).
 # Older flakes use `devShell.<system>` instead: if the attribute is missing, retry with that.
 "<skill-dir>/scripts/flox.sh" run -p nix -- nix --extra-experimental-features 'nix-command flakes' \
-  eval --no-write-lock-file --json ".#devShells.<system>.default" --apply "$APPLY" > /tmp/floxify-nix-eval-<system>.json
+  eval --no-write-lock-file --json ".#devShells.<system>.default" --apply "$APPLY" > /tmp/floxify-<project-name>-nix-eval-<system>.json
 # shell.nix (one run; it has no per-system outputs):
 "<skill-dir>/scripts/flox.sh" run -p nix -- nix --extra-experimental-features 'nix-command flakes' \
   eval --impure --json --expr 'let s = import ./shell.nix; in if builtins.isFunction s then s {} else s' \
-  --apply "$APPLY" > /tmp/floxify-nix-eval.json
+  --apply "$APPLY" > /tmp/floxify-<project-name>-nix-eval.json
 ```
 
-Then write the merged list to `/tmp/floxify-nix-eval.json`, one entry per
+Then write the merged list to `/tmp/floxify-<project-name>-nix-eval.json`, one entry per
 package: `{"name", "version", "attr", "systems"}`. `attr` is the attribute
 name the file uses (`python312`, `nodejs_20`), read from the file;
 `systems` lists the systems whose eval contained it. Drop stdenv
@@ -238,7 +238,7 @@ services) and merge:
 - Phase 1's hooks (`uv sync`, `npm ci`, `bundle install`) still go in.
 
 In Phase 3c Step 4, pass the eval to verify.py:
-`... verify.py "$DETECT_JSON" "$TARGET_DIR/.flox/env/manifest.toml" --nix-eval /tmp/floxify-nix-eval.json`
+`... verify.py "$DETECT_JSON" "$TARGET_DIR/.flox/env/manifest.toml" --nix-eval /tmp/floxify-<project-name>-nix-eval.json`
 (skip the flag if the eval was unavailable). Every advisory
 `nix-package-not-installed` must either be fixed or appear in the report's
 "couldn't convert" list.
