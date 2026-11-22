@@ -370,7 +370,7 @@ def _nix_facts(target, root_files):
         # Output `packages.<x>` / `packages = forAllSystems ...`, not mkShell's
         # own `packages = [ ... ]` / `packages = with pkgs; [ ... ]` list.
         has_builds = bool(re.search(
-            r"\bpackages\.[\w${}-]+|\bpackages\s*=\s*(?!(?:with\s+[\w.]+;\s*)?\[)", text))
+            r"\bpackages\.[\w${}-]+|\bpackages\s*=(?!\s*(?:with\s+[\w.]+;\s*)?\[)", text))
     else:
         pinned = bool(_NIX_PIN.search(text) and _NIX_REV.search(text)) or "sources.nix" in text
         dev_shells = ["default"]
