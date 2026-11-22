@@ -115,17 +115,14 @@ Read `references/conversion-modes.md` § Audit Mode and follow it.
 
 **If `devbox.json` exists (and no .flox/):** Switch to DevBox conversion mode.
 Read `references/conversion-modes.md` § DevBox Conversion Mode and follow it.
+DevBox wins even when Nix files are also present (DevBox drives Nix itself).
 
-**If `flake.nix` or `shell.nix` exists (and no .flox/):**
-Ask:
-```
-This project uses Nix directly. Options:
-  1  Audit only — show what Flox would add without touching anything
-  2  Set up Flox alongside it — they coexist fine
-  3  Skip
-
-Which? (default: 1)
-```
+**If `flake.nix` or `shell.nix` exists (and no .flox/, no devbox.json):**
+Switch to Nix conversion mode. Read `references/conversion-modes.md`
+§ Nix Conversion Mode and follow it. Don't ask first: converting the dev
+shell leaves every Nix file untouched. If the user asked for "audit only",
+run Audit Mode instead. A bare `default.nix` (no `flake.nix`/`shell.nix`)
+is usually a build, not a dev shell: continue to Phase 1.
 
 **If clean (.flox/ absent, no Nix files):** Continue to Phase 1.
 
@@ -153,7 +150,11 @@ DETECT_JSON="/tmp/floxify-detect.json"   # one floxify run at a time; fine to re
 
 `<skill-dir>` is this skill's own directory — the folder that holds this
 SKILL.md (the same place you'd read `scripts/` or a reference file from). Use
-its absolute path. `$DETECT_JSON` is a fixed path — remember it verbatim for
+its absolute path. Run every other `flox` command in this skill the same
+way, through `"<skill-dir>/scripts/flox.sh"` with the same arguments
+(`flox.sh search ...`, `flox.sh show ...`, `flox.sh activate ...`): it is
+plain `flox` plus the tag that attributes the call to this skill.
+`$DETECT_JSON` is a fixed path — remember it verbatim for
 Phase 3c, since each Bash call starts a fresh shell and cannot inherit a
 variable from this step.
 
@@ -256,7 +257,7 @@ Found: Python 3.11 (← .python-version) · Node 20.11.0 (← .nvmrc) · Postgre
 go stale. For every runtime, library, and tool detected in Phase 1, search the catalog:
 
 ```bash
-flox search --all "<term>" 2>/dev/null | head -5
+"<skill-dir>/scripts/flox.sh" search --all "<term>" 2>/dev/null | head -5
 # or if flox-mcp is present: search_packages(search_term="<term>", limit=5)
 ```
 
@@ -602,7 +603,7 @@ Report these in ⚠ (neutral): `<service> starts via docker-compose on activate 
 ### Verify each package
 
 ```bash
-flox search --all "<pkgname>" 2>/dev/null | head -10
+"<skill-dir>/scripts/flox.sh" search --all "<pkgname>" 2>/dev/null | head -10
 # or if flox-mcp is present: search_packages(search_term="<pkgname>", limit=10)
 ```
 
@@ -629,7 +630,7 @@ Checking catalog...
 
 ```
 init_new_environment(environment_dir="<absolute-target-dir>")
-# or: cd "$TARGET_DIR" && flox init --no-auto-setup
+# or: cd "$TARGET_DIR" && "<skill-dir>/scripts/flox.sh" init --no-auto-setup
 ```
 
 `--no-auto-setup` skips interactive prompts since we write the manifest ourselves.
@@ -852,7 +853,7 @@ Print before starting: `Verifying environment... (first run may take 30–60 sec
 **Step 1 — Schema + package resolution**
 
 ```bash
-cd "$TARGET_DIR" && flox activate -c "echo __ok__" 2>&1
+cd "$TARGET_DIR" && "<skill-dir>/scripts/flox.sh" activate -c "echo __ok__" 2>&1
 ```
 
 - `__ok__` in output → proceed to Step 2
@@ -863,7 +864,7 @@ cd "$TARGET_DIR" && flox activate -c "echo __ok__" 2>&1
 **Step 2 — Runtime versions + hook execution**
 
 ```bash
-cd "$TARGET_DIR" && flox activate -c "
+cd "$TARGET_DIR" && "<skill-dir>/scripts/flox.sh" activate -c "
   python --version 2>/dev/null || true
   node --version 2>/dev/null || true
   go version 2>/dev/null || true
@@ -883,7 +884,7 @@ Run only when the project has native Python deps (`psycopg2`, `cryptography`, `l
 `xmlsec`, `Pillow`, etc.):
 
 ```bash
-cd "$TARGET_DIR" && flox activate -c "
+cd "$TARGET_DIR" && "<skill-dir>/scripts/flox.sh" activate -c "
   python -c 'import psycopg2' 2>/dev/null && echo 'psycopg2 ✓' || echo 'psycopg2 ✗ — missing native dep'
   python -c 'import cryptography' 2>/dev/null && echo 'cryptography ✓' || echo 'cryptography ✗'
   python -c 'import lxml' 2>/dev/null && echo 'lxml ✓' || echo 'lxml ✗'
@@ -1012,7 +1013,7 @@ Wait for the user's response, then:
 
 - **1 (Try it):** Run:
   ```bash
-  cd "$TARGET_DIR" && flox activate -c "
+  cd "$TARGET_DIR" && "<skill-dir>/scripts/flox.sh" activate -c "
     echo '✓ environment active'
     python --version 2>/dev/null || true
     node --version 2>/dev/null || true
