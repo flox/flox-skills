@@ -195,6 +195,8 @@ shell.nix`). This is a deliberate exception to Phase 2's "default
 unpinned" rule: the team pinned these already, and a silent upgrade on
 conversion reads as "Flox broke my setup".
 
+- "Closest catalog version" means a named version: pin it (`version = "1.83.0"`),
+  don't leave the runtime floating.
 - Prefer the versioned attribute the file uses (`python312`, `nodejs_20`,
   `postgresql_16`). If the file uses a bare name (`python3`, `go`), resolve
   the versioned pkg-path that matches the eval's version with `flox.sh show`.
@@ -218,6 +220,7 @@ so handle each package by where it comes from:
 | Exported by a public flake input (`rust-overlay`, `fenix`, `zig-overlay`) | `<id>.flake = "github:<owner>/<repo>/<rev>#<attr>"`, rev from `flake.lock`'s `locked.rev` for that input. If the input only provides an overlay (for example `rust-bin.stable.<ver>.default` from rust-overlay), use the closest catalog package instead (`cargo` + `rustc` + `rustfmt` + `clippy`, pinned to the eval's version) and record it as a version change if it differs |
 | From the repo's OWN overlay, and the repo is on GitHub and the flake exports that package (`packages.<system>.<name>`) for every manifest system | `<id>.flake = "github:<org>/<repo>/<rev>#<name>"` with the pushed rev. Tell the user: it compiles on every machine (no binary cache has it), relock to pick up overlay changes, private repos need git credentials |
 | From the repo's own overlay, not exported, not pushed, or not on GitHub | Don't install it. List it under "couldn't convert" with the reason |
+| An overlay that rebinds a tool to a different JDK, Python or Node (`sbt.override { jre = jdk21; }`) | Install the tool plus that runtime, and set the link in the hook (`export JAVA_HOME="$FLOX_ENV"` for a JDK) so the tool actually runs on it. Note in the report that the catalog tool is built against its default runtime |
 | An overlay that swaps something under everything (patched OpenSSL, custom stdenv, `config.allowUnfree`-style settings) | No Flox equivalent. Say plainly the flake keeps doing that part. Convert the rest |
 
 For any customer overlay, the recommended next step is a Flox build:
@@ -247,7 +250,12 @@ In Phase 3c Step 4, pass the eval to verify.py:
 
 - Header: `flake.nix → .flox/env/manifest.toml  ·  flake.nix and flake.lock left untouched`
   (for shell.nix: `shell.nix → .flox/env/manifest.toml  ·  shell.nix left untouched`)
-- **Version changes** (from → to), if any. Omit the section if none.
+- **Version changes** (from → to), as its own section, one line per package:
+  every pinned runtime that differs from the eval, every floating package whose
+  major differs, and any end-of-life runtime kept as-is (`nodejs 18.20.4 (EOL)`).
+  Omit the section if there are none.
+- **Systems**: if `[options] systems` leaves out a system the flake supports
+  (for example `x86_64-darwin`), say which and why.
 - **Couldn't convert**: each item, why, and the next step.
 - Other dev shells not converted, by name, if any.
 - If `has_builds`: `Your flake also builds <names>. Those stay with the flake; ask me to move them to flox build when you want.`

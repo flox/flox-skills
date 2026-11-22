@@ -853,6 +853,12 @@ Print before starting: `Verifying environment... (first run may take 30–60 sec
 
 **Step 1 — Schema + package resolution**
 
+Run every step of 3c in the foreground and wait for it, however long it takes.
+A first activation that pulls a large closure (GHC, CUDA, a JDK) or compiles a
+package can run 10+ minutes. Don't background it, poll it, or schedule a
+wake-up: in a non-interactive run the session ends and the report is never
+written.
+
 ```bash
 cd "$TARGET_DIR" && "<skill-dir>/scripts/flox.sh" activate -c "echo __ok__" 2>&1
 ```
