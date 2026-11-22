@@ -57,7 +57,7 @@ _EXECUTES = re.compile(r"(?:\bflox-python\.sh\b|\bpython3?\b|\bflox\s+run\b)")
 
 # Tag rate over ALL flox calls (Nix conversion work). A call is tagged when
 # it goes through one of the skill's wrappers, or sets the tag inline.
-_TAGGED_CALL = re.compile(r"flox\.sh\s+[a-z-]|flox-python\.sh|FLOX_INVOCATION_SOURCE=\S*floxify")
+_TAGGED_CALL = re.compile(r"flox\.sh[\"']?\s+[a-z-]|flox-python\.sh|FLOX_INVOCATION_SOURCE=\S*floxify")
 # Bare `flox <subcommand>` (or /path/to/flox <subcommand>). `--version`
 # sends no telemetry, so it is neither tagged nor untagged.
 _BARE_CALL = re.compile(r"(?<![\w-])flox\s+(?!--version\b)[a-z-]")
