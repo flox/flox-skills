@@ -130,8 +130,9 @@ system (evaluation does not build, so other systems work from this machine).
 
 ```bash
 cd "$TARGET_DIR"
-APPLY='d: map (p: { name = p.pname or p.name; version = p.version or ""; }) (d.buildInputs ++ d.nativeBuildInputs ++ d.propagatedBuildInputs ++ d.propagatedNativeBuildInputs)'
-# flake.nix (repeat per system; the flake must be tracked by git to be visible):
+APPLY='d: map (p: { name = p.pname or p.name; version = p.version or ""; }) (builtins.filter builtins.isAttrs (d.buildInputs ++ d.nativeBuildInputs ++ d.propagatedBuildInputs ++ d.propagatedNativeBuildInputs))'
+# flake.nix (repeat per system; the flake must be tracked by git to be visible).
+# Older flakes use `devShell.<system>` instead: if the attribute is missing, retry with that.
 "<skill-dir>/scripts/flox.sh" run -p nix -- nix --extra-experimental-features 'nix-command flakes' \
   eval --no-write-lock-file --json ".#devShells.<system>.default" --apply "$APPLY" > /tmp/floxify-nix-eval-<system>.json
 # shell.nix (one run; it has no per-system outputs):
@@ -163,6 +164,8 @@ were left alone.
 |---|---|
 | `packages` / `buildInputs` / `nativeBuildInputs` | `[install]`, same nixpkgs attribute name as `pkg-path` |
 | `inputsFrom = [ x ]` | expand: x's build inputs are in the eval list; install them too |
+| `${pkgs.X}` used inside `shellHook`, env values, or `writeShellScriptBin` helpers | `[install]` too. The eval does not list these (they aren't in `packages`), so read them from the file. In the hook, replace `${pkgs.X}/bin/tool` with plain `tool` |
+| `writeShellScriptBin "name" ''...''` helpers in `packages` (`pg-start`, `db-reset`) | a shell function of the same name in `[profile] common`, so the developer keeps the command |
 | `shellHook` | `[hook] on-activate`. Keep commands that set up the project; drop `echo` banners and anything that re-enters Nix (`nix develop`, `nix-shell`) |
 | Literal env attrs (`FOO = "bar";`, `env = { ... }`) | `[vars]`. A computed value (`"${pkgs.foo}/lib"`) goes in the hook as `export FOO="$FLOX_ENV/lib"` |
 | `eachDefaultSystem` / `systems = [...]` | `[options] systems`, restricted to the four Flox systems |
