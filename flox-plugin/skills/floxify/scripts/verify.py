@@ -2169,8 +2169,53 @@ def check_group_fragmentation(manifest):
 # orchestration
 # ---------------------------------------------------------------------------
 
+def _nix_base(name):
+    """`python312` / `python3` -> `python`, `nodejs_20` -> `nodejs`."""
+    return re.sub(r"[-_.]?[0-9][0-9_.]*$", "", name or "")
+
+
+def check_nix_coverage(nix_pkgs, manifest):
+    """ADVISORY: every package the Nix dev-shell eval reports is installed.
+
+    `nix_pkgs` is the eval output floxify's Nix Conversion Mode writes:
+    `[{"name": pname, "version": v, "attr": optional attr from the file}]`.
+    A package can be installed by pkg-path or by a flake ref (`...#attr`);
+    it is covered when the attr, the last pkg-path segment, or the name
+    with its version suffix stripped matches. Anything uncovered is not
+    wrong on its own (some packages have no Flox equivalent), but the
+    report must say so, which is what the message asks for.
+    """
+    targets = set()
+    for iid, desc in (_table(manifest, "install") or {}).items():
+        targets.add(iid)
+        pp = _pkg_path_str(desc)
+        if pp:
+            targets.add(pp)
+            targets.add(pp.split(".")[-1])
+        flake = desc.get("flake") if isinstance(desc, dict) else None
+        if isinstance(flake, str) and "#" in flake:
+            targets.add(flake.rsplit("#", 1)[1])
+    bases = {_nix_base(t) for t in targets if "." not in t}
+    out = []
+    for pkg in nix_pkgs or []:
+        if not isinstance(pkg, dict):
+            continue
+        name, attr = pkg.get("name") or "", pkg.get("attr") or ""
+        if attr in targets or name in targets or (name and _nix_base(name) in bases):
+            continue
+        label = attr or name
+        out.append(violation(
+            "nix-package-not-installed",
+            f"Nix dev shell provides {label} {pkg.get('version') or ''}".rstrip()
+            + " but [install] has no match; install it, or list it under "
+            "\"couldn't convert\" in the report with the reason.",
+            severity=ADVISORY, package=label,
+        ))
+    return out
+
+
 def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
-          catalog_timeout=30):
+          catalog_timeout=30, nix_eval=None):
     """Run every check. Returns {"violations": [...], "catalog_checked": bool,
     "catalog_unknown": [...]}.
 
@@ -2220,6 +2265,8 @@ def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
     violations += check_outputs_heuristic(detect, manifest)
     violations += check_native_group_coherence(detect, manifest)
     violations += check_group_fragmentation(manifest)
+    if nix_eval is not None:
+        violations += check_nix_coverage(nix_eval, manifest)
 
     return {
         "violations": violations,
@@ -2275,7 +2322,17 @@ def main(argv):
     ap.add_argument("--no-catalog", action="store_true",
                     help="skip live `flox show` catalog checks")
     ap.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    ap.add_argument("--nix-eval", metavar="PATH",
+                    help="Nix dev-shell eval JSON from Nix Conversion Mode")
     args = ap.parse_args(argv[1:])
+
+    nix_eval = None
+    if args.nix_eval:
+        try:
+            nix_eval = json.loads(Path(args.nix_eval).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"error: could not read --nix-eval: {exc}", file=sys.stderr)
+            return 2
 
     if args.detect_json == "-":
         detect_text = sys.stdin.read()
@@ -2298,7 +2355,7 @@ def main(argv):
     manifest_text = manifest_path.read_text(encoding="utf-8")
 
     result = verify(detect, manifest_text, flox_bin=args.flox_bin,
-                    check_catalog_live=not args.no_catalog)
+                    check_catalog_live=not args.no_catalog, nix_eval=nix_eval)
 
     if args.json:
         print(json.dumps({**result, "_meta": {"disclaimer": DISCLAIMER}}, indent=2))

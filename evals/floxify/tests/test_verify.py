@@ -3586,5 +3586,53 @@ postgresql.pkg-path = "postgresql_15"
         self.assertIn("leaf-datastore-not-served", rules)
 
 
+
+class TestNixCoverage(unittest.TestCase):
+    """Advisory: every package from the Nix dev-shell eval is installed,
+    or the agent must list it under "couldn't convert" in the report."""
+
+    MANIFEST = (
+        'version = 1\n[install]\n'
+        'python.pkg-path = "python312"\n'
+        'node.pkg-path = "nodejs_20"\n'
+        'numpy.pkg-path = "python312Packages.numpy"\n'
+        'rust.flake = "github:oxalica/rust-overlay/abc#rust-bin"\n'
+    )
+
+    def _check(self, pkgs, manifest=None):
+        m, _ = verify_mod.parse_manifest(manifest or self.MANIFEST)
+        return verify_mod.check_nix_coverage(pkgs, m)
+
+    def test_all_covered(self):
+        pkgs = [{"name": "python3", "version": "3.12.8", "attr": "python312"},
+                {"name": "nodejs", "version": "20.18.1"},
+                {"name": "numpy", "version": "2.1", "attr": "python312Packages.numpy"},
+                {"name": "rust-bin", "version": "1.83.0", "attr": "rust-bin"}]
+        self.assertEqual(self._check(pkgs), [])
+
+    def test_missing_package_is_advisory_and_named(self):
+        v = self._check([{"name": "ripgrep", "version": "14.1.1"}])
+        self.assertEqual(len(v), 1)
+        self.assertEqual(v[0]["severity"], verify_mod.ADVISORY)
+        self.assertEqual(v[0]["rule"], "nix-package-not-installed")
+        self.assertIn("ripgrep", v[0]["message"])
+        self.assertIn("couldn't convert", v[0]["message"])
+
+    def test_versioned_name_is_not_a_false_match(self):
+        # python3 must not be satisfied by an unrelated "python3Packages.foo".
+        m = 'version = 1\n[install]\nfoo.pkg-path = "python3Packages.foo"\n'
+        self.assertEqual(len(self._check([{"name": "python3", "version": "3.12"}], m)), 1)
+
+    def test_verify_without_nix_eval_is_unchanged(self):
+        r1 = verify({}, self.MANIFEST, check_catalog_live=False)
+        r2 = verify({}, self.MANIFEST, check_catalog_live=False, nix_eval=None)
+        self.assertEqual(r1, r2)
+
+    def test_verify_with_nix_eval_adds_advisory(self):
+        r = verify({}, self.MANIFEST, check_catalog_live=False,
+                   nix_eval=[{"name": "ripgrep", "version": "14"}])
+        rules = [x["rule"] for x in r["violations"]]
+        self.assertIn("nix-package-not-installed", rules)
+
 if __name__ == "__main__":
     unittest.main()
