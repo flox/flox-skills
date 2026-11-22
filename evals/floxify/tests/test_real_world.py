@@ -1630,5 +1630,40 @@ class TestJudgeTier2CatalogNote(unittest.TestCase):
         self.assertIn("confirmed to resolve", prompt.lower())
 
 
+
+class TestNixChecks(unittest.TestCase):
+    def test_hashes_catch_edit_and_creation(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "flake.nix").write_text("{ }")
+            before = real_world._nix_hashes(d)
+            Path(d, "flake.lock").write_text("{}")        # eval created a lock
+            self.assertNotEqual(before, real_world._nix_hashes(d))
+            Path(d, "flake.lock").unlink()
+            self.assertEqual(before, real_world._nix_hashes(d))
+            Path(d, "flake.nix").write_text("{ x = 1; }")
+            self.assertNotEqual(before, real_world._nix_hashes(d))
+
+    def test_hashes_cover_nix_dir(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "nix").mkdir()
+            Path(d, "nix", "sources.json").write_text("{}")
+            self.assertIn("nix/sources.json", real_world._nix_hashes(d))
+
+    def test_checks_only_for_nix_entries(self):
+        self.assertEqual(real_world._nix_checks({}, {}, {}, "", ""), {})
+
+    def test_checks(self):
+        e = {"nix": True}
+        ok = real_world._nix_checks(e, {"a": "1"}, {"a": "1"},
+                                    'x.flake = "github:o/r/abc#x"\n', "flake.nix left untouched")
+        self.assertTrue(all(ok.values()), ok)
+        bad = real_world._nix_checks(e, {"a": "1"}, {"a": "2"},
+                                     'x.flake = "path:/Users/me/repo#x"\n', "done")
+        self.assertEqual(bad, {"nix_files_untouched": False,
+                               "no_local_flake_refs": False,
+                               "nix_report_header": False})
+        self.assertFalse(real_world._nix_checks(
+            e, {}, {}, 'x.flake = "git+file:///tmp/r"\n', "left untouched")["no_local_flake_refs"])
+
 if __name__ == "__main__":
     unittest.main()

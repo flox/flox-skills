@@ -81,11 +81,13 @@ Usage:
 Pure stdlib — no additional packages required.
 """
 import argparse
+import hashlib
 import json
 import re
 import shutil
 import subprocess
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -375,6 +377,39 @@ def _structural_checks(entry, manifest_text, verify_mod=None):
         else:
             checks[f"has_service_{name}"] = wired
     return checks
+
+
+# --- Nix conversion mode checks ---------------------------------------------
+
+# Set from --registry in main(); names the transcript folder.
+_REGISTRY_STEM = "real-world"
+
+NIX_FILES = ("flake.nix", "flake.lock", "shell.nix", "default.nix", ".envrc")
+LOCAL_FLAKE_REF = re.compile(r"""(?:^|["'\s])(?:path:|git\+file:|file://)""", re.M)
+
+
+def _nix_hashes(target_dir):
+    """sha256 of every Nix-owned file at the root and under nix/. A file
+    that appears or disappears changes the dict, so creation counts too."""
+    target = Path(target_dir)
+    paths = [target / f for f in NIX_FILES] + sorted((target / "nix").glob("**/*"))
+    return {
+        str(p.relative_to(target)): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in paths if p.is_file()
+    }
+
+
+def _nix_checks(entry, before, after, manifest_text, agent_text):
+    """Hard checks for a registry entry marked `"nix": true`."""
+    if not entry.get("nix"):
+        return {}
+    return {
+        "nix_files_untouched": before == after,
+        "no_local_flake_refs": (
+            manifest_text is not None and not LOCAL_FLAKE_REF.search(manifest_text)
+        ),
+        "nix_report_header": "left untouched" in (agent_text or ""),
+    }
 
 
 # --- service startup + connectivity probe (AI-447) -------------------------
@@ -760,6 +795,8 @@ def process_entry(entry, skill_dir, activate=False, services=False,
                 flush=True,
             )
 
+        nix_before = _nix_hashes(tmp)
+
         prompt = (
             f"/floxify {tmpdir}\n\n"
             "This is a large real-world open-source repository (not a small "
@@ -804,7 +841,17 @@ def process_entry(entry, skill_dir, activate=False, services=False,
         verify_mod = _load_verify_module(skill_dir)
 
         hard = _structural_checks(entry, manifest_text, verify_mod=verify_mod)
+        hard.update(_nix_checks(entry, nix_before, _nix_hashes(tmp),
+                                manifest_text, agent_out))
         hard_pass = all(hard.values())
+
+        lock_path = tmp / ".flox" / "env" / "manifest.lock"
+        manifest_lock = lock_path.read_text(encoding="utf-8") if lock_path.exists() else None
+        if _meta.get("raw_stream"):
+            stream_dir = HERE / "results" / "streams" / Path(_REGISTRY_STEM).stem
+            stream_dir.mkdir(parents=True, exist_ok=True)
+            (stream_dir / f"{entry['id']}-{int(time.time())}.jsonl").write_text(
+                _meta["raw_stream"], encoding="utf-8")
 
         # Honest wired/deferred/missing record per service (AI-470) —
         # independent of whether that outcome satisfies has_service_<kind>
@@ -934,6 +981,8 @@ def process_entry(entry, skill_dir, activate=False, services=False,
             "manifest": manifest_text or "",
             "manifest_excerpt": (manifest_text or "")[:3000],
             "agent_output_excerpt": (agent_out or "")[:800],
+            "agent_output": agent_out or "",
+            "manifest_lock": manifest_lock,
         }
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -1068,6 +1117,8 @@ def main():
         )
         raise SystemExit(1)
 
+    global _REGISTRY_STEM
+    _REGISTRY_STEM = args.registry
     entries = _load_registry(args.registry)
     if args.only:
         entries = [e for e in entries if e["id"] == args.only]

@@ -55,6 +55,39 @@ _VIA_WRAPPER = re.compile(r"\bflox-python\.sh\b")
 _EXECUTES = re.compile(r"(?:\bflox-python\.sh\b|\bpython3?\b|\bflox\s+run\b)")
 
 
+# Tag rate over ALL flox calls (Nix conversion work). A call is tagged when
+# it goes through one of the skill's wrappers, or sets the tag inline.
+_TAGGED_CALL = re.compile(r"flox\.sh\s+[a-z-]|flox-python\.sh|FLOX_INVOCATION_SOURCE=\S*floxify")
+# Bare `flox <subcommand>` (or /path/to/flox <subcommand>). `--version`
+# sends no telemetry, so it is neither tagged nor untagged.
+_BARE_CALL = re.compile(r"(?<![\w-])flox\s+(?!--version\b)[a-z-]")
+
+
+def classify_flox_calls(commands):
+    """(tagged, untagged) counts of flox invocations across Bash commands."""
+    tagged = untagged = 0
+    for cmd in commands:
+        c = cmd or ""
+        t = len(_TAGGED_CALL.findall(c))
+        tagged += t
+        untagged += max(len(_BARE_CALL.findall(c)) - (1 if "FLOX_INVOCATION_SOURCE=" in c and t else 0), 0)
+    return tagged, untagged
+
+
+def tag_rate_report(stream_dir):
+    """Print per-transcript and total tag rates; return the total rate."""
+    total_t = total_u = 0
+    for path in sorted(Path(stream_dir).glob("*.jsonl")):
+        t, u = classify_flox_calls(_bash_commands(path))
+        total_t += t
+        total_u += u
+        print(f"{path.stem}: {t}/{t + u} flox calls tagged")
+    n = total_t + total_u
+    rate = total_t / n if n else 0.0
+    print(f"TOTAL: {total_t}/{n} tagged ({rate:.0%})")
+    return rate
+
+
 def _reaches_a_prescribed_script(cmd):
     c = cmd or ""
     return bool(_PRESCRIBED.search(c) and _EXECUTES.search(c))
@@ -128,7 +161,12 @@ def main():
     ap.add_argument("--skill-dir", type=Path, default=DEFAULT_SKILL_DIR)
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--timeout", type=int, default=900)
+    ap.add_argument("--streams", type=Path,
+                    help="report the tag rate over saved stream-json transcripts in DIR; no agent run")
     args = ap.parse_args()
+    if args.streams:
+        tag_rate_report(args.streams)
+        return 0
     return run(args.skill_dir, args.fixture, args.model, args.timeout)
 
 

@@ -83,5 +83,20 @@ class TestMatchesWhatSkillMdActuallyShips(unittest.TestCase):
                 self.assertTrue(ev._via_wrapper(ln))
 
 
+
+class TestClassifyFloxCalls(unittest.TestCase):
+    def test_counts(self):
+        from invocation_source_eval import classify_flox_calls
+        cmds = [
+            'flox search --all jq 2>/dev/null | head -5',
+            '"/s/scripts/flox.sh" show jq',
+            '"/s/scripts/flox-python.sh" "/s/scripts/detect.py" .',
+            'cd /r && /usr/local/bin/flox activate -c "echo ok"',
+            'flox --version',
+            'FLOX_INVOCATION_SOURCE=agentic.skill.floxify.1-1-0 flox init',
+            'cat .flox/env/manifest.toml',
+        ]
+        self.assertEqual(classify_flox_calls(cmds), (3, 2))
+
 if __name__ == "__main__":
     unittest.main()
