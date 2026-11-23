@@ -169,7 +169,7 @@ were left alone.
 | `shellHook` | `[hook] on-activate`. Keep commands that set up the project; drop `echo` banners and anything that re-enters Nix (`nix develop`, `nix-shell`) |
 | Literal env attrs (`FOO = "bar";`, `env = { ... }`) | `[vars]`. A computed value (`"${pkgs.foo}/lib"`) goes in the hook as `export FOO="$FLOX_ENV/lib"` |
 | `eachDefaultSystem` / `systems = [...]` | `[options] systems`, restricted to the four Flox systems |
-| Postgres / Redis / MySQL started by hand in `shellHook` | `[services]`, using `references/service-patterns.md` |
+| Postgres / Redis / MySQL started by hand in `shellHook` | `[services]`, using `references/service-patterns.md`. Only setup stays in the hook (initdb, a temporary start/stop to seed data). Copy that pattern's three rules: `mkdir -p` every socket/data dir first, bound every wait, clean up a failed setup |
 
 Only explicitly declared env vars convert. Variables Nix setup hooks set on
 their own (`PKG_CONFIG_PATH`, `CMAKE_PREFIX_PATH`, `NIX_CFLAGS_COMPILE`) are

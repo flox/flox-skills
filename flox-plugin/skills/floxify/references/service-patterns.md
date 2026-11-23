@@ -36,9 +36,15 @@ on-activate = '''
     pg_ctl -D "$FLOX_ENV_CACHE/postgres" \
       -o "-p $PGPORT -k $PGHOST -c listen_addresses=''" \
       -l "$FLOX_ENV_CACHE/postgres/init.log" start
-    until pg_isready -h "$PGHOST" -p "$PGPORT" -q; do sleep 0.2; done
-    createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$PGDATABASE"
-    pg_ctl -D "$FLOX_ENV_CACHE/postgres" stop -m fast
+    for i in $(seq 50); do pg_isready -h "$PGHOST" -p "$PGPORT" -q && break; sleep 0.2; done
+    if pg_isready -h "$PGHOST" -p "$PGPORT" -q; then
+      createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$PGDATABASE"
+      pg_ctl -D "$FLOX_ENV_CACHE/postgres" stop -m fast
+    else
+      echo "Postgres setup failed, see $FLOX_ENV_CACHE/postgres/init.log" >&2
+      pg_ctl -D "$FLOX_ENV_CACHE/postgres" stop -m immediate >/dev/null 2>&1
+      rm -rf "$FLOX_ENV_CACHE/postgres"   # so the next activate retries setup
+    fi
   fi
 '''
 
@@ -51,6 +57,22 @@ command = '''
     -c listen_addresses=""
 '''
 ```
+
+Three rules this pattern follows, each from a real failure:
+- **Create every directory Postgres uses before starting it.** `mkdir -p "$PGHOST"`
+  comes first: Postgres won't create its socket directory and dies with
+  "could not create lock file" (escalating-esqueleto, 2026-11-21, which
+  only worked on the machine where the folder already existed).
+- **Bound every wait.** An `until pg_isready; do sleep ...; done` loop hangs
+  activation forever when the server never comes up. Wait a fixed number
+  of tries, then fail with a message.
+- **Clean up a failed setup.** If the temporary server never answers,
+  remove the half-made data directory so the next activate runs setup
+  again instead of skipping it.
+
+The temporary `pg_ctl start` / `stop` pair is only for one-time seeding
+(createdb, loading a schema). Never leave a server started by the hook:
+`[services]` starts it.
 
 The one-time init inside `on-activate` needs `-c listen_addresses=''` too
 (not just the steady-state `[services.postgres]` block) — without it, the
