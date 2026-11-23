@@ -223,7 +223,7 @@ so handle each package by where it comes from:
 | An overlay that rebinds a tool to a different JDK, Python or Node (`sbt.override { jre = jdk21; }`) | Install the tool plus that runtime, and set the link in the hook (`export JAVA_HOME="$FLOX_ENV"` for a JDK) so the tool actually runs on it. Note in the report that the catalog tool is built against its default runtime |
 | An overlay that swaps something under everything (patched OpenSSL, custom stdenv, `config.allowUnfree`-style settings) | No Flox equivalent. Say plainly the flake keeps doing that part. Convert the rest |
 
-For any customer overlay, the recommended next step is a Flox build:
+For any overlay of the team's own, the recommended next step is a Flox build:
 move the override into `.flox/pkgs/<name>.nix`, `flox build`, then
 `flox publish` to the org's catalog, so teammates and CI install it by name,
 prebuilt. Offer it as a next step ("Ask me to set that up"); the `flox`
