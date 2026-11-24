@@ -353,6 +353,18 @@ def _flake_dev_shells(text):
     return sorted(names)
 
 
+def _nested_nix(target):
+    """flake.nix / shell.nix below the root (monorepo subprojects). Reported
+    only: floxify converts the root dev shell, and names these as left
+    alone. nix/ holds a flake's own helpers, not separate projects."""
+    out = []
+    for p in _walk(target):
+        rel = p.relative_to(target)
+        if len(rel.parts) > 1 and p.name in ("flake.nix", "shell.nix") and rel.parts[0] != "nix":
+            out.append(str(rel))
+    return sorted(out)
+
+
 def _nix_facts(target, root_files):
     """Facts about a flake.nix / shell.nix dev shell, read from the files only.
 
@@ -836,6 +848,7 @@ def scan(target):
         "files_scanned": sorted(set(scanned)),
         "notes": notes,
         "nix": _nix_facts(target, root_files),
+        "nested_nix": _nested_nix(target),
         "_meta": {
             "analyzer": "floxify/detect.py",
             "disclaimer": "search_terms are catalog hints to verify with `flox "

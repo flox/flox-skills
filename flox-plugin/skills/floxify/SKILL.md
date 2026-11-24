@@ -997,6 +997,12 @@ What changed:  .flox/env/manifest.toml  created  ·  nothing else touched
 - Never say `flox login` — correct command is `flox auth login`
 - Never say `flox activate <user>/<name>` — correct syntax is `flox activate -r <user>/<name>`
 - No Flox-internal jargon: no "derivation", "store path", "attribute path", "Nix"
+  (naming the repo's own files, like `flake.nix` or `shell.nix`, is fine)
+- If detect.py's `nested_nix` lists files (dev shells in subfolders, as in a
+  monorepo), add one ⚠ line naming them: `⚠  Also found dev shells in
+  services/api/flake.nix, services/worker/shell.nix. Left alone: this run
+  sets up <the root dev shell | the repo root>; run floxify in a subfolder
+  to set that one up.` Never convert them silently or skip mentioning them.
 
 **After printing the report:**
 

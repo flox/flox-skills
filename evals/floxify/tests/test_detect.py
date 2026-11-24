@@ -641,6 +641,27 @@ def test_nix_flake_wins_over_shell_and_flags_devbox():
     assert n["also_devbox"] is True, n
 
 
+def test_nested_nix_lists_subfolder_flakes():
+    r = _scan_tmp({"flake.nix": _FLAKE_DEVSHELL,
+                   "services/api/flake.nix": "{ }",
+                   "services/worker/shell.nix": "{ }",
+                   "node_modules/x/flake.nix": "{ }"})
+    assert r["nested_nix"] == ["services/api/flake.nix", "services/worker/shell.nix"], r["nested_nix"]
+
+
+def test_nested_nix_without_root_flake_keeps_nix_none():
+    # Case C (flakes only in subfolders): routing stays on the normal path,
+    # but the facts say they exist so the report can name them.
+    r = _scan_tmp({"services/api/flake.nix": "{ }", "package.json": "{}"})
+    assert r["nix"] is None, r["nix"]
+    assert r["nested_nix"] == ["services/api/flake.nix"], r["nested_nix"]
+
+
+def test_nested_nix_empty_and_ignores_nix_dir():
+    r = _scan_tmp({"flake.nix": _FLAKE_DEVSHELL, "nix/shell.nix": "{ }"})
+    assert r["nested_nix"] == [], r["nested_nix"]
+
+
 def _all_tests():
     return [(n, f) for n, f in sorted(globals().items())
             if n.startswith("test_") and callable(f)]
