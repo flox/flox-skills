@@ -155,7 +155,7 @@ way, through `"<skill-dir>/scripts/flox.sh"` with the same arguments
 (`flox.sh search ...`, `flox.sh show ...`, `flox.sh activate ...`): it is
 plain `flox` plus the tag that attributes the call to this skill.
 `$DETECT_JSON` is a fixed path once `<project-name>` is filled in (the
-name printed above) — remember it verbatim for
+name printed above); remember it verbatim for
 Phase 3c, since each Bash call starts a fresh shell and cannot inherit a
 variable from this step.
 
@@ -934,7 +934,7 @@ when verify.py is invoked directly.)
   back to `python3 "<skill-dir>/scripts/verify.py" ...` with a system Python.
   If `$DETECT_JSON` doesn't exist (Step 1a's fallback to manual scanning
   skipped writing it), still run verify.py with an empty facts file
-  (`echo '{}' > /tmp/floxify-<project-name>-detect.json`) — the catalog/vars/hook checks
+  (`echo '{}' > /tmp/floxify-<project-name>-detect.json`); the catalog/vars/hook checks
   that don't need detect facts still run.
 - `verify.py` checks *consistency with what detect.py found*, not
   *correctness* — it says so in its own output. A clean run is not a

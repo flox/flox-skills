@@ -206,6 +206,12 @@ conversion reads as "Flox broke my setup".
 - Everything else (jq, git, ripgrep, linters) stays unpinned; `manifest.lock`
   freezes it. If a floating package's **major** version differs from the
   eval's, list it as a version change too.
+- **The dev shell wins over every other file.** If a Dockerfile,
+  devcontainer, compose file, CI config or `.tool-versions` names a
+  different version (Postgres 16 in production, 14 in the flake), still
+  pin the dev shell's version. Then add a report line naming the other
+  file, its version, and the pkg-path to switch to (`postgresql_16`) if
+  the team wants to match it. Don't switch on your own.
 - Unpinned `shell.nix` (`pinned: false`): Phase 2's normal rules. In the
   report, say this is the first time the team gets identical versions.
 
@@ -254,6 +260,11 @@ In Phase 3c Step 4, pass the eval to verify.py:
   every pinned runtime that differs from the eval, every floating package whose
   major differs, and any end-of-life runtime kept as-is (`nodejs 18.20.4 (EOL)`).
   Omit the section if there are none.
+- **Other files disagree**: one line per runtime or database where another
+  file names a different version than the dev shell:
+  `postgresql: kept 14 (flake.nix); .devcontainer and fly.toml use 16. Switch to postgresql_16 to match.`
+  This is in addition to **Version changes**, not instead: a patch change
+  from the eval (14.13 → 14.17) still goes there too.
 - **Systems**: if `[options] systems` leaves out a system the flake supports
   (for example `x86_64-darwin`), say which and why.
 - **Couldn't convert**: each item, why, and the next step.
