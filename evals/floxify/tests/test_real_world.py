@@ -1665,5 +1665,40 @@ class TestNixChecks(unittest.TestCase):
         self.assertFalse(real_world._nix_checks(
             e, {}, {}, 'x.flake = "git+file:///tmp/r"\n', "left untouched")["no_local_flake_refs"])
 
+
+class TestNixReportChecks(unittest.TestCase):
+    LOCK = json.dumps({"packages": [
+        {"pname": "nodejs", "version": "18.20.8", "system": "aarch64-darwin"},
+        {"pname": "postgresql_14", "version": "14.13", "system": "aarch64-darwin"},
+        {"pname": "zulu21", "version": "21.0.9", "system": "aarch64-darwin"},
+        {"pname": "python3", "version": "python3-3.13.12", "system": "aarch64-darwin"}]})
+    E = {"nix": True, "nix_versions": {"nodejs": "18.20.4", "postgresql": "14.13", "python3": "3.13.12"}}
+
+    def test_versioned_lock_names_are_found(self):
+        e = {"nix": True, "nix_versions": {"zulu-ca-jdk": "21.0.8"}}
+        self.assertFalse(real_world._version_drift_reported(e, self.LOCK, ""))
+        self.assertTrue(real_world._version_drift_reported(e, self.LOCK, "jdk 21.0.8 → 21.0.9"))
+
+    def test_lock_versions_normalizes(self):
+        self.assertEqual(real_world._lock_versions(self.LOCK)["python3"], "3.13.12")
+
+    def test_drift_reported(self):
+        self.assertTrue(real_world._version_drift_reported(self.E, self.LOCK, "node 18.20.4 → 18.20.8"))
+        self.assertTrue(real_world._version_drift_reported(self.E, self.LOCK, "node floats within 18.20"))
+
+    def test_drift_unreported_fails(self):
+        self.assertFalse(real_world._version_drift_reported(self.E, self.LOCK, "all good"))
+
+    def test_no_drift_needs_no_mention(self):
+        e = {"nix": True, "nix_versions": {"postgresql": "14.13"}}
+        self.assertTrue(real_world._version_drift_reported(e, self.LOCK, ""))
+
+    def test_nested_reported(self):
+        e = {"nix": True, "nested_nix": ["packages/uplc/flake.nix"]}
+        ok = real_world._nix_checks(e, {}, {}, "", "Also found packages/uplc/flake.nix, left untouched", "{}")
+        self.assertTrue(ok["nested_nix_reported"])
+        bad = real_world._nix_checks(e, {}, {}, "", "left untouched", "{}")
+        self.assertFalse(bad["nested_nix_reported"])
+
 if __name__ == "__main__":
     unittest.main()

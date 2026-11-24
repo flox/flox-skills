@@ -399,11 +399,58 @@ def _nix_hashes(target_dir):
     }
 
 
-def _nix_checks(entry, before, after, manifest_text, agent_text):
+_TRAILING_VERSION = re.compile(r"(\d+(?:\.\d+)+[\w.+-]*)$")
+
+
+def _lock_versions(lock_text):
+    """{pname: version} from a manifest.lock (first system seen wins)."""
+    try:
+        lock = json.loads(lock_text or "{}")
+    except json.JSONDecodeError:
+        return {}
+    out = {}
+    for p in lock.get("packages") or []:
+        if not isinstance(p, dict):
+            continue
+        name = p.get("pname") or p.get("install_id")
+        ver = str(p.get("version") or "")
+        m = _TRAILING_VERSION.search(ver)
+        if name and m:
+            out.setdefault(name, m.group(1))
+    return out
+
+
+def _version_drift_reported(entry, lock_text, agent_text):
+    """Every runtime/DB whose locked version differs from the Nix eval's
+    (registry `nix_versions`) must be named in the report: the eval's
+    version, or its major.minor, appears in the agent's output. A package
+    missing from the lock is the pins_* checks' business, not this one's."""
+    locked = _lock_versions(lock_text)
+    base = lambda n: re.sub(r"[_-]?[0-9][0-9_]*$", "", n)
+    text = agent_text or ""
+    for name, want in (entry.get("nix_versions") or {}).items():
+        # postgresql -> postgresql_17, nodejs -> nodejs_18, zulu-ca-jdk -> zulu21
+        got = locked.get(name) or next(
+            (v for k, v in locked.items() if base(k) == name), None) or next(
+            (v for k, v in locked.items() if base(k) == name.split("-")[0]), None)
+        if got is None or got == want:
+            continue
+        if want not in text and ".".join(want.split(".")[:2]) not in text:
+            return False
+    return True
+
+
+def _nix_checks(entry, before, after, manifest_text, agent_text, lock_text=None):
     """Hard checks for a registry entry marked `"nix": true`."""
     if not entry.get("nix"):
         return {}
-    return {
+    checks = {}
+    if entry.get("nix_versions"):
+        checks["version_drift_reported"] = _version_drift_reported(entry, lock_text, agent_text)
+    if entry.get("nested_nix"):
+        checks["nested_nix_reported"] = all(
+            str(Path(p).parent) in (agent_text or "") for p in entry["nested_nix"])
+    return checks | {
         "nix_files_untouched": before == after,
         "no_local_flake_refs": (
             manifest_text is not None and not LOCAL_FLAKE_REF.search(manifest_text)
@@ -841,12 +888,11 @@ def process_entry(entry, skill_dir, activate=False, services=False,
         verify_mod = _load_verify_module(skill_dir)
 
         hard = _structural_checks(entry, manifest_text, verify_mod=verify_mod)
-        hard.update(_nix_checks(entry, nix_before, _nix_hashes(tmp),
-                                manifest_text, agent_out))
-        hard_pass = all(hard.values())
-
         lock_path = tmp / ".flox" / "env" / "manifest.lock"
         manifest_lock = lock_path.read_text(encoding="utf-8") if lock_path.exists() else None
+        hard.update(_nix_checks(entry, nix_before, _nix_hashes(tmp),
+                                manifest_text, agent_out, manifest_lock))
+        hard_pass = all(hard.values())
         if _meta.get("raw_stream"):
             stream_dir = HERE / "results" / "streams" / Path(_REGISTRY_STEM).stem
             stream_dir.mkdir(parents=True, exist_ok=True)

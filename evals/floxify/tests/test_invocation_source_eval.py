@@ -95,6 +95,8 @@ class TestClassifyFloxCalls(unittest.TestCase):
             'flox --version',
             'FLOX_INVOCATION_SOURCE=agentic.skill.floxify.1-1-0 flox init',
             'cat .flox/env/manifest.toml',
+            'echo "=== flox config ==="; ls',
+            '# Inspect what flox init actually wrote',
         ]
         self.assertEqual(classify_flox_calls(cmds), (3, 2))
 

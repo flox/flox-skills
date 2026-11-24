@@ -63,11 +63,22 @@ _TAGGED_CALL = re.compile(r"flox\.sh[\"']?\s+[a-z-]|flox-python\.sh|FLOX_INVOCAT
 _BARE_CALL = re.compile(r"(?<![\w-])flox\s+(?!--version\b)[a-z-]")
 
 
+_STMT_SPLIT = re.compile(r"\n|;|&&|\|\||\|")
+_NOT_A_CALL = re.compile(r"^\s*(?:#|echo\b|printf\b)")
+
+
+def _executable_text(cmd):
+    """The command minus comments and echo/printf statements, whose text
+    often names flox without running it."""
+    return "\n".join(st for st in _STMT_SPLIT.split(cmd or "")
+                     if st.strip() and not _NOT_A_CALL.match(st))
+
+
 def classify_flox_calls(commands):
     """(tagged, untagged) counts of flox invocations across Bash commands."""
     tagged = untagged = 0
     for cmd in commands:
-        c = cmd or ""
+        c = _executable_text(cmd)
         t = len(_TAGGED_CALL.findall(c))
         tagged += t
         untagged += max(len(_BARE_CALL.findall(c)) - (1 if "FLOX_INVOCATION_SOURCE=" in c and t else 0), 0)
