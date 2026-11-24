@@ -102,6 +102,34 @@ python3 migrate_mode.py               # full registry → results/migrate.json
 python3 migrate_mode.py --only migrate-gh-yes
 ```
 
+## The Nix conversion suite (`real-world-nix.jsonl`)
+
+Real company repos with a Nix dev shell, run through `real_world.py`. Each
+entry carries `"nix": true`, which adds these hard checks to the usual
+structural ones:
+
+| Check | Verifies |
+|---|---|
+| `nix_files_untouched` | sha256 of `flake.nix`, `flake.lock`, `shell.nix`, `default.nix`, `.envrc` and `nix/**` is identical before and after (a created `flake.lock` fails it too) |
+| `no_local_flake_refs` | no `path:` / `git+file:` / `file://` in the manifest |
+| `nix_report_header` | the report says the Nix files were left untouched |
+| `version_drift_reported` | for each `nix_versions` entry (from a real `nix eval` of the dev shell), a locked version that differs must be named in the report |
+| `nested_nix_reported` | every dev shell listed in `nested_nix` (subfolder flakes) is named in the report |
+
+`real-world-nix.jsonl` is the core set (one repo per shape: simple flake,
+rust-overlay, pinned shell.nix with its own overlay, JDK-rebinding overlay,
+failing eval, database in shellHook, end-of-life runtime, monorepo with a
+subfolder flake). `real-world-nix-extended.jsonl` holds repos that repeat a
+covered shape; run it before a release.
+
+```bash
+FLOX_DISABLE_METRICS=true python3 real_world.py --registry real-world-nix.jsonl --activate --reps 3 --concurrency 3
+python3 invocation_source_eval.py --streams results/streams/real-world-nix   # tag rate over every flox call
+python3 linux_vm_check.py results/<run>.json                                  # activate the same manifests on Linux
+```
+
+`FLOX_DISABLE_METRICS=true` keeps eval runs out of production telemetry.
+
 ## How a run works
 
 For each entry, the runner:
