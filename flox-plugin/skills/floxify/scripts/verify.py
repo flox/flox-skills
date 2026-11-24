@@ -377,6 +377,8 @@ def check_runtimes_installed(detect, manifest):
     install = _table(manifest, "install")
     pkg_paths = {_pkg_path_str(d) for d in install.values() if isinstance(d, dict)}
     pkg_paths.discard(None)
+    # nested attrs count by their last segment (beam27Packages.elixir_1_17)
+    pkg_paths |= {pp.split(".")[-1] for pp in pkg_paths}
 
     runtimes = _facts_list(detect, "runtimes")
     languages = {r["language"] for r in runtimes if r.get("language")}
@@ -2393,7 +2395,14 @@ def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
     violations += check_malformed_sections(manifest)
     violations += check_malformed_pkg_paths(manifest)
     violations += check_malformed_detect_facts(detect)
-    violations += check_runtimes_installed(detect, manifest)
+    runtime_v = check_runtimes_installed(detect, manifest)
+    if nix_eval is not None:
+        # Nix mode: the dev shell is the source of truth. A runtime the
+        # repo mentions but the dev shell leaves out is reported, not forced.
+        for v in runtime_v:
+            v["severity"] = ADVISORY
+            v["message"] += " (the Nix dev shell does not include it either; say so in the report)"
+    violations += runtime_v
     violations += check_leaf_datastore_services(detect, manifest)
     violations += check_vars_endpoints(detect, manifest)
     violations += check_vars_literal(manifest)

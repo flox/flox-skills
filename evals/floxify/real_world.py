@@ -212,7 +212,7 @@ def _clone_at_sha(url, sha, dest, timeout=900):
 def _runtime_pinned(manifest_text, pattern):
     if manifest_text is None:
         return False
-    return bool(re.search(r'pkg-path = "' + pattern + r'"', manifest_text))
+    return bool(re.search(r'pkg-path = "(?:[\w-]+\.)*' + pattern + r'"', manifest_text))
 
 
 _REQUIRED_VERIFY_EXPORTS = ("matching_service_names", "manifest_wires_compose")

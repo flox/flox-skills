@@ -3629,6 +3629,21 @@ class TestNixCoverage(unittest.TestCase):
         m = 'version = 1\n[install]\nfoo.pkg-path = "python3Packages.foo"\n'
         self.assertEqual(len(self._check([{"name": "python3", "version": "3.12"}], m)), 1)
 
+    def test_nested_attr_counts_as_runtime(self):
+        detect = {"runtimes": [{"language": "elixir", "source": "mix.exs"}]}
+        m, _ = verify_mod.parse_manifest(
+            'version = 1\n[install]\nelixir.pkg-path = "beam27Packages.elixir_1_17"\n')
+        self.assertEqual(verify_mod.check_runtimes_installed(detect, m), [])
+
+    def test_runtime_outside_dev_shell_is_advisory_in_nix_mode(self):
+        detect = {"runtimes": [{"language": "rust", "source": "rust-toolchain.toml"}]}
+        man = 'version = 1\n[install]\nnode.pkg-path = "nodejs_23"\n'
+        hard = verify(detect, man, check_catalog_live=False)
+        nix = verify(detect, man, check_catalog_live=False, nix_eval=[])
+        rule = lambda r: [x["severity"] for x in r["violations"] if x["rule"] == "runtime-not-installed"]
+        self.assertEqual(rule(hard), [verify_mod.HARD])
+        self.assertEqual(rule(nix), [verify_mod.ADVISORY])
+
     def test_verify_without_nix_eval_is_unchanged(self):
         r1 = verify({}, self.MANIFEST, check_catalog_live=False)
         r2 = verify({}, self.MANIFEST, check_catalog_live=False, nix_eval=None)
