@@ -333,6 +333,74 @@ def _gemfile_gems_by_scope(text):
     return runtime_gems, dev_gems
 
 
+
+# ---- Nix dev shells (read-only; floxify's Nix mode does the eval) -------
+
+_NIX_PIN = re.compile(r"fetchTarball|fetchFromGitHub|fetchGit|fetchurl|sources\.nix|niv\b")
+_NIX_REV = re.compile(r"\b[0-9a-f]{40}\b|sha256|narHash|rev\s*=")
+_DEVSHELL_DOTTED = re.compile(r"devShells?(?:\.(?:\$\{[^}]+\}|[\w-]+))*\.([\w-]+)\s*=")
+_DEVSHELL_SET = re.compile(r"devShells\s*=")
+_SET_KEY = re.compile(r"^\s*([\w-]+)\s*=\s*(?:[\w.]+\.)?mkShell", re.M)
+_SYSTEMS = {"x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"}
+
+
+def _flake_dev_shells(text):
+    names = {m.group(1) for m in _DEVSHELL_DOTTED.finditer(text)} - _SYSTEMS
+    if _DEVSHELL_SET.search(text):
+        names |= set(_SET_KEY.findall(text))
+    if not names and "mkShell" in text:
+        names = {"default"}
+    return sorted(names)
+
+
+def _nested_nix(target):
+    """flake.nix / shell.nix below the root (monorepo subprojects). Reported
+    only: floxify converts the root dev shell, and names these as left
+    alone. nix/ holds a flake's own helpers, not separate projects."""
+    out = []
+    for p in _walk(target):
+        rel = p.relative_to(target)
+        if len(rel.parts) > 1 and p.name in ("flake.nix", "shell.nix") and rel.parts[0] != "nix":
+            out.append(str(rel))
+    return sorted(out)
+
+
+def _nix_facts(target, root_files):
+    """Facts about a flake.nix / shell.nix dev shell, read from the files only.
+
+    None when neither exists: a bare default.nix is usually a build, not a
+    dev shell, so it stays on the normal path.
+    """
+    files = [f for f in ("flake.nix", "shell.nix") if f in root_files]
+    if not files:
+        return None
+    kind = "flake" if "flake.nix" in files else "shell"
+    text = _read(target / files[0]) or ""
+    if kind == "flake":
+        pinned = "flake.lock" in root_files
+        dev_shells = _flake_dev_shells(text)
+        # Output `packages.<x>` / `packages = forAllSystems ...`, not mkShell's
+        # own `packages = [ ... ]` / `packages = with pkgs; [ ... ]` list.
+        has_builds = bool(re.search(
+            r"\bpackages\.[\w${}-]+|\bpackages\s*=(?!\s*(?:with\s+[\w.]+;\s*)?\[)", text))
+    else:
+        pinned = bool(_NIX_PIN.search(text) and _NIX_REV.search(text)) or "sources.nix" in text
+        dev_shells = ["default"]
+        has_builds = False
+    envrc_text = _read(target / ".envrc") if ".envrc" in root_files else ""
+    m = re.search(r"^\s*use\s+(flake|nix)\b", envrc_text or "", re.M)
+    return {
+        "kind": kind,
+        "files": files,
+        "pinned": pinned,
+        "has_overlays": bool(re.search(r"\boverlays?\b", text)),
+        "has_builds": has_builds,
+        "dev_shells": dev_shells,
+        "envrc": f"use {m.group(1)}" if m else None,
+        "also_devbox": "devbox.json" in root_files,
+    }
+
+
 def scan(target):
     target = Path(target).resolve()
     runtimes, pkg_mgrs, services = [], [], []
@@ -779,6 +847,8 @@ def scan(target):
         "lockfiles": sorted(set(lockfiles)),
         "files_scanned": sorted(set(scanned)),
         "notes": notes,
+        "nix": _nix_facts(target, root_files),
+        "nested_nix": _nested_nix(target),
         "_meta": {
             "analyzer": "floxify/detect.py",
             "disclaimer": "search_terms are catalog hints to verify with `flox "

@@ -910,6 +910,9 @@ LEMMY_DATABASE_URL = "postgres://lemmy:password@localhost:5432/lemmy"
 PGHOST = "/tmp/lemmy-postgres"
 PGPORT = "5432"
 
+[hook]
+on-activate = 'mkdir -p "$PGHOST"'
+
 [services.postgres]
 command = "postgres -k /tmp/lemmy-postgres"
 '''
@@ -1015,6 +1018,9 @@ on-activate = """
         manifest = '''
 [vars]
 PGHOST = "/tmp/myapp-postgres"
+
+[hook]
+on-activate = "mkdir -p /tmp/myapp-postgres"
 
 [services.postgres]
 command = "postgres -k /tmp/myapp-postgres"
@@ -3585,6 +3591,165 @@ postgresql.pkg-path = "postgresql_15"
         rules = {x["rule"] for x in v}
         self.assertIn("leaf-datastore-not-served", rules)
 
+
+
+class TestNixCoverage(unittest.TestCase):
+    """Advisory: every package from the Nix dev-shell eval is installed,
+    or the agent must list it under "couldn't convert" in the report."""
+
+    MANIFEST = (
+        'version = 1\n[install]\n'
+        'python.pkg-path = "python312"\n'
+        'node.pkg-path = "nodejs_20"\n'
+        'numpy.pkg-path = "python312Packages.numpy"\n'
+        'rust.flake = "github:oxalica/rust-overlay/abc#rust-bin"\n'
+    )
+
+    def _check(self, pkgs, manifest=None):
+        m, _ = verify_mod.parse_manifest(manifest or self.MANIFEST)
+        return verify_mod.check_nix_coverage(pkgs, m)
+
+    def test_all_covered(self):
+        pkgs = [{"name": "python3", "version": "3.12.8", "attr": "python312"},
+                {"name": "nodejs", "version": "20.18.1"},
+                {"name": "numpy", "version": "2.1", "attr": "python312Packages.numpy"},
+                {"name": "rust-bin", "version": "1.83.0", "attr": "rust-bin"}]
+        self.assertEqual(self._check(pkgs), [])
+
+    def test_missing_package_is_advisory_and_named(self):
+        v = self._check([{"name": "ripgrep", "version": "14.1.1"}])
+        self.assertEqual(len(v), 1)
+        self.assertEqual(v[0]["severity"], verify_mod.ADVISORY)
+        self.assertEqual(v[0]["rule"], "nix-package-not-installed")
+        self.assertIn("ripgrep", v[0]["message"])
+        self.assertIn("couldn't convert", v[0]["message"])
+
+    def test_versioned_name_is_not_a_false_match(self):
+        # python3 must not be satisfied by an unrelated "python3Packages.foo".
+        m = 'version = 1\n[install]\nfoo.pkg-path = "python3Packages.foo"\n'
+        self.assertEqual(len(self._check([{"name": "python3", "version": "3.12"}], m)), 1)
+
+    def test_nested_attr_counts_as_runtime(self):
+        detect = {"runtimes": [{"language": "elixir", "source": "mix.exs"}]}
+        m, _ = verify_mod.parse_manifest(
+            'version = 1\n[install]\nelixir.pkg-path = "beam27Packages.elixir_1_17"\n')
+        self.assertEqual(verify_mod.check_runtimes_installed(detect, m), [])
+
+    def test_runtime_outside_dev_shell_is_advisory_in_nix_mode(self):
+        detect = {"runtimes": [{"language": "rust", "source": "rust-toolchain.toml"}]}
+        man = 'version = 1\n[install]\nnode.pkg-path = "nodejs_23"\n'
+        hard = verify(detect, man, check_catalog_live=False)
+        nix = verify(detect, man, check_catalog_live=False, nix_eval=[])
+        rule = lambda r: [x["severity"] for x in r["violations"] if x["rule"] == "runtime-not-installed"]
+        self.assertEqual(rule(hard), [verify_mod.HARD])
+        self.assertEqual(rule(nix), [verify_mod.ADVISORY])
+
+    def test_verify_without_nix_eval_is_unchanged(self):
+        r1 = verify({}, self.MANIFEST, check_catalog_live=False)
+        r2 = verify({}, self.MANIFEST, check_catalog_live=False, nix_eval=None)
+        self.assertEqual(r1, r2)
+
+    def test_verify_with_nix_eval_adds_advisory(self):
+        r = verify({}, self.MANIFEST, check_catalog_live=False,
+                   nix_eval=[{"name": "ripgrep", "version": "14"}])
+        rules = [x["rule"] for x in r["violations"]]
+        self.assertIn("nix-package-not-installed", rules)
+
+
+class TestHookStartsServer(unittest.TestCase):
+    """A database started in on-activate AND run by [services] starts twice
+    (escalating-esqueleto, 2026-11-21: activation hung on Linux)."""
+
+    SVC = '[services.postgres]\ncommand = "postgres -D $PGDATA"\n'
+
+    def _rules(self, hook, services=""):
+        m = f"[hook]\non-activate = \'\'\'\n{hook}\n\'\'\'\n{services}"
+        return {(x["rule"], x["severity"]) for x in _violations({}, m)}
+
+    def test_pg_ctl_start_with_service_is_hard(self):
+        self.assertIn(("hook-starts-service", "hard"),
+                      self._rules('pg_ctl -D "$PGDATA" -l log start', self.SVC))
+
+    def test_backgrounded_postgres_with_service_is_hard(self):
+        self.assertIn(("hook-starts-service", "hard"),
+                      self._rules('postgres -D "$PGDATA" &', self.SVC))
+
+    def test_redis_server_with_service_is_hard(self):
+        svc = '[services.redis]\ncommand = "redis-server --port 6379"\n'
+        self.assertIn(("hook-starts-service", "hard"),
+                      self._rules("redis-server --daemonize yes", svc))
+
+    def test_start_without_service_is_advisory(self):
+        self.assertEqual({r for r in self._rules('pg_ctl -D "$PGDATA" start') if r[0] == "hook-starts-service"},
+                         {("hook-starts-service", "advisory")})
+
+    def test_initdb_and_createdb_are_fine(self):
+        hook = 'if [ ! -d "$PGDATA" ]; then initdb -D "$PGDATA"; fi\ncreatedb app || true'
+        self.assertNotIn("hook-starts-service", {r[0] for r in self._rules(hook, self.SVC)})
+
+    def test_pg_ctl_status_and_stop_are_fine(self):
+        self.assertNotIn("hook-starts-service",
+                         {r[0] for r in self._rules('pg_ctl -D "$PGDATA" status || true', self.SVC)})
+
+    def test_function_definition_is_not_a_start(self):
+        hook = 'pg_start() {\n  pg_ctl -D "$PGDATA" start\n}'
+        self.assertNotIn("hook-starts-service", {r[0] for r in self._rules(hook, self.SVC)})
+
+    def test_comment_is_not_a_start(self):
+        self.assertNotIn("hook-starts-service",
+                         {r[0] for r in self._rules("# run: pg_ctl start", self.SVC)})
+
+
+class TestHookServerSetupHazards(unittest.TestCase):
+    """escalating-esqueleto, 2026-11-21: the hook and service put the socket
+    in /tmp/<name>-postgres, nothing created it, Postgres died, and an
+    unbounded `until pg_isready` loop hung activation forever on Linux."""
+
+    SVC = '[services.postgres]\ncommand = "postgres -D $PGDATA -k /tmp/app-pg"\n'
+
+    def _v(self, hook, services=""):
+        m = f"[hook]\non-activate = \'\'\'\n{hook}\n\'\'\'\n{services}"
+        return {(x["rule"], x["severity"]) for x in _violations({}, m)}
+
+    def test_continued_start_line_is_seen(self):
+        hook = 'pg_ctl -D "$PGDATA" \\\n  -l log start'
+        self.assertIn(("hook-starts-service", "hard"), self._v(hook, self.SVC))
+
+    def test_temporary_start_then_stop_for_seeding_is_fine(self):
+        hook = ('mkdir -p /tmp/app-pg\npg_ctl -D "$PGDATA" -l log start\n'
+                'psql -f seed.sql\npg_ctl -D "$PGDATA" stop -m fast')
+        self.assertNotIn("hook-starts-service", {r[0] for r in self._v(hook, self.SVC)})
+
+    def test_socket_dir_never_created_is_hard(self):
+        self.assertIn(("socket-dir-not-created", "hard"), self._v("initdb -D \"$PGDATA\"", self.SVC))
+
+    def test_socket_dir_created_is_fine(self):
+        self.assertNotIn("socket-dir-not-created",
+                         {r[0] for r in self._v('mkdir -p "/tmp/app-pg"', self.SVC)})
+
+    def test_socket_dir_under_flox_cache_is_fine(self):
+        svc = '[services.postgres]\ncommand = "postgres -D $PGDATA -k $FLOX_ENV_CACHE/pg"\n'
+        self.assertNotIn("socket-dir-not-created", {r[0] for r in self._v("true", svc)})
+
+    def test_unbounded_wait_is_advisory(self):
+        hook = "until pg_isready -q; do sleep 0.2; done"
+        self.assertIn(("hook-unbounded-wait", "advisory"), self._v(hook))
+
+    def test_bounded_wait_is_fine(self):
+        hook = "for i in $(seq 50); do pg_isready -q && break; sleep 0.2; done"
+        self.assertNotIn("hook-unbounded-wait", {r[0] for r in self._v(hook)})
+
+
+class TestSocketDirResolvesVars(unittest.TestCase):
+    def test_mkdir_of_var_counts(self):
+        m = ('[vars]\nPGHOST = "/tmp/app-pg"\n[hook]\non-activate = \'mkdir -p "$PGHOST"\'\n'
+             '[services.postgres]\ncommand = "postgres -k /tmp/app-pg"\n')
+        self.assertNotIn("socket-dir-not-created", {x["rule"] for x in _violations({}, m)})
+
+    def test_use_via_var_without_mkdir_fires(self):
+        m = ('[vars]\nPGHOST = "/tmp/app-pg"\n'
+             '[services.postgres]\ncommand = \'postgres -k "$PGHOST"\'\n')
+        self.assertIn("socket-dir-not-created", {x["rule"] for x in _violations({}, m)})
 
 if __name__ == "__main__":
     unittest.main()

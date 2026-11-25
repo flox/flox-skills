@@ -91,6 +91,189 @@ In the report: `devbox.json → .flox/env/manifest.toml  ·  devbox.json left un
 
 ---
 
+## Nix Conversion Mode
+
+Use when `flake.nix` or `shell.nix` exists and there is no `.flox/` and no
+`devbox.json`. detect.py's `nix` block (Phase 1a) has the facts: `kind`,
+`pinned`, `has_overlays`, `has_builds`, `dev_shells`, `envrc`.
+
+Print: `<project-name>/ uses Nix (<flake.nix|shell.nix>). Converting the dev shell → Flox manifest. Your Nix files stay untouched.`
+
+The Flox catalog is nixpkgs, so a Nix dev shell converts closely: same
+package names, same versions. Flox sits on top of the Nix the team already
+uses; frame it that way in everything you print.
+
+**Hard rules for this mode:**
+- Never modify, delete, reformat or "replace" `flake.nix`, `flake.lock`,
+  `shell.nix`, `default.nix`, `nix/`, or `.envrc`. Never run `nix flake
+  lock`/`update`. Every eval below passes `--no-write-lock-file`: without
+  it, evaluating a flake that has no `flake.lock` CREATES one.
+- Never write a local path into the manifest (`path:`, `git+file:`, an
+  absolute directory). It works on this machine only.
+- Only the dev shell converts. A flake's `packages`, `apps`, `checks`,
+  `nixosModules` and `overlays` outputs stay with the flake.
+
+### 1. Run detect.py, then evaluate the dev shell
+
+Run Phase 1a's detect.py command first (it supplies the `nix` block and the
+language facts). Then evaluate the dev shell to get the real package list
+and versions. Use the shell named `default` (or the only one); if
+`dev_shells` lists others, convert `default` and name the rest in the
+report. `<skill-dir>/scripts/flox.sh run -p nix` supplies Nix; no system
+Nix is needed.
+
+Pick the systems first: the flake's own (`eachDefaultSystem` means all four,
+an explicit `systems = [...]` list means those, restricted to the four Flox
+supports), or for `shell.nix` the four Flox defaults. Evaluate once per
+system (evaluation does not build, so other systems work from this machine).
+`APPLY` is the same for both kinds:
+
+```bash
+cd "$TARGET_DIR"
+APPLY='d: map (p: { name = p.pname or p.name; version = p.version or ""; }) (builtins.filter builtins.isAttrs (d.buildInputs ++ d.nativeBuildInputs ++ d.propagatedBuildInputs ++ d.propagatedNativeBuildInputs))'
+# flake.nix (repeat per system; the flake must be tracked by git to be visible).
+# Older flakes use `devShell.<system>` instead: if the attribute is missing, retry with that.
+"<skill-dir>/scripts/flox.sh" run -p nix -- nix --extra-experimental-features 'nix-command flakes' \
+  eval --no-write-lock-file --json ".#devShells.<system>.default" --apply "$APPLY" > /tmp/floxify-<project-name>-nix-eval-<system>.json
+# shell.nix (one run; it has no per-system outputs):
+"<skill-dir>/scripts/flox.sh" run -p nix -- nix --extra-experimental-features 'nix-command flakes' \
+  eval --impure --json --expr 'let s = import ./shell.nix; in if builtins.isFunction s then s {} else s' \
+  --apply "$APPLY" > /tmp/floxify-<project-name>-nix-eval.json
+```
+
+Then write the merged list to `/tmp/floxify-<project-name>-nix-eval.json`, one entry per
+package: `{"name", "version", "attr", "systems"}`. `attr` is the attribute
+name the file uses (`python312`, `nodejs_20`), read from the file;
+`systems` lists the systems whose eval contained it. Drop stdenv
+plumbing the file does not name itself (`stdenv`, `bash`, `coreutils`,
+setup hooks, `*-hook`).
+
+**If the eval fails, or is still running after about 5 minutes** (private flake inputs, no network, a
+broken flake): don't retry in a loop and don't try to repair it. Read the
+file instead, build the same list without versions, and put this line in
+the report:
+`Nix eval unavailable (<one-line reason>); converted from reading <file>, versions not checked.`
+
+A flake with no `devShells` (only `packages`) has nothing to convert here:
+continue with normal Phase 1, and say in the report that the flake's builds
+were left alone.
+
+### 2. Map the dev shell to the manifest
+
+| In the Nix dev shell | Goes to |
+|---|---|
+| `packages` / `buildInputs` / `nativeBuildInputs` | `[install]`, same nixpkgs attribute name as `pkg-path` |
+| `inputsFrom = [ x ]` | expand: x's build inputs are in the eval list; install them too |
+| `${pkgs.X}` used inside `shellHook`, env values, or `writeShellScriptBin` helpers | `[install]` too. The eval does not list these (they aren't in `packages`), so read them from the file. In the hook, replace `${pkgs.X}/bin/tool` with plain `tool` |
+| `writeShellScriptBin "name" ''...''` helpers in `packages` (`pg-start`, `db-reset`) | a shell function of the same name in `[profile] common`, so the developer keeps the command |
+| `shellHook` | `[hook] on-activate`. Keep commands that set up the project; drop `echo` banners and anything that re-enters Nix (`nix develop`, `nix-shell`) |
+| Literal env attrs (`FOO = "bar";`, `env = { ... }`) | `[vars]`. A computed value (`"${pkgs.foo}/lib"`) goes in the hook as `export FOO="$FLOX_ENV/lib"` |
+| `eachDefaultSystem` / `systems = [...]` | `[options] systems`, restricted to the four Flox systems |
+| Postgres / Redis / MySQL started by hand in `shellHook` | `[services]`, using `references/service-patterns.md`. Only setup stays in the hook (initdb, a temporary start/stop to seed data). Copy that pattern's three rules: `mkdir -p` every socket/data dir first, bound every wait, clean up a failed setup |
+
+Only explicitly declared env vars convert. Variables Nix setup hooks set on
+their own (`PKG_CONFIG_PATH`, `CMAKE_PREFIX_PATH`, `NIX_CFLAGS_COMPILE`) are
+not copied; Flox sets its own.
+
+A package that appears only on some systems' evals gets
+`systems = [...]` on its `[install]` entry.
+
+**Language package sets** (`python3.withPackages (ps: [...])`,
+`nodePackages.*`, `ghcWithPackages`, `rubyPackages`): if the repo has its
+own package-manager files (`requirements.txt`, `pyproject.toml`,
+`package.json`, `Gemfile`), install only the interpreter and let Phase 1's
+normal hook install the packages. If it doesn't, install each one as a
+catalog package (`python312Packages.numpy`).
+
+### 3. Versions
+
+Pin only **runtimes, toolchains and databases** (Python, Node, Ruby, Go,
+Rust/cargo/rustc, Java/JDK, Elixir/Erlang, PHP, Deno, Bun, Zig, Postgres,
+Redis/Valkey, MySQL/MariaDB, MongoDB) to the version the eval reports,
+recorded reason `matches flake.lock` (or `matches the nixpkgs pinned in
+shell.nix`). This is a deliberate exception to Phase 2's "default
+unpinned" rule: the team pinned these already, and a silent upgrade on
+conversion reads as "Flox broke my setup".
+
+- "Closest catalog version" means a named version: pin it (`version = "1.83.0"`),
+  don't leave the runtime floating.
+- Prefer the versioned attribute the file uses (`python312`, `nodejs_20`,
+  `postgresql_16`). If the file uses a bare name (`python3`, `go`), resolve
+  the versioned pkg-path that matches the eval's version with `flox.sh show`.
+- If the catalog doesn't have the eval's exact version, use the closest
+  version it has and list it in the report as a version change (from → to).
+  Never write a version the catalog can't serve.
+- Everything else (jq, git, ripgrep, linters) stays unpinned; `manifest.lock`
+  freezes it. If a floating package's **major** version differs from the
+  eval's, list it as a version change too.
+- **The dev shell wins over every other file.** If a Dockerfile,
+  devcontainer, compose file, CI config or `.tool-versions` names a
+  different version (Postgres 16 in production, 14 in the flake), still
+  pin the dev shell's version. Then add a report line naming the other
+  file, its version, and the pkg-path to switch to (`postgresql_16`) if
+  the team wants to match it. Don't switch on your own.
+- Unpinned `shell.nix` (`pinned: false`): Phase 2's normal rules. In the
+  report, say this is the first time the team gets identical versions.
+
+### 4. Overlays and packages from other flakes
+
+An overlay changes the nixpkgs package set. Flox can't change the catalog,
+so handle each package by where it comes from:
+
+| Package | Do |
+|---|---|
+| Plain nixpkgs, untouched | Convert normally |
+| Exported by a public flake input (`rust-overlay`, `fenix`, `zig-overlay`) | `<id>.flake = "github:<owner>/<repo>/<rev>#<attr>"`, rev from `flake.lock`'s `locked.rev` for that input. If the input only provides an overlay (for example `rust-bin.stable.<ver>.default` from rust-overlay), use the closest catalog package instead (`cargo` + `rustc` + `rustfmt` + `clippy`, pinned to the eval's version) and record it as a version change if it differs |
+| From the repo's OWN overlay, and the repo is on GitHub and the flake exports that package (`packages.<system>.<name>`) for every manifest system | `<id>.flake = "github:<org>/<repo>/<rev>#<name>"` with the pushed rev. Tell the user: it compiles on every machine (no binary cache has it), relock to pick up overlay changes, private repos need git credentials |
+| From the repo's own overlay, not exported, not pushed, or not on GitHub | Don't install it. List it under "couldn't convert" with the reason |
+| An overlay that rebinds a tool to a different JDK, Python or Node (`sbt.override { jre = jdk21; }`) | Install the tool plus that runtime, and set the link in the hook (`export JAVA_HOME="$FLOX_ENV"` for a JDK) so the tool actually runs on it. Note in the report that the catalog tool is built against its default runtime |
+| An overlay that swaps something under everything (patched OpenSSL, custom stdenv, `config.allowUnfree`-style settings) | No Flox equivalent. Say plainly the flake keeps doing that part. Convert the rest |
+
+For any overlay of the team's own, the recommended next step is a Flox build:
+move the override into `.flox/pkgs/<name>.nix`, `flox build`, then
+`flox publish` to the org's catalog, so teammates and CI install it by name,
+prebuilt. Offer it as a next step ("Ask me to set that up"); the `flox`
+skill does the build work.
+
+### 5. Continue with Phase 1, then Phase 2 and 3
+
+Nix mode supplies the system packages; it does not replace the rest of
+floxify. Continue with Phase 1 (language files, package managers,
+services) and merge:
+
+- The Nix dev shell wins on runtimes and system tools (it's what the team
+  actually runs). If `.python-version`, `.nvmrc`, `go.mod` or similar
+  disagree with it, keep the Nix version and report the mismatch.
+- Phase 1's hooks (`uv sync`, `npm ci`, `bundle install`) still go in.
+
+In Phase 3c Step 4, pass the eval to verify.py:
+`... verify.py "$DETECT_JSON" "$TARGET_DIR/.flox/env/manifest.toml" --nix-eval /tmp/floxify-<project-name>-nix-eval.json`
+(skip the flag if the eval was unavailable). Every advisory
+`nix-package-not-installed` must either be fixed or appear in the report's
+"couldn't convert" list.
+
+### 6. Report additions
+
+- Header: `flake.nix → .flox/env/manifest.toml  ·  flake.nix and flake.lock left untouched`
+  (for shell.nix: `shell.nix → .flox/env/manifest.toml  ·  shell.nix left untouched`)
+- **Version changes** (from → to), as its own section, one line per package:
+  every pinned runtime that differs from the eval, every floating package whose
+  major differs, and any end-of-life runtime kept as-is (`nodejs 18.20.4 (EOL)`).
+  Omit the section if there are none.
+- **Other files disagree**: one line per runtime or database where another
+  file names a different version than the dev shell:
+  `postgresql: kept 14 (flake.nix); .devcontainer and fly.toml use 16. Switch to postgresql_16 to match.`
+  This is in addition to **Version changes**, not instead: a patch change
+  from the eval (14.13 → 14.17) still goes there too.
+- **Systems**: if `[options] systems` leaves out a system the flake supports
+  (for example `x86_64-darwin`), say which and why.
+- **Couldn't convert**: each item, why, and the next step.
+- Other dev shells not converted, by name, if any.
+- If `has_builds`: `Your flake also builds <names>. Those stay with the flake; ask me to move them to flox build when you want.`
+- If `envrc` is `use flake` / `use nix`: `.envrc runs <use flake>; swap it for "flox activate" when you're ready (left untouched).`
+
+---
+
 ## Brewfile Conversion Mode
 
 A `Brewfile` signals `brew bundle` is in use — treat it as a high-priority source in

@@ -115,17 +115,14 @@ Read `references/conversion-modes.md` § Audit Mode and follow it.
 
 **If `devbox.json` exists (and no .flox/):** Switch to DevBox conversion mode.
 Read `references/conversion-modes.md` § DevBox Conversion Mode and follow it.
+DevBox wins even when Nix files are also present (DevBox drives Nix itself).
 
-**If `flake.nix` or `shell.nix` exists (and no .flox/):**
-Ask:
-```
-This project uses Nix directly. Options:
-  1  Audit only — show what Flox would add without touching anything
-  2  Set up Flox alongside it — they coexist fine
-  3  Skip
-
-Which? (default: 1)
-```
+**If `flake.nix` or `shell.nix` exists (and no .flox/, no devbox.json):**
+Switch to Nix conversion mode. Read `references/conversion-modes.md`
+§ Nix Conversion Mode and follow it. Don't ask first: converting the dev
+shell leaves every Nix file untouched. If the user asked for "audit only",
+run Audit Mode instead. A bare `default.nix` (no `flake.nix`/`shell.nix`)
+is usually a build, not a dev shell: continue to Phase 1.
 
 **If clean (.flox/ absent, no Nix files):** Continue to Phase 1.
 
@@ -147,13 +144,18 @@ printing it — Phase 3c's `verify.py` re-reads these same facts to check the
 manifest you eventually write against them:
 
 ```bash
-DETECT_JSON="/tmp/floxify-detect.json"   # one floxify run at a time; fine to reuse
+DETECT_JSON="/tmp/floxify-<project-name>-detect.json"   # per project: parallel runs must not share it
 "<skill-dir>/scripts/flox-python.sh" "<skill-dir>/scripts/detect.py" "$TARGET_DIR" | tee "$DETECT_JSON"
 ```
 
 `<skill-dir>` is this skill's own directory — the folder that holds this
 SKILL.md (the same place you'd read `scripts/` or a reference file from). Use
-its absolute path. `$DETECT_JSON` is a fixed path — remember it verbatim for
+its absolute path. Run every other `flox` command in this skill the same
+way, through `"<skill-dir>/scripts/flox.sh"` with the same arguments
+(`flox.sh search ...`, `flox.sh show ...`, `flox.sh activate ...`): it is
+plain `flox` plus the tag that attributes the call to this skill.
+`$DETECT_JSON` is a fixed path once `<project-name>` is filled in (the
+name printed above); remember it verbatim for
 Phase 3c, since each Bash call starts a fresh shell and cannot inherit a
 variable from this step.
 
@@ -256,7 +258,7 @@ Found: Python 3.11 (← .python-version) · Node 20.11.0 (← .nvmrc) · Postgre
 go stale. For every runtime, library, and tool detected in Phase 1, search the catalog:
 
 ```bash
-flox search --all "<term>" 2>/dev/null | head -5
+"<skill-dir>/scripts/flox.sh" search --all "<term>" 2>/dev/null | head -5
 # or if flox-mcp is present: search_packages(search_term="<term>", limit=5)
 ```
 
@@ -602,7 +604,7 @@ Report these in ⚠ (neutral): `<service> starts via docker-compose on activate 
 ### Verify each package
 
 ```bash
-flox search --all "<pkgname>" 2>/dev/null | head -10
+"<skill-dir>/scripts/flox.sh" search --all "<pkgname>" 2>/dev/null | head -10
 # or if flox-mcp is present: search_packages(search_term="<pkgname>", limit=10)
 ```
 
@@ -629,7 +631,7 @@ Checking catalog...
 
 ```
 init_new_environment(environment_dir="<absolute-target-dir>")
-# or: cd "$TARGET_DIR" && flox init --no-auto-setup
+# or: cd "$TARGET_DIR" && "<skill-dir>/scripts/flox.sh" init --no-auto-setup
 ```
 
 `--no-auto-setup` skips interactive prompts since we write the manifest ourselves.
@@ -851,8 +853,14 @@ Print before starting: `Verifying environment... (first run may take 30–60 sec
 
 **Step 1 — Schema + package resolution**
 
+Run every step of 3c in the foreground and wait for it, however long it takes.
+A first activation that pulls a large closure (GHC, CUDA, a JDK) or compiles a
+package can run 10+ minutes. Don't background it, poll it, or schedule a
+wake-up: in a non-interactive run the session ends and the report is never
+written.
+
 ```bash
-cd "$TARGET_DIR" && flox activate -c "echo __ok__" 2>&1
+cd "$TARGET_DIR" && "<skill-dir>/scripts/flox.sh" activate -c "echo __ok__" 2>&1
 ```
 
 - `__ok__` in output → proceed to Step 2
@@ -863,7 +871,7 @@ cd "$TARGET_DIR" && flox activate -c "echo __ok__" 2>&1
 **Step 2 — Runtime versions + hook execution**
 
 ```bash
-cd "$TARGET_DIR" && flox activate -c "
+cd "$TARGET_DIR" && "<skill-dir>/scripts/flox.sh" activate -c "
   python --version 2>/dev/null || true
   node --version 2>/dev/null || true
   go version 2>/dev/null || true
@@ -883,7 +891,7 @@ Run only when the project has native Python deps (`psycopg2`, `cryptography`, `l
 `xmlsec`, `Pillow`, etc.):
 
 ```bash
-cd "$TARGET_DIR" && flox activate -c "
+cd "$TARGET_DIR" && "<skill-dir>/scripts/flox.sh" activate -c "
   python -c 'import psycopg2' 2>/dev/null && echo 'psycopg2 ✓' || echo 'psycopg2 ✗ — missing native dep'
   python -c 'import cryptography' 2>/dev/null && echo 'cryptography ✓' || echo 'cryptography ✗'
   python -c 'import lxml' 2>/dev/null && echo 'lxml ✓' || echo 'lxml ✗'
@@ -926,7 +934,7 @@ when verify.py is invoked directly.)
   back to `python3 "<skill-dir>/scripts/verify.py" ...` with a system Python.
   If `$DETECT_JSON` doesn't exist (Step 1a's fallback to manual scanning
   skipped writing it), still run verify.py with an empty facts file
-  (`echo '{}' > /tmp/floxify-detect.json`) — the catalog/vars/hook checks
+  (`echo '{}' > /tmp/floxify-<project-name>-detect.json`); the catalog/vars/hook checks
   that don't need detect facts still run.
 - `verify.py` checks *consistency with what detect.py found*, not
   *correctness* — it says so in its own output. A clean run is not a
@@ -989,6 +997,11 @@ What changed:  .flox/env/manifest.toml  created  ·  nothing else touched
 - Never say `flox login` — correct command is `flox auth login`
 - Never say `flox activate <user>/<name>` — correct syntax is `flox activate -r <user>/<name>`
 - No Flox-internal jargon: no "derivation", "store path", "attribute path", "Nix"
+  (naming the repo's own files, like `flake.nix` or `shell.nix`, is fine)
+- If detect.py's `nested_nix` lists files (dev shells in subfolders, as in a
+  monorepo), add one ⚠ line naming them:
+  `⚠  Also found dev shells in services/api/flake.nix, services/worker/shell.nix. Left alone: this run sets up <the root dev shell | the repo root>; run floxify in a subfolder to set that one up.`
+  Never convert them silently or skip mentioning them.
 
 **After printing the report:**
 
@@ -1012,7 +1025,7 @@ Wait for the user's response, then:
 
 - **1 (Try it):** Run:
   ```bash
-  cd "$TARGET_DIR" && flox activate -c "
+  cd "$TARGET_DIR" && "<skill-dir>/scripts/flox.sh" activate -c "
     echo '✓ environment active'
     python --version 2>/dev/null || true
     node --version 2>/dev/null || true

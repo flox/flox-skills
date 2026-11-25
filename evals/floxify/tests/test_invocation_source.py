@@ -24,6 +24,7 @@ PLUGIN_JSON = REPO_ROOT / "flox-plugin" / ".claude-plugin" / "plugin.json"
 VERIFY = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "verify.py"
 SKILL_MD = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "SKILL.md"
 WRAPPER = REPO_ROOT / "flox-plugin" / "skills" / "floxify" / "scripts" / "flox-python.sh"
+FLOX_WRAPPER = WRAPPER.with_name("flox.sh")
 
 # No sys_modules_key: nothing here patches by string name, so this gets a
 # private instance rather than competing for the shared "verify" key.
@@ -144,6 +145,34 @@ class TestVersionMatchesPluginJson(unittest.TestCase):
             with self.subTest(line=n):
                 self.assertIn("flox-python.sh", ln,
                               f"SKILL.md:{n} reaches a script without the wrapper")
+
+
+class TestFloxWrapper(unittest.TestCase):
+    """scripts/flox.sh tags plain flox calls (search, show, init, activate,
+    services) the same way flox-python.sh tags the scripts."""
+
+    def _run(self, env_tag):
+        import os, subprocess, tempfile
+        with tempfile.TemporaryDirectory() as d:
+            fake = Path(d) / "flox"
+            fake.write_text('#!/bin/sh\necho "$FLOX_INVOCATION_SOURCE"\necho "$*"\n')
+            fake.chmod(0o755)
+            env = {"PATH": f"{d}:/usr/bin:/bin"}
+            if env_tag is not None:
+                env["FLOX_INVOCATION_SOURCE"] = env_tag
+            out = subprocess.run(["sh", str(FLOX_WRAPPER), "show", "jq"],
+                                 env=env, capture_output=True, text=True, check=True)
+            return out.stdout.splitlines()
+
+    def test_appends_tag(self):
+        self.assertEqual(self._run("ci"), [f"ci,{verify.INVOCATION_SOURCE}", "show jq"])
+
+    def test_sets_tag_when_unset(self):
+        self.assertEqual(self._run(None), [verify.INVOCATION_SOURCE, "show jq"])
+
+    def test_version_matches_flox_python(self):
+        tags = lambda p: set(re.findall(r"agentic\.skill\.floxify\.[0-9-]+", p.read_text()))
+        self.assertEqual(tags(FLOX_WRAPPER), tags(WRAPPER))
 
 
 if __name__ == "__main__":

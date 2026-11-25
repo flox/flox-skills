@@ -556,6 +556,112 @@ def test_mise_tools_non_dict_does_not_raise():
     assert any("tools" in n for n in r["notes"]), r["notes"]
 
 
+# --------------------------------------------------------------------------
+# Nix dev shells: read-only facts, no eval
+# --------------------------------------------------------------------------
+
+_FLAKE_DEVSHELL = """{
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+  outputs = { self, nixpkgs, ... }: {
+    overlays.default = final: prev: { jq = prev.jq; };
+    devShells.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.mkShell { packages = [ ]; };
+  };
+}
+"""
+
+
+def test_nix_none_without_nix_files():
+    assert _scan_tmp({"package.json": "{}"})["nix"] is None
+
+
+def test_nix_default_nix_alone_is_not_a_dev_shell():
+    assert _scan_tmp({"default.nix": "{ pkgs }: pkgs.hello"})["nix"] is None
+
+
+def test_nix_flake_with_lock_and_overlay():
+    n = _scan_tmp({"flake.nix": _FLAKE_DEVSHELL, "flake.lock": "{}"})["nix"]
+    assert n["kind"] == "flake", n
+    assert n["pinned"] is True, n
+    assert n["has_overlays"] is True, n
+    assert n["has_builds"] is False, n
+    assert n["dev_shells"] == ["default"], n
+    assert n["envrc"] is None, n
+
+
+def test_nix_flake_builds_and_envrc():
+    flake = _FLAKE_DEVSHELL.replace("overlays.default = final: prev: { jq = prev.jq; };",
+                                    "packages.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.hello;")
+    n = _scan_tmp({"flake.nix": flake, ".envrc": "use flake\n"})["nix"]
+    assert n["has_builds"] is True, n
+    assert n["has_overlays"] is False, n
+    assert n["pinned"] is False, n          # no flake.lock committed
+    assert n["envrc"] == "use flake", n
+
+
+def test_nix_flake_multiple_dev_shells():
+    flake = """{ outputs = { nixpkgs, flake-utils, ... }: flake-utils.lib.eachDefaultSystem (system: {
+      devShells.default = pkgs.mkShell { };
+      devShells.ci = pkgs.mkShell { };
+    }); }"""
+    assert _scan_tmp({"flake.nix": flake})["nix"]["dev_shells"] == ["ci", "default"]
+
+
+def test_nix_flake_dev_shells_attrset_form():
+    flake = """{ outputs = { nixpkgs, ... }: { devShells = forAllSystems (pkgs: {
+      default = pkgs.mkShell { };
+      docs = pkgs.mkShell { };
+    }); }; }"""
+    assert _scan_tmp({"flake.nix": flake})["nix"]["dev_shells"] == ["default", "docs"]
+
+
+def test_nix_shell_unpinned():
+    n = _scan_tmp({"shell.nix": "{ pkgs ? import <nixpkgs> {} }:\npkgs.mkShell { packages = [ pkgs.go ]; }\n",
+                   ".envrc": "use nix\n"})["nix"]
+    assert n["kind"] == "shell", n
+    assert n["pinned"] is False, n
+    assert n["dev_shells"] == ["default"], n
+    assert n["envrc"] == "use nix", n
+
+
+def test_nix_shell_pinned_fetchtarball():
+    src = ('let pkgs = import (fetchTarball "https://github.com/NixOS/nixpkgs/archive/'
+           '0123456789abcdef0123456789abcdef01234567.tar.gz") {};\nin pkgs.mkShell { }\n')
+    assert _scan_tmp({"shell.nix": src})["nix"]["pinned"] is True
+
+
+def test_nix_shell_pinned_niv():
+    src = "let sources = import ./nix/sources.nix; pkgs = import sources.nixpkgs {}; in pkgs.mkShell {}"
+    assert _scan_tmp({"shell.nix": src})["nix"]["pinned"] is True
+
+
+def test_nix_flake_wins_over_shell_and_flags_devbox():
+    n = _scan_tmp({"flake.nix": _FLAKE_DEVSHELL, "shell.nix": "{}", "devbox.json": "{}"})["nix"]
+    assert n["kind"] == "flake", n
+    assert n["files"] == ["flake.nix", "shell.nix"], n
+    assert n["also_devbox"] is True, n
+
+
+def test_nested_nix_lists_subfolder_flakes():
+    r = _scan_tmp({"flake.nix": _FLAKE_DEVSHELL,
+                   "services/api/flake.nix": "{ }",
+                   "services/worker/shell.nix": "{ }",
+                   "node_modules/x/flake.nix": "{ }"})
+    assert r["nested_nix"] == ["services/api/flake.nix", "services/worker/shell.nix"], r["nested_nix"]
+
+
+def test_nested_nix_without_root_flake_keeps_nix_none():
+    # Case C (flakes only in subfolders): routing stays on the normal path,
+    # but the facts say they exist so the report can name them.
+    r = _scan_tmp({"services/api/flake.nix": "{ }", "package.json": "{}"})
+    assert r["nix"] is None, r["nix"]
+    assert r["nested_nix"] == ["services/api/flake.nix"], r["nested_nix"]
+
+
+def test_nested_nix_empty_and_ignores_nix_dir():
+    r = _scan_tmp({"flake.nix": _FLAKE_DEVSHELL, "nix/shell.nix": "{ }"})
+    assert r["nested_nix"] == [], r["nested_nix"]
+
+
 def _all_tests():
     return [(n, f) for n, f in sorted(globals().items())
             if n.startswith("test_") and callable(f)]

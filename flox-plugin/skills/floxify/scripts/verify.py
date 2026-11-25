@@ -377,6 +377,8 @@ def check_runtimes_installed(detect, manifest):
     install = _table(manifest, "install")
     pkg_paths = {_pkg_path_str(d) for d in install.values() if isinstance(d, dict)}
     pkg_paths.discard(None)
+    # nested attrs count by their last segment (beam27Packages.elixir_1_17)
+    pkg_paths |= {pp.split(".")[-1] for pp in pkg_paths}
 
     runtimes = _facts_list(detect, "runtimes")
     languages = {r["language"] for r in runtimes if r.get("language")}
@@ -953,6 +955,147 @@ def _hook_statements(manifest):
             if not stmt or _ECHO_OR_PRINTF_RE.match(stmt):
                 continue
             yield stmt
+
+
+# A server process started in on-activate: kind -> start-command pattern.
+# Setup (initdb, createdb, pg_ctl status/stop) is fine in a hook; starting
+# the server is the service's job.
+_HOOK_SERVER_START = {
+    "postgres": re.compile(r"\bpg_ctl\b.*\bstart\b|\bpg_ctl\b.*\brestart\b|(?:^|/|\s)postgres\s+-D\b"),
+    "redis": re.compile(r"(?:^|/|\s)(?:redis|valkey)-server\b"),
+    "mariadb": re.compile(r"(?:^|/|\s)(?:mysqld(?:_safe)?|mariadbd(?:-safe)?)\b|\bmysql\.server\s+start\b"),
+    "mongodb": re.compile(r"(?:^|/|\s)mongod\b"),
+}
+_HOOK_SERVER_STOP = {
+    "postgres": re.compile(r"\bpg_ctl\b.*\bstop\b"),
+    "redis": re.compile(r"\bredis-cli\b.*\bshutdown\b"),
+    "mariadb": re.compile(r"\bmysqladmin\b.*\bshutdown\b|\bmysql\.server\s+stop\b"),
+    "mongodb": re.compile(r"\bmongod\b.*--shutdown\b|shutdownServer"),
+}
+_FUNC_DEF_RE = re.compile(r"^\s*(?:function\s+[\w-]+|[\w-]+\s*\(\s*\))")
+
+
+def _joined_lines(script):
+    """Script lines with backslash-newline continuations joined, so a
+    command split over several lines is seen as one."""
+    return re.sub(r"\\\n\s*", " ", script).splitlines()
+
+
+def check_hook_starts_service(manifest):
+    """A database started in [hook] on-activate runs on every activation.
+    HARD when a [services.*] entry already runs that kind (it starts twice:
+    escalating-esqueleto hung on Linux). ADVISORY otherwise (it belongs in
+    [services]). Lines inside a shell function definition are skipped: a
+    defined-but-not-called helper starts nothing."""
+    script = _table(manifest, "hook").get("on-activate")
+    if not isinstance(script, str):
+        return []
+    found, stopped, depth = {}, set(), 0
+    for raw in _joined_lines(script):
+        line = _strip_comment(raw)
+        if depth or _FUNC_DEF_RE.match(line):
+            depth += line.count("{") - line.count("}")
+            depth = max(depth, 0)
+            continue
+        for stmt in re.split(r"[;&|]+", line):
+            stmt = stmt.strip()
+            if not stmt or _ECHO_OR_PRINTF_RE.match(stmt):
+                continue
+            for kind, rx in _HOOK_SERVER_STOP.items():
+                if rx.search(stmt):
+                    stopped.add(kind)
+            for kind, rx in _HOOK_SERVER_START.items():
+                if rx.search(stmt) and not _HOOK_SERVER_STOP[kind].search(stmt):
+                    found.setdefault(kind, stmt)
+    out = []
+    for kind, stmt in found.items():
+        if kind in stopped:
+            continue   # temporary start/stop to seed data: fine
+        if _service_covers(manifest, kind):
+            out.append(violation(
+                "hook-starts-service",
+                f"[hook] on-activate starts {kind} (`{_truncate(stmt)}`) and a "
+                f"[services.*] entry also runs it, so it starts twice. Keep setup "
+                f"(initdb, createdb) in the hook; leave starting to [services].",
+                kind=kind,
+            ))
+        else:
+            out.append(violation(
+                "hook-starts-service",
+                f"[hook] on-activate starts {kind} (`{_truncate(stmt)}`) on every "
+                f"activation. Move it to a [services.{kind}] entry.",
+                severity=ADVISORY, kind=kind,
+            ))
+    return out
+
+
+_SOCKET_DIR_RES = (
+    re.compile(r"""(?:^|\s)-k\s+["']?([^\s"';]+)"""),
+    re.compile(r"""unix_socket_director(?:y|ies)\s*=\s*\\?["']?([^\s"';,]+)"""),
+)
+
+
+def check_socket_dirs(manifest):
+    """HARD: a literal socket directory (`postgres -k /tmp/x`) that nothing
+    in the hook creates. Postgres won't create it and dies with "could not
+    create lock file"; it only works on a machine where the folder happens
+    to exist already (escalating-esqueleto, 2026-11-21). Paths built from
+    variables are skipped: their value isn't knowable here."""
+    hook = _table(manifest, "hook").get("on-activate")
+    hook = hook if isinstance(hook, str) else ""
+    texts = [hook] + [
+        str(d.get("command", "")) for d in _table(manifest, "services").values()
+        if isinstance(d, dict)
+    ]
+    # Resolve literal [vars] ($PGHOST -> /tmp/app-pg) in both the uses and
+    # the hook's mkdir, so `mkdir -p "$PGHOST"` counts as creating it.
+    lit = {k: v for k, v in _table(manifest, "vars").items() if isinstance(v, str) and "$" not in v}
+    sub = lambda t: re.sub(r"\$\{?(\w+)\}?", lambda m: lit.get(m.group(1), m.group(0)), t)
+    hook = sub(hook)
+    out, seen = [], set()
+    for text in texts:
+        joined = sub(" ".join(_joined_lines(text)))
+        for rx in _SOCKET_DIR_RES:
+            for path in rx.findall(joined):
+                path = path.rstrip("/")
+                if not path.startswith("/") or "$" in path or path in ("/tmp", "/var/run", "/run") or path in seen:
+                    continue
+                seen.add(path)
+                if not re.search(r"\bmkdir\b[^\n]*" + re.escape(path), hook):
+                    out.append(violation(
+                        "socket-dir-not-created",
+                        f"socket directory {path} is used but never created; add "
+                        f"`mkdir -p {path}` to the hook before anything uses it, or put "
+                        f"the socket under $FLOX_ENV_CACHE.",
+                        path=path,
+                    ))
+    return out
+
+
+_WAIT_LOOP_RE = re.compile(r"\b(?:until|while)\b[^\n]*?;\s*do\b[^\n]*?\bsleep\b[^\n]*")
+_BOUNDED_RE = re.compile(r"\bseq\b|\$\(\(|\btimeout\b|-(?:gt|lt|ge|le)\b|\bSECONDS\b|\btries\b|\battempt")
+
+
+def check_hook_unbounded_wait(manifest):
+    """ADVISORY: a wait loop (`until pg_isready; do sleep 1; done`) with no
+    limit hangs activation forever when the thing it waits for never comes
+    up. Give it a counter or a timeout, then fail with a message."""
+    script = _table(manifest, "hook").get("on-activate")
+    if not isinstance(script, str):
+        return []
+    out = []
+    for line in _joined_lines(script):
+        line = _strip_comment(line)
+        m = _WAIT_LOOP_RE.search(line)
+        if m and not _BOUNDED_RE.search(m.group(0)):
+            out.append(violation(
+                "hook-unbounded-wait",
+                f"wait loop with no limit (`{_truncate(m.group(0).strip())}`): if the "
+                f"service never comes up, activation hangs. Bound it "
+                f"(`for i in $(seq 50); do ... && break; sleep 0.2; done`).",
+                severity=ADVISORY,
+            ))
+    return out
 
 
 def check_hook_no_mutation(manifest):
@@ -2169,8 +2312,53 @@ def check_group_fragmentation(manifest):
 # orchestration
 # ---------------------------------------------------------------------------
 
+def _nix_base(name):
+    """`python312` / `python3` -> `python`, `nodejs_20` -> `nodejs`."""
+    return re.sub(r"[-_.]?[0-9][0-9_.]*$", "", name or "")
+
+
+def check_nix_coverage(nix_pkgs, manifest):
+    """ADVISORY: every package the Nix dev-shell eval reports is installed.
+
+    `nix_pkgs` is the eval output floxify's Nix Conversion Mode writes:
+    `[{"name": pname, "version": v, "attr": optional attr from the file}]`.
+    A package can be installed by pkg-path or by a flake ref (`...#attr`);
+    it is covered when the attr, the last pkg-path segment, or the name
+    with its version suffix stripped matches. Anything uncovered is not
+    wrong on its own (some packages have no Flox equivalent), but the
+    report must say so, which is what the message asks for.
+    """
+    targets = set()
+    for iid, desc in (_table(manifest, "install") or {}).items():
+        targets.add(iid)
+        pp = _pkg_path_str(desc)
+        if pp:
+            targets.add(pp)
+            targets.add(pp.split(".")[-1])
+        flake = desc.get("flake") if isinstance(desc, dict) else None
+        if isinstance(flake, str) and "#" in flake:
+            targets.add(flake.rsplit("#", 1)[1])
+    bases = {_nix_base(t) for t in targets if "." not in t}
+    out = []
+    for pkg in nix_pkgs or []:
+        if not isinstance(pkg, dict):
+            continue
+        name, attr = pkg.get("name") or "", pkg.get("attr") or ""
+        if attr in targets or name in targets or (name and _nix_base(name) in bases):
+            continue
+        label = attr or name
+        out.append(violation(
+            "nix-package-not-installed",
+            f"Nix dev shell provides {label} {pkg.get('version') or ''}".rstrip()
+            + " but [install] has no match; install it, or list it under "
+            "\"couldn't convert\" in the report with the reason.",
+            severity=ADVISORY, package=label,
+        ))
+    return out
+
+
 def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
-          catalog_timeout=30):
+          catalog_timeout=30, nix_eval=None):
     """Run every check. Returns {"violations": [...], "catalog_checked": bool,
     "catalog_unknown": [...]}.
 
@@ -2207,12 +2395,22 @@ def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
     violations += check_malformed_sections(manifest)
     violations += check_malformed_pkg_paths(manifest)
     violations += check_malformed_detect_facts(detect)
-    violations += check_runtimes_installed(detect, manifest)
+    runtime_v = check_runtimes_installed(detect, manifest)
+    if nix_eval is not None:
+        # Nix mode: the dev shell is the source of truth. A runtime the
+        # repo mentions but the dev shell leaves out is reported, not forced.
+        for v in runtime_v:
+            v["severity"] = ADVISORY
+            v["message"] += " (the Nix dev shell does not include it either; say so in the report)"
+    violations += runtime_v
     violations += check_leaf_datastore_services(detect, manifest)
     violations += check_vars_endpoints(detect, manifest)
     violations += check_vars_literal(manifest)
     violations += check_hook_no_mutation(manifest)
     violations += check_hook_network(manifest)
+    violations += check_hook_starts_service(manifest)
+    violations += check_socket_dirs(manifest)
+    violations += check_hook_unbounded_wait(manifest)
     catalog_violations, catalog_checked, catalog_unknown = check_catalog(
         manifest, flox_bin=flox_bin, live=check_catalog_live, timeout=catalog_timeout,
     )
@@ -2220,6 +2418,8 @@ def verify(detect, manifest_text, flox_bin="flox", check_catalog_live=True,
     violations += check_outputs_heuristic(detect, manifest)
     violations += check_native_group_coherence(detect, manifest)
     violations += check_group_fragmentation(manifest)
+    if nix_eval is not None:
+        violations += check_nix_coverage(nix_eval, manifest)
 
     return {
         "violations": violations,
@@ -2275,7 +2475,17 @@ def main(argv):
     ap.add_argument("--no-catalog", action="store_true",
                     help="skip live `flox show` catalog checks")
     ap.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    ap.add_argument("--nix-eval", metavar="PATH",
+                    help="Nix dev-shell eval JSON from Nix Conversion Mode")
     args = ap.parse_args(argv[1:])
+
+    nix_eval = None
+    if args.nix_eval:
+        try:
+            nix_eval = json.loads(Path(args.nix_eval).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"error: could not read --nix-eval: {exc}", file=sys.stderr)
+            return 2
 
     if args.detect_json == "-":
         detect_text = sys.stdin.read()
@@ -2298,7 +2508,7 @@ def main(argv):
     manifest_text = manifest_path.read_text(encoding="utf-8")
 
     result = verify(detect, manifest_text, flox_bin=args.flox_bin,
-                    check_catalog_live=not args.no_catalog)
+                    check_catalog_live=not args.no_catalog, nix_eval=nix_eval)
 
     if args.json:
         print(json.dumps({**result, "_meta": {"disclaimer": DISCLAIMER}}, indent=2))
