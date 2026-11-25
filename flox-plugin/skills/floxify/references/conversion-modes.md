@@ -151,8 +151,8 @@ setup hooks, `*-hook`).
 **If the eval fails, or is still running after about 5 minutes** (private flake inputs, no network, a
 broken flake): don't retry in a loop and don't try to repair it. Read the
 file instead, build the same list without versions, and put this line in
-the report: `Nix eval unavailable (<one-line reason>); converted from reading
-<file>, versions not checked.`
+the report:
+`Nix eval unavailable (<one-line reason>); converted from reading <file>, versions not checked.`
 
 A flake with no `devShells` (only `packages`) has nothing to convert here:
 continue with normal Phase 1, and say in the report that the flake's builds
